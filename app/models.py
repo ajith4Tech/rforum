@@ -96,6 +96,8 @@ class Response(Base):
     )
     value: Mapped[str] = mapped_column(Text, nullable=False)
     guest_identifier: Mapped[str] = mapped_column(String(255), nullable=False)
+    name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    rating: Mapped[int | None] = mapped_column(Integer, nullable=True)
     upvotes: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

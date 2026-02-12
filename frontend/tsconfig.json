@@ -1,0 +1,14 @@
+{
+  "extends": "./.svelte-kit/tsconfig.json",
+  "compilerOptions": {
+    "types": ["svelte"],
+    "baseUrl": ".",
+    "paths": {
+      "$lib": ["src/lib"],
+      "$lib/*": ["src/lib/*"],
+      "$app": [".svelte-kit/types"],
+      "$app/*": [".svelte-kit/types/*"]
+    }
+  },
+  "include": ["src/**/*", "src/**/*.svelte"]
+}

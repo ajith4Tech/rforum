@@ -1,13 +1,12 @@
 <script lang="ts">
-  import { page } from '$app/stores';
-  import { joinSession, submitResponse, upvoteResponse, listResponses } from '$lib/api';
+  import { joinSession, submitResponse, upvoteResponse, listResponses, resolveFileUrl } from '$lib/api';
   import { RforumWebSocket } from '$lib/ws';
   import { onMount, onDestroy } from 'svelte';
   import {
     Radio, Send, ChevronUp, BarChart3, MessageSquare, AlignLeft, FileText, CheckCircle2
   } from 'lucide-svelte';
 
-  const code = $derived($page.params.code);
+  let code = $state('');
 
   let session: any = $state(null);
   let activeSlide: any = $state(null);
@@ -19,6 +18,8 @@
   let selectedOption = $state('');
   let submitted = $state(false);
   let guestId = $state('');
+  let guestName = $state('');
+  let feedbackRating = $state(5);
 
   function normalizeSlide(slide: any) {
     if (!slide) return null;
@@ -32,6 +33,10 @@
     // Generate guest ID
     guestId = localStorage.getItem('rforum_guest_id') || crypto.randomUUID().slice(0, 8);
     localStorage.setItem('rforum_guest_id', guestId);
+
+    code = typeof window !== 'undefined'
+      ? window.location.pathname.split('/').pop() || ''
+      : '';
 
     try {
       session = await joinSession(code);
@@ -89,10 +94,22 @@
 
   async function handleTextSubmit() {
     if (!inputValue.trim()) return;
-    submitted = true;
-    const response = await submitResponse(activeSlide.id, inputValue.trim(), guestId);
+    if ((activeSlide.type === 'QNA' || activeSlide.type === 'FEEDBACK') && !guestName.trim()) {
+      alert('Please enter your name.');
+      return;
+    }
+    if (activeSlide.type === 'POLL') {
+      submitted = true;
+    }
+    const response = await submitResponse(activeSlide.id, inputValue.trim(), guestId, guestName || undefined, activeSlide.type === 'FEEDBACK' ? feedbackRating : undefined);
     ws?.send('new_response', response);
     inputValue = '';
+    if (activeSlide.type !== 'POLL') {
+      submitted = false;
+    }
+    if (activeSlide.type === 'QNA') {
+      guestName = guestName.trim();
+    }
   }
 
   async function handleUpvote(responseId: string) {
@@ -151,7 +168,7 @@
             <div class="space-y-3">
               {#each activeSlide.content_json?.options || [] as option}
                 <button
-                  on:click={() => handlePollVote(option)}
+                  onclick={() => handlePollVote(option)}
                   class="w-full card hover:border-brand-500/50 hover:bg-brand-500/5
                          transition-all duration-200 text-left text-lg font-medium
                          active:scale-[0.98] cursor-pointer"
@@ -170,29 +187,42 @@
             <h1 class="text-2xl font-bold">{activeSlide.content_json?.prompt}</h1>
           </div>
 
-          <form on:submit|preventDefault={handleTextSubmit} class="flex gap-3 mb-6">
+          <form onsubmit={(event) => { event.preventDefault(); handleTextSubmit(); }} class="space-y-3 mb-6">
             <input
               type="text"
-              bind:value={inputValue}
-              placeholder="Type your question..."
-              class="input-field flex-1"
+              bind:value={guestName}
+              placeholder="Your name"
+              class="input-field"
             />
-            <button type="submit" class="btn-primary p-3">
-              <Send class="w-5 h-5" />
-            </button>
+            <div class="flex gap-3">
+              <input
+                type="text"
+                bind:value={inputValue}
+                placeholder="Type your question..."
+                class="input-field flex-1"
+              />
+              <button type="submit" class="btn-primary p-3">
+                <Send class="w-5 h-5" />
+              </button>
+            </div>
           </form>
 
           <div class="space-y-3 max-h-[50vh] overflow-y-auto">
             {#each responses.sort((a, b) => b.upvotes - a.upvotes) as response (response.id)}
               <div class="card flex items-start gap-3 animate-slide-up">
                 <button
-                  on:click={() => handleUpvote(response.id)}
+                  onclick={() => handleUpvote(response.id)}
                   class="flex flex-col items-center text-surface-400 hover:text-brand-400 transition-colors shrink-0"
                 >
                   <ChevronUp class="w-5 h-5" />
                   <span class="text-xs font-bold">{response.upvotes}</span>
                 </button>
-                <p class="text-surface-200 text-sm">{response.value}</p>
+                <div>
+                  <p class="text-surface-200 text-sm">{response.value}</p>
+                  {#if response.name}
+                    <p class="text-xs text-surface-500 mt-1">{response.name}</p>
+                  {/if}
+                </div>
               </div>
             {/each}
           </div>
@@ -211,13 +241,30 @@
               <p class="font-semibold">Thanks for your feedback!</p>
             </div>
           {:else}
-            <form on:submit|preventDefault={handleTextSubmit}>
+            <form onsubmit={(event) => { event.preventDefault(); handleTextSubmit(); }}>
+              <input
+                type="text"
+                bind:value={guestName}
+                placeholder="Your name"
+                class="input-field mb-3"
+              />
               <textarea
                 bind:value={inputValue}
                 placeholder="Share your thoughts..."
                 rows="4"
                 class="input-field mb-4 resize-none"
               ></textarea>
+              <div class="flex items-center gap-3 mb-4">
+                <label for="feedback-rating" class="text-sm text-surface-400">Rating</label>
+                <input
+                  id="feedback-rating"
+                  type="number"
+                  min="1"
+                  max="5"
+                  bind:value={feedbackRating}
+                  class="input-field w-24"
+                />
+              </div>
               <button type="submit" class="btn-primary w-full flex items-center justify-center gap-2">
                 <Send class="w-4 h-4" />
                 Submit
@@ -232,6 +279,26 @@
             <FileText class="w-10 h-10 text-brand-400 mx-auto mb-4" />
             <h1 class="text-2xl font-bold mb-4">{activeSlide.content_json?.title}</h1>
             <p class="text-surface-300 leading-relaxed">{activeSlide.content_json?.body}</p>
+              {#if activeSlide.content_json?.file_url}
+              {#if activeSlide.content_json?.file_type?.includes('pdf')}
+                {#key activeSlide.content_json?.file_page}
+                  <iframe
+                    title="Content file"
+                    src={`${resolveFileUrl(activeSlide.content_json.file_url)}?v=${activeSlide.content_json?.file_page || 1}#page=${activeSlide.content_json?.file_page || 1}`}
+                    class="w-full h-[480px] mt-6 rounded-xl border border-surface-800 pointer-events-none"
+                  ></iframe>
+                {/key}
+              {:else}
+                <a
+                  class="inline-block mt-6 text-brand-400 hover:underline"
+                  href={resolveFileUrl(activeSlide.content_json.file_url)}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Open {activeSlide.content_json.file_name || 'file'}
+                </a>
+              {/if}
+            {/if}
           </div>
         {/if}
       </div>

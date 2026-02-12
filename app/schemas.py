@@ -79,6 +79,17 @@ class SlideOut(BaseModel):
 class ResponseCreate(BaseModel):
     value: str
     guest_identifier: str
+    name: str | None = None
+    rating: int | None = None
+
+    @field_validator("rating")
+    @classmethod
+    def validate_rating(cls, value: int | None) -> int | None:
+        if value is None:
+            return value
+        if value < 1 or value > 5:
+            raise ValueError("rating must be between 1 and 5")
+        return value
 
 
 class ResponseOut(BaseModel):
@@ -86,6 +97,8 @@ class ResponseOut(BaseModel):
     slide_id: uuid.UUID
     value: str
     guest_identifier: str
+    name: str | None = None
+    rating: int | None = None
     upvotes: int
     created_at: datetime
 

@@ -1,6 +1,9 @@
+import os
+import subprocess
 import uuid
+from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -123,3 +126,76 @@ async def delete_slide(
         raise HTTPException(status_code=404, detail="Slide not found")
     await db.delete(slide)
     await db.commit()
+
+
+@router.post("/{slide_id}/upload", response_model=SlideOut)
+async def upload_content_file(
+    session_id: str,
+    slide_id: str,
+    file: UploadFile,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await _verify_ownership(session_id, user, db)
+
+    try:
+        session_uuid = uuid.UUID(session_id)
+        slide_uuid = uuid.UUID(slide_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid ID format")
+
+    result = await db.execute(
+        select(Slide).where(Slide.id == slide_uuid, Slide.session_id == session_uuid)
+    )
+    slide = result.scalar_one_or_none()
+    if not slide:
+        raise HTTPException(status_code=404, detail="Slide not found")
+
+    os.makedirs("uploads", exist_ok=True)
+    original_name = file.filename or "upload.bin"
+    filename = f"{slide_id}_{original_name}"
+    file_path = os.path.join("uploads", filename)
+    content = await file.read()
+    with open(file_path, "wb") as handle:
+        handle.write(content)
+
+    content_type = file.content_type or "application/octet-stream"
+    file_url = f"/uploads/{filename}"
+    file_name = original_name
+
+    # Convert PPT/PPTX to PDF if possible
+    ext = Path(original_name).suffix.lower()
+    if ext in {".ppt", ".pptx"}:
+        try:
+            result = subprocess.run(
+                [
+                    "libreoffice",
+                    "--headless",
+                    "--convert-to",
+                    "pdf",
+                    "--outdir",
+                    "uploads",
+                    file_path,
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            pdf_name = f"{Path(file_path).stem}.pdf"
+            pdf_path = os.path.join("uploads", pdf_name)
+            if os.path.exists(pdf_path):
+                file_url = f"/uploads/{pdf_name}"
+                file_name = pdf_name
+                content_type = "application/pdf"
+        except Exception:
+            pass
+
+    content_json = dict(slide.content_json or {})
+    content_json["file_name"] = file_name
+    content_json["file_url"] = file_url
+    content_json["file_type"] = content_type
+    content_json["file_page"] = 1
+    slide.content_json = content_json
+
+    await db.commit()
+    return slide
