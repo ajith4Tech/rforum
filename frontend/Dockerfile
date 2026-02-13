@@ -1,21 +1,24 @@
 FROM node:20-alpine AS builder
 WORKDIR /app
 
-# Only copy package files first to leverage Docker cache
+# 1. Copy package files and install ALL dependencies
 COPY package*.json ./
-# Use 'npm ci' for a clean, automated install based on lockfile
-RUN npm ci 
+RUN npm install
 
+# 2. Copy the rest of the source
 COPY . .
 
-# Run build with CI=false to ignore non-critical warnings
+# 3. Generate SvelteKit types/internal files and then build
+# This fixes the "Cannot find base config file" warning
+RUN npx svelte-kit sync
 RUN CI=false npm run build
 
+# Stage 2: Production
 FROM node:20-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 
-# Copy only production essentials
+# Copy only the built app and production modules
 COPY --from=builder /app/build ./build
 COPY --from=builder /app/package*.json ./
 COPY --from=builder /app/node_modules ./node_modules
