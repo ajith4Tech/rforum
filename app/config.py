@@ -1,9 +1,16 @@
 from pydantic_settings import BaseSettings
 from functools import lru_cache
-
+import os
 
 class Settings(BaseSettings):
-    DATABASE_URL: str = "postgresql+asyncpg://rforum:rforum@db:5432/rforum"
+    DATABASE_URL = os.environ["DATABASE_URL"]
+
+    if DATABASE_URL.startswith("postgresql://"):
+        DATABASE_URL = DATABASE_URL.replace(
+            "postgresql://",
+            "postgresql+asyncpg://",
+            1,
+    )
     REDIS_URL: str = "redis://redis:6379/0"
     SECRET_KEY: str = "change-me-in-production-use-a-real-secret"
     ALGORITHM: str = "HS256"
