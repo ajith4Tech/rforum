@@ -1,0 +1,22 @@
+# Backend service
+[services.backend]
+name = "rforum-backend"
+# Root Directory is where Railway looks for the Dockerfile/code
+rootDirectory = "app" 
+# Use $PORT variable for Railway's dynamic assignment
+startCommand = "uvicorn main:app --host 0.0.0.0 --port $PORT"
+
+[services.backend.env]
+# Use Railway Reference Variables for internal networking
+DATABASE_URL = "${{Postgres.DATABASE_URL}}"
+REDIS_URL = "${{Redis.REDIS_URL}}"
+CORS_ORIGINS = '["https://${{frontend.RAILWAY_PUBLIC_DOMAIN}}"]'
+
+# Frontend service
+[services.frontend]
+name = "rforum-frontend"
+rootDirectory = "frontend"
+
+[services.frontend.env]
+# Points the frontend to the backend's live URL
+VITE_API_URL = "https://${{backend.RAILWAY_PUBLIC_DOMAIN}}"

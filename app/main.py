@@ -12,7 +12,8 @@ from app.database import engine
 from app.routers import auth, responses, sessions, slides, ws, polls, qna, feedback
 
 # Ensure the 'rforum' directory is in PYTHONPATH
-sys.path.append(str(Path(__file__).resolve().parent.parent))
+base_dir = Path(__file__).resolve().parent.parent
+sys.path.append(str(base_dir))
 
 settings = get_settings()
 
@@ -42,7 +43,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+uploads_dir = base_dir / "uploads"
+uploads_dir.mkdir(parents=True, exist_ok=True)
+if uploads_dir.exists():
+    app.mount("/uploads", StaticFiles(directory=str(uploads_dir)), name="uploads")
 
 # ── Register routers ─────────────────────────────────
 app.include_router(auth.router)
