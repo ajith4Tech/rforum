@@ -1,19 +1,37 @@
-FROM node:20-alpine
+# Stage 1: Build stage
+FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Install dependencies
+# Install dependencies - using 'npm ci' for reproducible builds
+# (Requires a package-lock.json to be present in /frontend)
 COPY package*.json ./
 RUN npm install
 
-# Copy source and build
+# Copy source files
 COPY . .
-RUN ls -la src/lib && ls -la src/lib/api.ts
+
+# Run the build
+# SvelteKit with adapter-node will create a 'build/' directory
 RUN npm run build
 
-EXPOSE 4173
+# Stage 2: Production runtime stage
+FROM node:20-alpine AS runner
 
-ENV PORT=4173
+WORKDIR /app
 
-# Use PORT provided by the platform when available (Railway sets PORT)
-CMD ["sh", "-c", "npm run preview -- --host 0.0.0.0 --port ${PORT:-4173}"]
+# Set production environment
+ENV NODE_ENV=production
+
+# Copy only the necessary build artifacts and production dependencies
+# This keeps the image small (~160MB vs 800MB+)
+COPY --from=builder /app/package*.json ./
+COPY --from=builder /app/build ./build
+COPY --from=builder /app/node_modules ./node_modules
+
+# Railway provides the PORT environment variable at runtime
+EXPOSE 3000
+ENV PORT=3000
+
+# Start the standalone Node server produced by adapter-node
+CMD ["node", "build/index.js"]
