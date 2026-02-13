@@ -2,9 +2,9 @@
 [services.backend]
 name = "rforum-backend"
 # Root Directory is where Railway looks for the Dockerfile/code
-rootDirectory = "app" 
-# Use $PORT variable for Railway's dynamic assignment
-startCommand = "uvicorn main:app --host 0.0.0.0 --port $PORT"
+rootDirectory = "app"
+# Run Alembic first, then start Uvicorn
+startCommand = "sh start.sh"
 
 [services.backend.env]
 # Use Railway Reference Variables for internal networking
