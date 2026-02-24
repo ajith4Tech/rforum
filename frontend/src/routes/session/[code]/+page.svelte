@@ -3,7 +3,7 @@
   import { RforumWebSocket } from '$lib/ws';
   import { onMount, onDestroy } from 'svelte';
   import {
-    Radio, Send, ChevronUp, BarChart3, MessageSquare, AlignLeft, FileText, CheckCircle2
+    Radio, Send, ChevronUp, BarChart3, MessageSquare, AlignLeft, FileText, CheckCircle2, Cloud
   } from 'lucide-svelte';
 
   let code = $state('');
@@ -21,6 +21,7 @@
   let guestName = $state('');
   let feedbackRating = $state(5);
   let actionError = $state('');
+  let thankYou = $state(false);
 
   function generateGuestId() {
     if (typeof crypto !== 'undefined') {
@@ -116,7 +117,7 @@
 
   async function handleTextSubmit() {
     if (!inputValue.trim()) return;
-    if ((activeSlide.type === 'QNA' || activeSlide.type === 'FEEDBACK') && !guestName.trim()) {
+    if ((activeSlide.type === 'QNA' || activeSlide.type === 'FEEDBACK' || activeSlide.type === 'WORD_CLOUD') && !guestName.trim()) {
       alert('Please enter your name.');
       return;
     }
@@ -137,8 +138,10 @@
       if (activeSlide.type !== 'POLL') {
         submitted = false;
       }
-      if (activeSlide.type === 'QNA') {
+      if (activeSlide.type === 'QNA' || activeSlide.type === 'WORD_CLOUD') {
         guestName = guestName.trim();
+        thankYou = true;
+        setTimeout(() => { thankYou = false; }, 2000);
       }
     } catch (err: any) {
       actionError = err?.message || 'Could not submit';
@@ -246,6 +249,13 @@
             </div>
           </form>
 
+          {#if thankYou}
+            <div class="flex items-center justify-center gap-2 mb-4 text-sm text-success animate-fade-in">
+              <CheckCircle2 class="w-4 h-4" />
+              Thanks for submitting your question!
+            </div>
+          {/if}
+
           {#if actionError}
             <p class="text-danger text-sm mb-4 text-center">{actionError}</p>
           {/if}
@@ -313,6 +323,45 @@
                 Submit
               </button>
             </form>
+          {/if}
+        {/if}
+
+        <!-- Word Cloud Slide -->
+        {#if activeSlide.type === 'WORD_CLOUD'}
+          <div class="text-center mb-8">
+            <Cloud class="w-10 h-10 text-brand-400 mx-auto mb-3" />
+            <h1 class="text-2xl font-bold">{activeSlide.content_json?.prompt}</h1>
+          </div>
+
+          <form onsubmit={(event) => { event.preventDefault(); handleTextSubmit(); }} class="space-y-3 mb-6">
+            <input
+              type="text"
+              bind:value={guestName}
+              placeholder="Your name"
+              class="input-field"
+            />
+            <div class="flex gap-3">
+              <input
+                type="text"
+                bind:value={inputValue}
+                placeholder="Type your answer..."
+                class="input-field flex-1"
+              />
+              <button type="submit" class="btn-primary p-3">
+                <Send class="w-5 h-5" />
+              </button>
+            </div>
+          </form>
+
+          {#if thankYou}
+            <div class="flex items-center justify-center gap-2 mb-4 text-sm text-success animate-fade-in">
+              <CheckCircle2 class="w-4 h-4" />
+              Thanks for your answer!
+            </div>
+          {/if}
+
+          {#if actionError}
+            <p class="text-danger text-sm mb-4 text-center">{actionError}</p>
           {/if}
         {/if}
 

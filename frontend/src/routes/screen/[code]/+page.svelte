@@ -2,7 +2,7 @@
   import { joinSession, listResponses } from '$lib/api';
   import { RforumWebSocket } from '$lib/ws';
   import { onMount, onDestroy } from 'svelte';
-  import { BarChart3, MessageSquare, AlignLeft, FileText, Radio } from 'lucide-svelte';
+  import { BarChart3, MessageSquare, AlignLeft, FileText, Radio, Cloud } from 'lucide-svelte';
   import { resolveFileUrl } from '$lib/api';
 
   let code = $state('');
@@ -69,6 +69,21 @@
       label: opt,
       count: counts[opt],
       percent: Math.round((counts[opt] / total) * 100)
+    }));
+  }
+
+  function getWordCloudData() {
+    const freq: Record<string, number> = {};
+    for (const r of responses) {
+      const word = r.value?.trim().toLowerCase();
+      if (word) freq[word] = (freq[word] || 0) + 1;
+    }
+    const entries = Object.entries(freq).sort((a, b) => b[1] - a[1]);
+    const maxCount = entries[0]?.[1] || 1;
+    return entries.map(([word, count]) => ({
+      word,
+      count,
+      size: Math.max(1, (count / maxCount) * 3.5)
     }));
   }
 </script>
@@ -165,6 +180,24 @@
                 </div>
               {/each}
             </div>
+          </div>
+        {:else if activeSlide.type === 'WORD_CLOUD'}
+          <div class="card text-center">
+            <Cloud class="w-10 h-10 text-brand-400 mx-auto mb-4" />
+            <h1 class="text-2xl font-bold mb-6">{activeSlide.content_json?.prompt}</h1>
+            {#if responses.length === 0}
+              <p class="text-surface-500">Waiting for responses...</p>
+            {:else}
+              <div class="flex flex-wrap items-center justify-center gap-4 min-h-[200px] p-6">
+                {#each getWordCloudData() as item}
+                  <span
+                    class="text-brand-400 font-bold transition-all"
+                    style={`font-size: ${item.size}rem; opacity: ${0.5 + (item.count / (responses.length || 1)) * 0.5}`}
+                  >{item.word}</span>
+                {/each}
+              </div>
+              <div class="text-xs text-surface-500 mt-4">{responses.length} response{responses.length === 1 ? '' : 's'}</div>
+            {/if}
           </div>
         {:else if activeSlide.type === 'CONTENT'}
           <div class="card text-center">

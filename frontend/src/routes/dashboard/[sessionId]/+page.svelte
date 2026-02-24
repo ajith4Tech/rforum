@@ -9,7 +9,8 @@
     MessageSquare,
     AlignLeft,
     FileText,
-    Pencil
+    Pencil,
+    Cloud
   } from 'lucide-svelte';
 
   let sessionId = $state('');
@@ -31,6 +32,7 @@
   let pollOptions = $state<string[]>([]);
   let qnaPrompt = $state('');
   let feedbackPrompt = $state('');
+  let wordCloudPrompt = $state('');
   let editingSlideId = $state<string | null>(null);
   const activeSlide = $derived(getActiveSlide());
   const activeType = $derived(activeSlide?.type?.toUpperCase());
@@ -39,14 +41,16 @@
     POLL: BarChart3,
     QNA: MessageSquare,
     FEEDBACK: AlignLeft,
-    CONTENT: FileText
+    CONTENT: FileText,
+    WORD_CLOUD: Cloud
   };
 
   const slideLabels: Record<string, string> = {
     POLL: 'Poll',
     QNA: 'Q&A',
     FEEDBACK: 'Feedback',
-    CONTENT: 'Content'
+    CONTENT: 'Content',
+    WORD_CLOUD: 'Word Cloud'
   };
 
   $effect(() => {
@@ -64,6 +68,9 @@
     }
     if (active?.type?.toUpperCase() === 'FEEDBACK') {
       feedbackPrompt = active.content_json?.prompt ?? '';
+    }
+    if (active?.type?.toUpperCase() === 'WORD_CLOUD') {
+      wordCloudPrompt = active.content_json?.prompt ?? '';
     }
   });
 
@@ -145,6 +152,8 @@
         return { prompt: 'Share your thoughts...' };
       case 'CONTENT':
         return { title: 'Slide Title', body: 'Slide content goes here.' };
+      case 'WORD_CLOUD':
+        return { prompt: 'What comes to mind?' };
       default:
         return {};
     }
@@ -301,6 +310,34 @@
     });
     slides = slides.map((s) => (s.id === active.id ? updated : s));
     ws?.send('slide_change', { slide_id: active.id });
+  }
+
+  async function saveWordCloudSlide() {
+    const active = getActiveSlide();
+    if (!active) return;
+    const updated = await updateSlide(sessionId, active.id, {
+      content_json: {
+        ...active.content_json,
+        prompt: wordCloudPrompt.trim()
+      }
+    });
+    slides = slides.map((s) => (s.id === active.id ? updated : s));
+    ws?.send('slide_change', { slide_id: active.id });
+  }
+
+  function getWordCloudData() {
+    const freq: Record<string, number> = {};
+    for (const r of slideResponses) {
+      const word = r.value?.trim().toLowerCase();
+      if (word) freq[word] = (freq[word] || 0) + 1;
+    }
+    const entries = Object.entries(freq).sort((a, b) => b[1] - a[1]);
+    const maxCount = entries[0]?.[1] || 1;
+    return entries.map(([word, count]) => ({
+      word,
+      count,
+      size: Math.max(0.75, (count / maxCount) * 2.5)
+    }));
   }
 
   async function goToContentSlide(direction: 'next' | 'prev') {
@@ -587,6 +624,30 @@
                   <div class="text-xl font-semibold mb-3">{contentTitle || 'Untitled slide'}</div>
                   <div class="text-sm text-surface-200 whitespace-pre-wrap">{contentBody || 'Add your slide content...'}</div>
                 </div>
+              </div>
+            {:else if activeType === 'WORD_CLOUD'}
+              <div class="card space-y-4">
+                <div class="text-lg font-semibold">Word Cloud</div>
+                {#if editingSlideId === activeSlideId}
+                  <input class="input-field" type="text" bind:value={wordCloudPrompt} placeholder="Prompt" />
+                  <div class="flex items-center gap-2">
+                    <button onclick={saveWordCloudSlide} class="btn-primary text-sm">Save prompt</button>
+                    <button onclick={stopEditing} class="btn-secondary text-sm">Done</button>
+                  </div>
+                {/if}
+                {#if slideResponses.length === 0}
+                  <div class="text-sm text-surface-500">No responses yet.</div>
+                {:else}
+                  <div class="border border-surface-800 rounded-xl p-6 flex flex-wrap items-center justify-center gap-3 min-h-[200px]">
+                    {#each getWordCloudData() as item}
+                      <span
+                        class="text-brand-400 font-semibold transition-all"
+                        style={`font-size: ${item.size}rem; opacity: ${0.5 + (item.count / (slideResponses.length || 1)) * 0.5}`}
+                      >{item.word}</span>
+                    {/each}
+                  </div>
+                  <div class="text-xs text-surface-500">{slideResponses.length} response{slideResponses.length === 1 ? '' : 's'}</div>
+                {/if}
               </div>
             {:else}
               <div class="card text-center text-surface-500 py-20">Unsupported slide type.</div>

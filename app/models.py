@@ -15,6 +15,7 @@ class SlideType(str, enum.Enum):
     QNA = "QNA"
     FEEDBACK = "FEEDBACK"
     CONTENT = "CONTENT"
+    WORD_CLOUD = "WORD_CLOUD"
 
 
 
