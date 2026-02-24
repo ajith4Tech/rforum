@@ -185,3 +185,10 @@ export function resolveFileUrl(fileUrl?: string | null) {
   const trimmed = fileUrl.startsWith('/') ? fileUrl : `/${fileUrl}`;
   return `${origin}${trimmed}`;
 }
+
+/** Wrap a file URL in Google Docs Viewer for cross-device (especially mobile) PDF/PPT display */
+export function getDocViewerUrl(fileUrl?: string | null) {
+  const resolved = resolveFileUrl(fileUrl);
+  if (!resolved) return '';
+  return `https://docs.google.com/gview?url=${encodeURIComponent(resolved)}&embedded=true`;
+}

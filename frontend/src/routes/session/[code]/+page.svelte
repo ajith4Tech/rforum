@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { joinSession, submitResponse, upvoteResponse, listResponses, resolveFileUrl } from '$lib/api';
+  import { joinSession, submitResponse, upvoteResponse, listResponses, resolveFileUrl, getDocViewerUrl } from '$lib/api';
   import { RforumWebSocket } from '$lib/ws';
   import { onMount, onDestroy } from 'svelte';
   import {
@@ -372,25 +372,20 @@
             <h1 class="text-2xl font-bold mb-4">{activeSlide.content_json?.title}</h1>
             <p class="text-surface-300 leading-relaxed">{activeSlide.content_json?.body}</p>
               {#if activeSlide.content_json?.file_url}
-              {#if activeSlide.content_json?.file_type?.includes('pdf')}
-                {#key activeSlide.content_json?.file_page}
-                  <iframe
-                    title="Content file"
-                    src={`${resolveFileUrl(activeSlide.content_json.file_url)}?v=${activeSlide.content_json?.file_page || 1}#page=${activeSlide.content_json?.file_page || 1}`}
-                    class="w-full h-[70vh] sm:h-[78vh] mt-6 rounded-xl border border-surface-800 pointer-events-none"
-                  ></iframe>
-                {/key}
-              {:else}
+                <iframe
+                  title="Content file"
+                  src={getDocViewerUrl(activeSlide.content_json.file_url)}
+                  class="w-full h-[70vh] sm:h-[78vh] mt-6 rounded-xl border border-surface-800"
+                ></iframe>
                 <a
-                  class="inline-block mt-6 text-brand-400 hover:underline"
+                  class="inline-block mt-3 text-brand-400 hover:underline text-sm"
                   href={resolveFileUrl(activeSlide.content_json.file_url)}
                   target="_blank"
                   rel="noreferrer"
                 >
-                  Open {activeSlide.content_json.file_name || 'file'}
+                  Open in new tab
                 </a>
               {/if}
-            {/if}
           </div>
         {/if}
       </div>

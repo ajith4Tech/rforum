@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { joinSession, listResponses } from '$lib/api';
+  import { joinSession, listResponses, getDocViewerUrl } from '$lib/api';
   import { RforumWebSocket } from '$lib/ws';
   import { onMount, onDestroy } from 'svelte';
   import { BarChart3, MessageSquare, AlignLeft, FileText, Radio, Cloud } from 'lucide-svelte';
@@ -205,17 +205,11 @@
             <h1 class="text-2xl font-bold mb-4">{activeSlide.content_json?.title}</h1>
             <p class="text-surface-300 leading-relaxed">{activeSlide.content_json?.body}</p>
             {#if activeSlide.content_json?.file_url}
-              {#if activeSlide.content_json?.file_type?.includes('pdf')}
-                {#key activeSlide.content_json?.file_page}
-                  <iframe
-                    title="Content file"
-                    src={`${resolveFileUrl(activeSlide.content_json.file_url)}?v=${activeSlide.content_json?.file_page || 1}#page=${activeSlide.content_json?.file_page || 1}`}
-                    class="w-full h-[70vh] sm:h-[78vh] mt-6 rounded-xl border border-surface-800 pointer-events-none"
-                  ></iframe>
-                {/key}
-              {:else}
-                <div class="text-sm text-surface-500 mt-6">File uploaded: {activeSlide.content_json.file_name || 'file'}</div>
-              {/if}
+                <iframe
+                  title="Content file"
+                  src={getDocViewerUrl(activeSlide.content_json.file_url)}
+                  class="w-full h-[70vh] sm:h-[78vh] mt-6 rounded-xl border border-surface-800 pointer-events-none"
+                ></iframe>
             {/if}
           </div>
         {/if}

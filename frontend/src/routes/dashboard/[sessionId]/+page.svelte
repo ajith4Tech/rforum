@@ -1,6 +1,6 @@
 <script lang="ts">
   import {
-    getSession, updateSession, createSlide, updateSlide, deleteSlide, listResponses, resolveFileUrl
+    getSession, updateSession, createSlide, updateSlide, deleteSlide, listResponses, resolveFileUrl, getDocViewerUrl
   } from '$lib/api';
   import { RforumWebSocket } from '$lib/ws';
   import { onMount, onDestroy } from 'svelte';
@@ -615,8 +615,12 @@
                       {/key}
                     </div>
                   {:else}
-                    <div class="text-sm text-surface-500">
-                      File uploaded: {activeSlide.content_json.file_name || 'file'}
+                    <div class="overflow-x-auto">
+                      <iframe
+                        title="Content file"
+                        src={getDocViewerUrl(activeSlide.content_json.file_url)}
+                        class="h-[420px] rounded-xl border border-surface-800 min-w-[900px]"
+                      ></iframe>
                     </div>
                   {/if}
                 {/if}
