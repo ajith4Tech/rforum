@@ -328,7 +328,7 @@
                   <iframe
                     title="Content file"
                     src={`${resolveFileUrl(activeSlide.content_json.file_url)}?v=${activeSlide.content_json?.file_page || 1}#page=${activeSlide.content_json?.file_page || 1}`}
-                    class="w-full h-[70vh] sm:h-[78vh] mt-6 rounded-xl border border-surface-800"
+                    class="w-full h-[70vh] sm:h-[78vh] mt-6 rounded-xl border border-surface-800 pointer-events-none"
                   ></iframe>
                 {/key}
               {:else}
