@@ -12,10 +12,14 @@ class Settings(BaseSettings):
         "http://localhost:5173",  # SvelteKit dev server
         "http://localhost:3000",  # React dev server
         "http://localhost:4173",  # SvelteKit preview
-        "http://localhost:8080",  # Vite preview
+        "http://localhost:8080",
+        "http://localhost:8000",  # Vite preview
         "http://127.0.0.1:5173",
         "http://127.0.0.1:4173",
         "http://127.0.0.1:8080",
+        "http://13.50.245.253:5173",  # deployed frontend
+        "http://13.50.245.253",
+        "https://13.50.245.253",
     ]
 
     model_config = {"env_file": ".env", "extra": "ignore"}
