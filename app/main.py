@@ -3,7 +3,6 @@ import sys
 from pathlib import Path
 
 from fastapi import FastAPI
-from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from redis.asyncio import Redis
 
@@ -42,7 +41,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+# Uploads are served through the /page/{page_num} endpoint — not as raw static files
 
 # ── Register routers ─────────────────────────────────
 app.include_router(auth.router)

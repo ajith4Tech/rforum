@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { joinSession, submitResponse, upvoteResponse, listResponses, resolveFileUrl, getDocViewerUrl } from '$lib/api';
+  import { joinSession, submitResponse, upvoteResponse, listResponses, getPageImageUrl } from '$lib/api';
   import { RforumWebSocket } from '$lib/ws';
   import { onMount, onDestroy } from 'svelte';
   import {
@@ -371,20 +371,17 @@
             <FileText class="w-10 h-10 text-brand-400 mx-auto mb-4" />
             <h1 class="text-2xl font-bold mb-4">{activeSlide.content_json?.title}</h1>
             <p class="text-surface-300 leading-relaxed">{activeSlide.content_json?.body}</p>
-              {#if activeSlide.content_json?.file_url}
-                <iframe
-                  title="Content file"
-                  src={getDocViewerUrl(activeSlide.content_json.file_url)}
-                  class="w-full h-[70vh] sm:h-[78vh] mt-6 rounded-xl border border-surface-800"
-                ></iframe>
-                <a
-                  class="inline-block mt-3 text-brand-400 hover:underline text-sm"
-                  href={resolveFileUrl(activeSlide.content_json.file_url)}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Open in new tab
-                </a>
+              {#if activeSlide.content_json?.file_url && session?.id}
+                {#key activeSlide.content_json?.file_page}
+                  <img
+                    alt={`Slide page ${activeSlide.content_json?.file_page || 1}`}
+                    src={getPageImageUrl(session.id, activeSlide.id, activeSlide.content_json?.file_page || 1)}
+                    class="w-full mt-6 rounded-xl border border-surface-800 select-none"
+                    draggable="false"
+                    oncontextmenu={(e) => e.preventDefault()}
+                  />
+                {/key}
+                <div class="text-xs text-surface-500 mt-2">Page {activeSlide.content_json?.file_page || 1} / {activeSlide.content_json?.total_pages || 1}</div>
               {/if}
           </div>
         {/if}

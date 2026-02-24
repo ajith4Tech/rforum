@@ -186,9 +186,7 @@ export function resolveFileUrl(fileUrl?: string | null) {
   return `${origin}${trimmed}`;
 }
 
-/** Wrap a file URL in Google Docs Viewer for cross-device (especially mobile) PDF/PPT display */
-export function getDocViewerUrl(fileUrl?: string | null) {
-  const resolved = resolveFileUrl(fileUrl);
-  if (!resolved) return '';
-  return `https://docs.google.com/gview?url=${encodeURIComponent(resolved)}&embedded=true`;
+/** Build the URL for a single rendered page image from the backend */
+export function getPageImageUrl(sessionId: string, slideId: string, page: number) {
+  return buildUrl(`/sessions/${sessionId}/slides/${slideId}/page/${page}`);
 }

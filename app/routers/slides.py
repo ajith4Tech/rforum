@@ -1,9 +1,12 @@
 import os
 import subprocess
 import uuid
+from io import BytesIO
 from pathlib import Path
 
+import fitz  # PyMuPDF
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -190,12 +193,79 @@ async def upload_content_file(
         except Exception:
             pass
 
+    # Count total pages for PDF files
+    total_pages = 1
+    final_path = file_url.lstrip("/")
+    if content_type == "application/pdf" and os.path.exists(final_path):
+        try:
+            doc = fitz.open(final_path)
+            total_pages = len(doc)
+            doc.close()
+        except Exception:
+            pass
+
     content_json = dict(slide.content_json or {})
     content_json["file_name"] = file_name
     content_json["file_url"] = file_url
     content_json["file_type"] = content_type
     content_json["file_page"] = 1
+    content_json["total_pages"] = total_pages
     slide.content_json = content_json
 
     await db.commit()
     return slide
+
+
+@router.get("/{slide_id}/page/{page_num}")
+async def get_page_image(
+    session_id: str,
+    slide_id: str,
+    page_num: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Render a single PDF page as a PNG image. No auth required so guests can view."""
+    try:
+        slide_uuid = uuid.UUID(slide_id)
+        session_uuid = uuid.UUID(session_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid ID format")
+
+    result = await db.execute(
+        select(Slide).where(Slide.id == slide_uuid, Slide.session_id == session_uuid)
+    )
+    slide = result.scalar_one_or_none()
+    if not slide:
+        raise HTTPException(status_code=404, detail="Slide not found")
+
+    content_json = slide.content_json or {}
+    file_url = content_json.get("file_url", "")
+    if not file_url:
+        raise HTTPException(status_code=404, detail="No file attached")
+
+    # Resolve to local path
+    file_path = file_url.lstrip("/")
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="File not found on disk")
+
+    try:
+        doc = fitz.open(file_path)
+    except Exception:
+        raise HTTPException(status_code=500, detail="Could not open PDF")
+
+    if page_num < 1 or page_num > len(doc):
+        doc.close()
+        raise HTTPException(status_code=400, detail=f"Page must be between 1 and {len(doc)}")
+
+    page = doc[page_num - 1]
+    # Render at 2x for crisp display on phones
+    pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
+    img_bytes = pix.tobytes("png")
+    doc.close()
+
+    return StreamingResponse(
+        BytesIO(img_bytes),
+        media_type="image/png",
+        headers={
+            "Cache-Control": "public, max-age=3600",
+        },
+    )

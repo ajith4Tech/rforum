@@ -1,6 +1,6 @@
 <script lang="ts">
   import {
-    getSession, updateSession, createSlide, updateSlide, deleteSlide, listResponses, resolveFileUrl, getDocViewerUrl
+    getSession, updateSession, createSlide, updateSlide, deleteSlide, listResponses, resolveFileUrl, getPageImageUrl
   } from '$lib/api';
   import { RforumWebSocket } from '$lib/ws';
   import { onMount, onDestroy } from 'svelte';
@@ -239,7 +239,9 @@
     const active = getActiveSlide();
     if (!active) return;
     const current = active.content_json?.file_page || 1;
-    const next = Math.max(1, current + delta);
+    const total = active.content_json?.total_pages || 1;
+    const next = Math.max(1, Math.min(total, current + delta));
+    if (next === current) return;
     slides = slides.map((s) =>
       s.id === active.id
         ? { ...s, content_json: { ...s.content_json, file_page: next } }
@@ -599,30 +601,20 @@
                   <button onclick={() => goToContentSlide('next')} class="btn-secondary text-sm">Next</button>
                 </div>
                 {#if activeSlide.content_json?.file_url}
-                  {#if activeSlide.content_json?.file_type?.includes('pdf')}
                     <div class="flex items-center gap-2">
-                      <button onclick={() => changeContentPage(-1)} class="btn-secondary text-sm">Prev page</button>
-                      <button onclick={() => changeContentPage(1)} class="btn-secondary text-sm">Next page</button>
-                      <div class="text-xs text-surface-500">Page {activeSlide.content_json?.file_page || 1}</div>
+                      <button onclick={() => changeContentPage(-1)} class="btn-secondary text-sm" disabled={(activeSlide.content_json?.file_page || 1) <= 1}>Prev page</button>
+                      <button onclick={() => changeContentPage(1)} class="btn-secondary text-sm" disabled={(activeSlide.content_json?.file_page || 1) >= (activeSlide.content_json?.total_pages || 1)}>Next page</button>
+                      <div class="text-xs text-surface-500">Page {activeSlide.content_json?.file_page || 1} / {activeSlide.content_json?.total_pages || 1}</div>
                     </div>
                     <div class="overflow-x-auto">
                       {#key activeSlide.content_json?.file_page}
-                        <iframe
-                          title="Content file"
-                          src={`${resolveFileUrl(activeSlide.content_json.file_url)}?v=${activeSlide.content_json?.file_page || 1}#page=${activeSlide.content_json?.file_page || 1}`}
-                          class="h-[420px] rounded-xl border border-surface-800 min-w-[900px]"
-                        ></iframe>
+                        <img
+                          alt={`Page ${activeSlide.content_json?.file_page || 1}`}
+                          src={getPageImageUrl(sessionId, activeSlide.id, activeSlide.content_json?.file_page || 1)}
+                          class="max-h-[500px] rounded-xl border border-surface-800 mx-auto"
+                        />
                       {/key}
                     </div>
-                  {:else}
-                    <div class="overflow-x-auto">
-                      <iframe
-                        title="Content file"
-                        src={getDocViewerUrl(activeSlide.content_json.file_url)}
-                        class="h-[420px] rounded-xl border border-surface-800 min-w-[900px]"
-                      ></iframe>
-                    </div>
-                  {/if}
                 {/if}
                 <div class="border border-surface-800 rounded-xl p-6 bg-surface-900">
                   <div class="text-xl font-semibold mb-3">{contentTitle || 'Untitled slide'}</div>
