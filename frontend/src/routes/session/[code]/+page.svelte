@@ -177,14 +177,10 @@
   <main class="flex-1 flex flex-col items-center justify-center px-4 py-6">
     {#if loading}
       <p class="text-surface-500">Connecting...</p>
-    {:else if error}
+    {:else if error && !activeSlide}
       <div class="text-center">
         <p class="text-danger text-lg mb-2">{error}</p>
         <a href="/" class="text-brand-400 hover:underline text-sm">Go home</a>
-      </div>
-    {:else if actionError}
-      <div class="text-center">
-        <p class="text-danger text-sm mb-2">{actionError}</p>
       </div>
     {:else if !activeSlide}
       <div class="text-center text-surface-500 animate-fade-in">
@@ -250,8 +246,12 @@
             </div>
           </form>
 
+          {#if actionError}
+            <p class="text-danger text-sm mb-4 text-center">{actionError}</p>
+          {/if}
+
           <div class="space-y-3 max-h-[50vh] overflow-y-auto">
-            {#each responses.sort((a, b) => b.upvotes - a.upvotes) as response (response.id)}
+            {#each [...responses].sort((a, b) => b.upvotes - a.upvotes) as response (response.id)}
               <div class="card flex items-start gap-3 animate-slide-up">
                 <button
                   onclick={() => handleUpvote(response.id)}

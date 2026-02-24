@@ -79,7 +79,7 @@ export async function login(email: string, password: string) {
   form.append('username', email);
   form.append('password', password);
 
-  const res = await fetch(withPrefix('/auth/login'), {
+  const res = await fetch(buildUrl('/auth/login'), {
     method: 'POST',
     body: form
   });

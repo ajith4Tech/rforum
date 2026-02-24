@@ -24,7 +24,7 @@
       session = await joinSession(code);
       const active = session.slides?.find((s: any) => s.is_active);
       if (active) {
-        activeSlide = active;
+        activeSlide = { ...active, type: active.type?.toUpperCase() };
         responses = await listResponses(active.id);
       }
 
@@ -46,7 +46,7 @@
     if (msg.event === 'slide_change') {
       session = await joinSession(code);
       const active = session.slides?.find((s: any) => s.is_active);
-      activeSlide = active || null;
+      activeSlide = active ? { ...active, type: active.type?.toUpperCase() } : null;
       if (active) responses = await listResponses(active.id);
     } else if (msg.event === 'new_response') {
       responses = [...responses, msg.data];
@@ -138,7 +138,7 @@
               <h1 class="text-2xl font-bold">{activeSlide.content_json?.prompt}</h1>
             </div>
             <div class="space-y-3 max-h-[60vh] overflow-y-auto">
-              {#each responses.sort((a, b) => b.upvotes - a.upvotes) as response (response.id)}
+              {#each [...responses].sort((a, b) => b.upvotes - a.upvotes) as response (response.id)}
                 <div class="p-3 rounded-lg border border-surface-800">
                   <div class="text-xs text-surface-500 mb-1">{response.name || response.guest_identifier}</div>
                   <div class="text-sm">{response.value}</div>
