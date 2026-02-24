@@ -21,6 +21,19 @@
   let guestName = $state('');
   let feedbackRating = $state(5);
 
+  function generateGuestId() {
+    if (typeof crypto !== 'undefined') {
+      if (typeof crypto.randomUUID === 'function') {
+        return crypto.randomUUID().slice(0, 8);
+      }
+      if (typeof crypto.getRandomValues === 'function') {
+        const bytes = crypto.getRandomValues(new Uint8Array(8));
+        return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('').slice(0, 8);
+      }
+    }
+    return Math.random().toString(36).slice(2, 10);
+  }
+
   function normalizeSlide(slide: any) {
     if (!slide) return null;
     return {
@@ -31,8 +44,11 @@
   
   onMount(async () => {
     // Generate guest ID
-    guestId = localStorage.getItem('rforum_guest_id') || crypto.randomUUID().slice(0, 8);
-    localStorage.setItem('rforum_guest_id', guestId);
+    const storedGuestId = typeof localStorage !== 'undefined' ? localStorage.getItem('rforum_guest_id') : null;
+    guestId = storedGuestId || generateGuestId();
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('rforum_guest_id', guestId);
+    }
 
     code = typeof window !== 'undefined'
       ? window.location.pathname.split('/').pop() || ''
