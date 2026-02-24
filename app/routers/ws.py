@@ -1,9 +1,13 @@
 import asyncio
 import json
+import uuid
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from redis.asyncio import Redis
 
 router = APIRouter(tags=["websocket"])
+
+# Unique identifier for this process to avoid re-broadcasting our own Redis messages
+SERVER_ID = str(uuid.uuid4())
 
 
 class ConnectionManager:
@@ -53,6 +57,8 @@ async def websocket_endpoint(websocket: WebSocket, session_code: str):
                 if message["type"] == "message":
                     try:
                         data = json.loads(message["data"])
+                        if data.get("origin") == SERVER_ID:
+                            continue  # Skip messages we originated
                         # All local clients connected to this instance 
                         # get the message via this broadcast call.
                         await manager.broadcast(session_code, data)
@@ -69,11 +75,14 @@ async def websocket_endpoint(websocket: WebSocket, session_code: str):
                 # Receive message from user
                 data = await websocket.receive_text()
                 message = json.loads(data)
+                if not isinstance(message, dict):
+                    continue
 
-                # FIX: ONLY publish to Redis. 
-                # Do NOT call manager.broadcast(session_code, message) here.
-                # The 'listen_redis' task above will receive the Redis event 
-                # and broadcast it to everyone, including this sender.
+                # Tag this message with the current server id and broadcast locally
+                message.setdefault("origin", SERVER_ID)
+                await manager.broadcast(session_code, message)
+
+                # Publish to Redis so other app instances receive it
                 await redis.publish(
                     f"session:{session_code}", json.dumps(message)
                 )

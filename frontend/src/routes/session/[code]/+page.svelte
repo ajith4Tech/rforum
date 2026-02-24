@@ -20,6 +20,7 @@
   let guestId = $state('');
   let guestName = $state('');
   let feedbackRating = $state(5);
+  let actionError = $state('');
 
   function generateGuestId() {
     if (typeof crypto !== 'undefined') {
@@ -56,7 +57,7 @@
 
     try {
       session = await joinSession(code);
-      const active = session.slides?.find((s: any) => s.is_active);
+      const active = normalizeSlide(session.slides?.find((s: any) => s.is_active));
       if (active) {
         activeSlide = active;
         responses = await listResponses(active.id);
@@ -81,7 +82,7 @@
     if (msg.event === 'slide_change') {
       // Reload session to get new active slide
       session = await joinSession(code);
-      const active = session.slides?.find((s: any) => s.is_active);
+      const active = normalizeSlide(session.slides?.find((s: any) => s.is_active));
       activeSlide = active || null;
       submitted = false;
       selectedOption = '';
@@ -104,8 +105,13 @@
   async function handlePollVote(option: string) {
     selectedOption = option;
     submitted = true;
-    const response = await submitResponse(activeSlide.id, option, guestId);
-    ws?.send('new_response', response);
+    try {
+      const response = await submitResponse(activeSlide.id, option, guestId);
+      ws?.send('new_response', response);
+    } catch (err: any) {
+      actionError = err?.message || 'Could not submit vote';
+      submitted = false;
+    }
   }
 
   async function handleTextSubmit() {
@@ -117,23 +123,40 @@
     if (activeSlide.type === 'POLL') {
       submitted = true;
     }
-    const response = await submitResponse(activeSlide.id, inputValue.trim(), guestId, guestName || undefined, activeSlide.type === 'FEEDBACK' ? feedbackRating : undefined);
-    ws?.send('new_response', response);
-    inputValue = '';
-    if (activeSlide.type !== 'POLL') {
+    try {
+      const response = await submitResponse(
+        activeSlide.id,
+        inputValue.trim(),
+        guestId,
+        guestName || undefined,
+        activeSlide.type === 'FEEDBACK' ? feedbackRating : undefined
+      );
+      ws?.send('new_response', response);
+      inputValue = '';
+      actionError = '';
+      if (activeSlide.type !== 'POLL') {
+        submitted = false;
+      }
+      if (activeSlide.type === 'QNA') {
+        guestName = guestName.trim();
+      }
+    } catch (err: any) {
+      actionError = err?.message || 'Could not submit';
       submitted = false;
-    }
-    if (activeSlide.type === 'QNA') {
-      guestName = guestName.trim();
     }
   }
 
   async function handleUpvote(responseId: string) {
-    const updated = await upvoteResponse(activeSlide.id, responseId);
-    ws?.send('upvote', updated);
-    responses = responses.map((r) =>
-      r.id === responseId ? { ...r, upvotes: updated.upvotes } : r
-    );
+    try {
+      const updated = await upvoteResponse(activeSlide.id, responseId);
+      ws?.send('upvote', updated);
+      responses = responses.map((r) =>
+        r.id === responseId ? { ...r, upvotes: updated.upvotes } : r
+      );
+      actionError = '';
+    } catch (err: any) {
+      actionError = err?.message || 'Could not upvote';
+    }
   }
 </script>
 
@@ -158,6 +181,10 @@
       <div class="text-center">
         <p class="text-danger text-lg mb-2">{error}</p>
         <a href="/" class="text-brand-400 hover:underline text-sm">Go home</a>
+      </div>
+    {:else if actionError}
+      <div class="text-center">
+        <p class="text-danger text-sm mb-2">{actionError}</p>
       </div>
     {:else if !activeSlide}
       <div class="text-center text-surface-500 animate-fade-in">
@@ -301,7 +328,7 @@
                   <iframe
                     title="Content file"
                     src={`${resolveFileUrl(activeSlide.content_json.file_url)}?v=${activeSlide.content_json?.file_page || 1}#page=${activeSlide.content_json?.file_page || 1}`}
-                    class="w-full h-[480px] mt-6 rounded-xl border border-surface-800 pointer-events-none"
+                    class="w-full h-[70vh] sm:h-[78vh] mt-6 rounded-xl border border-surface-800"
                   ></iframe>
                 {/key}
               {:else}
