@@ -130,4 +130,14 @@ async def join_session(code: str, db: AsyncSession = Depends(get_db)):
     session = result.unique().scalar_one_or_none()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found or not live")
-    return session
+
+    # Strip private file paths from guest-facing response
+    data = SessionWithSlides.model_validate(session)
+    for s in data.slides:
+        cj = dict(s.content_json)
+        if "file_url" in cj:
+            cj["has_file"] = True
+            del cj["file_url"]
+        cj.pop("file_name", None)
+        s.content_json = cj
+    return data

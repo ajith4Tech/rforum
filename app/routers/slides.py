@@ -252,9 +252,17 @@ async def get_page_image(
     except Exception:
         raise HTTPException(status_code=500, detail="Could not open PDF")
 
-    if page_num < 1 or page_num > len(doc):
+    total = len(doc)
+
+    # Backfill total_pages if it was missing or wrong
+    if content_json.get("total_pages") != total:
+        content_json["total_pages"] = total
+        slide.content_json = dict(content_json)
+        await db.commit()
+
+    if page_num < 1 or page_num > total:
         doc.close()
-        raise HTTPException(status_code=400, detail=f"Page must be between 1 and {len(doc)}")
+        raise HTTPException(status_code=400, detail=f"Page must be between 1 and {total}")
 
     page = doc[page_num - 1]
     # Render at 2x for crisp display on phones
@@ -266,6 +274,8 @@ async def get_page_image(
         BytesIO(img_bytes),
         media_type="image/png",
         headers={
-            "Cache-Control": "public, max-age=3600",
+            "Cache-Control": "no-store",
+            "Content-Disposition": "inline",
+            "X-Total-Pages": str(total),
         },
     )

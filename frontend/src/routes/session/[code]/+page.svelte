@@ -95,6 +95,17 @@
       responses = responses.map((r) =>
         r.id === msg.data.id ? { ...r, upvotes: msg.data.upvotes } : r
       );
+    } else if (msg.event === 'page_change') {
+      if (activeSlide && msg.data?.slide_id === activeSlide.id) {
+        activeSlide = {
+          ...activeSlide,
+          content_json: {
+            ...activeSlide.content_json,
+            file_page: msg.data.file_page,
+            total_pages: msg.data.total_pages ?? activeSlide.content_json?.total_pages
+          }
+        };
+      }
     } else if (msg.event === 'session_update') {
       if (msg.data.is_live === false) {
         session = null;
@@ -371,17 +382,18 @@
             <FileText class="w-10 h-10 text-brand-400 mx-auto mb-4" />
             <h1 class="text-2xl font-bold mb-4">{activeSlide.content_json?.title}</h1>
             <p class="text-surface-300 leading-relaxed">{activeSlide.content_json?.body}</p>
-              {#if activeSlide.content_json?.file_url && session?.id}
+              {#if (activeSlide.content_json?.file_url || activeSlide.content_json?.has_file) && session?.id}
                 {#key activeSlide.content_json?.file_page}
+                  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
                   <img
                     alt={`Slide page ${activeSlide.content_json?.file_page || 1}`}
                     src={getPageImageUrl(session.id, activeSlide.id, activeSlide.content_json?.file_page || 1)}
-                    class="w-full mt-6 rounded-xl border border-surface-800 select-none"
+                    class="w-full mt-6 rounded-xl border border-surface-800 select-none pointer-events-none"
                     draggable="false"
-                    oncontextmenu={(e) => e.preventDefault()}
+                    style="-webkit-touch-callout: none; -webkit-user-select: none;"
                   />
                 {/key}
-                <div class="text-xs text-surface-500 mt-2">Page {activeSlide.content_json?.file_page || 1} / {activeSlide.content_json?.total_pages || 1}</div>
+                <div class="text-xs text-surface-500 mt-2">Page {activeSlide.content_json?.file_page || 1}{activeSlide.content_json?.total_pages ? ` / ${activeSlide.content_json.total_pages}` : ''}</div>
               {/if}
           </div>
         {/if}

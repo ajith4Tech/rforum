@@ -239,22 +239,29 @@
     const active = getActiveSlide();
     if (!active) return;
     const current = active.content_json?.file_page || 1;
-    const total = active.content_json?.total_pages || 1;
-    const next = Math.max(1, Math.min(total, current + delta));
-    if (next === current) return;
+    const next = Math.max(1, current + delta);
     slides = slides.map((s) =>
       s.id === active.id
         ? { ...s, content_json: { ...s.content_json, file_page: next } }
         : s
     );
-    const updated = await updateSlide(sessionId, active.id, {
-      content_json: {
-        ...active.content_json,
-        file_page: next
-      }
-    });
-    slides = slides.map((s) => (s.id === active.id ? updated : s));
-    ws?.send('slide_change', { slide_id: active.id });
+    try {
+      const updated = await updateSlide(sessionId, active.id, {
+        content_json: {
+          ...active.content_json,
+          file_page: next
+        }
+      });
+      slides = slides.map((s) => (s.id === active.id ? updated : s));
+      ws?.send('page_change', { slide_id: active.id, file_page: next, total_pages: updated.content_json?.total_pages });
+    } catch {
+      // Revert optimistic update on failure
+      slides = slides.map((s) =>
+        s.id === active.id
+          ? { ...s, content_json: { ...s.content_json, file_page: current } }
+          : s
+      );
+    }
   }
 
   function addPollOption() {
@@ -603,8 +610,8 @@
                 {#if activeSlide.content_json?.file_url}
                     <div class="flex items-center gap-2">
                       <button onclick={() => changeContentPage(-1)} class="btn-secondary text-sm" disabled={(activeSlide.content_json?.file_page || 1) <= 1}>Prev page</button>
-                      <button onclick={() => changeContentPage(1)} class="btn-secondary text-sm" disabled={(activeSlide.content_json?.file_page || 1) >= (activeSlide.content_json?.total_pages || 1)}>Next page</button>
-                      <div class="text-xs text-surface-500">Page {activeSlide.content_json?.file_page || 1} / {activeSlide.content_json?.total_pages || 1}</div>
+                      <button onclick={() => changeContentPage(1)} class="btn-secondary text-sm">Next page</button>
+                      <div class="text-xs text-surface-500">Page {activeSlide.content_json?.file_page || 1}{activeSlide.content_json?.total_pages ? ` / ${activeSlide.content_json.total_pages}` : ''}</div>
                     </div>
                     <div class="overflow-x-auto">
                       {#key activeSlide.content_json?.file_page}
