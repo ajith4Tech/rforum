@@ -73,6 +73,23 @@ async def get_session(
     return session
 
 
+@router.get("/code/{code}", response_model=SessionWithSlides)
+async def get_session_by_code(
+    code: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Session)
+        .options(selectinload(Session.slides))
+        .where(Session.unique_code == code, Session.owner_id == user.id)
+    )
+    session = result.unique().scalar_one_or_none()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return session
+
+
 @router.patch("/{session_id}", response_model=SessionOut)
 async def update_session(
     session_id: str,

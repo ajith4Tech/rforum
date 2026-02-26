@@ -129,6 +129,46 @@ export async function updateSession(sessionId: string, payload: Record<string, u
   }, true);
 }
 
+// ── Events ───────────────────────────────────────────
+export async function listEvents() {
+  return fetchJson('/events', { method: 'GET' }, true);
+}
+
+export async function listPublicEvents(date?: string) {
+  const query = date ? `?event_date=${encodeURIComponent(date)}` : '';
+  return fetchJson(`/events/public${query}`, { method: 'GET' });
+}
+
+export async function createEvent(payload: Record<string, unknown>) {
+  return fetchJson('/events', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  }, true);
+}
+
+export async function updateEvent(eventId: string, payload: Record<string, unknown>) {
+  return fetchJson(`/events/${eventId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload)
+  }, true);
+}
+
+export async function deleteEvent(eventId: string) {
+  await fetchJson(`/events/${eventId}`, { method: 'DELETE' }, true);
+}
+
+export async function setEventSessions(eventId: string, session_ids: string[]) {
+  return fetchJson(`/events/${eventId}/sessions`, {
+    method: 'PUT',
+    body: JSON.stringify({ session_ids })
+  }, true);
+}
+
+// ── Public Events ───────────────────────────────────
+export async function getTodayEvent() {
+  return fetchJson('/events/public/today', { method: 'GET' });
+}
+
 // ── Slides ───────────────────────────────────────────
 export async function createSlide(sessionId: string, payload: Record<string, unknown>) {
   return fetchJson(`/sessions/${sessionId}/slides`, {
@@ -152,6 +192,11 @@ export async function deleteSlide(sessionId: string, slideId: string) {
 export async function joinSession(code: string) {
   const normalized = code?.toUpperCase();
   return fetchJson(`/sessions/join/${normalized}`, { method: 'GET' });
+}
+
+export async function getSessionByCode(code: string) {
+  const normalized = code?.toUpperCase();
+  return fetchJson(`/sessions/code/${normalized}`, { method: 'GET' }, true);
 }
 
 export async function listResponses(slideId: string) {

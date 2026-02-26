@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from pydantic import BaseModel, EmailStr, field_validator
 
 from app.models import SlideType
@@ -37,6 +37,7 @@ class SessionUpdate(BaseModel):
 class SessionOut(BaseModel):
     id: uuid.UUID
     owner_id: uuid.UUID
+    event_id: uuid.UUID | None = None
     unique_code: str
     title: str
     is_live: bool
@@ -47,6 +48,60 @@ class SessionOut(BaseModel):
 
 class SessionWithSlides(SessionOut):
     slides: list["SlideOut"] = []
+
+
+class SessionPublicOut(BaseModel):
+    id: uuid.UUID
+    title: str
+    is_live: bool
+    unique_code: str | None = None
+
+    model_config = {"from_attributes": True}
+
+
+# ── Event ────────────────────────────────────────────
+class EventCreate(BaseModel):
+    title: str
+    event_date: date
+    description: str | None = None
+    session_ids: list[uuid.UUID] = []
+
+
+class EventUpdate(BaseModel):
+    title: str | None = None
+    event_date: date | None = None
+    description: str | None = None
+    is_published: bool | None = None
+
+
+class EventOut(BaseModel):
+    id: uuid.UUID
+    owner_id: uuid.UUID
+    title: str
+    event_date: date
+    description: str | None = None
+    is_published: bool
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class EventWithSessions(EventOut):
+    sessions: list[SessionOut] = []
+
+
+class EventPublicOut(BaseModel):
+    id: uuid.UUID
+    title: str
+    event_date: date
+    description: str | None = None
+    sessions: list[SessionPublicOut] = []
+
+    model_config = {"from_attributes": True}
+
+
+class EventSessionsUpdate(BaseModel):
+    session_ids: list[uuid.UUID] = []
 
 
 # ── Slide ─────────────────────────────────────────────

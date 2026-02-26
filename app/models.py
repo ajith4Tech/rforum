@@ -1,7 +1,9 @@
-import uuid
-from datetime import datetime
+from __future__ import annotations
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, String, Text, func
+import uuid
+from datetime import date, datetime
+
+from sqlalchemy import Boolean, Date, DateTime, Enum, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSON, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -32,6 +34,28 @@ class User(Base):
     )
 
     sessions: Mapped[list["Session"]] = relationship(back_populates="owner")
+    events: Mapped[list["Event"]] = relationship(back_populates="owner")
+
+
+class Event(Base):
+    __tablename__ = "events"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    owner_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
+    )
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    event_date: Mapped[date] = mapped_column(Date, nullable=False)
+    is_published: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    owner: Mapped["User"] = relationship(back_populates="events")
+    sessions: Mapped[list["Session"]] = relationship(back_populates="event")
 
 
 class Session(Base):
@@ -43,6 +67,9 @@ class Session(Base):
     owner_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
     )
+    event_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("events.id", ondelete="SET NULL"), nullable=True
+    )
     unique_code: Mapped[str] = mapped_column(
         String(9), unique=True, nullable=False
     )  # e.g. ABCD-1234
@@ -53,6 +80,7 @@ class Session(Base):
     )
 
     owner: Mapped["User"] = relationship(back_populates="sessions")
+    event: Mapped[Event | None] = relationship(back_populates="sessions")
     slides: Mapped[list["Slide"]] = relationship(
         back_populates="session", cascade="all, delete-orphan", order_by="Slide.order"
     )
