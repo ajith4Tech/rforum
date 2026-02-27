@@ -107,10 +107,10 @@ export async function listSessions() {
   return fetchJson('/sessions', { method: 'GET' }, true);
 }
 
-export async function createSession(title: string) {
+export async function createSession(title: string, eventId: string) {
   return fetchJson('/sessions', {
     method: 'POST',
-    body: JSON.stringify({ title })
+    body: JSON.stringify({ title, event_id: eventId })
   }, true);
 }
 

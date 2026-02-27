@@ -27,6 +27,7 @@ class Token(BaseModel):
 # ── Session ───────────────────────────────────────────
 class SessionCreate(BaseModel):
     title: str
+    event_id: uuid.UUID
 
 
 class SessionUpdate(BaseModel):
@@ -64,7 +65,6 @@ class EventCreate(BaseModel):
     title: str
     event_date: date
     description: str | None = None
-    session_ids: list[uuid.UUID] = []
 
 
 class EventUpdate(BaseModel):

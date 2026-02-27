@@ -3,13 +3,13 @@ import string
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.auth import get_current_user
 from app.database import get_db
-from app.models import Session, User
+from app.models import Event, Session, User
 from app.schemas import SessionCreate, SessionOut, SessionUpdate, SessionWithSlides
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
@@ -28,12 +28,24 @@ async def create_session(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    result = await db.execute(
+        select(Event).where(Event.id == payload.event_id, Event.owner_id == user.id)
+    )
+    event = result.scalar_one_or_none()
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+
     code = _generate_code()
     # Ensure uniqueness
     while (await db.execute(select(Session).where(Session.unique_code == code))).scalar_one_or_none():
         code = _generate_code()
 
-    session = Session(owner_id=user.id, title=payload.title, unique_code=code)
+    session = Session(
+        owner_id=user.id,
+        title=payload.title,
+        unique_code=code,
+        event_id=payload.event_id,
+    )
     db.add(session)
     await db.flush()
     await db.commit()
@@ -127,12 +139,10 @@ async def delete_session(
         raise HTTPException(status_code=400, detail="Invalid session ID format")
     
     result = await db.execute(
-        select(Session).where(Session.id == session_uuid, Session.owner_id == user.id)
+        delete(Session).where(Session.id == session_uuid, Session.owner_id == user.id)
     )
-    session = result.scalar_one_or_none()
-    if not session:
+    if result.rowcount == 0:
         raise HTTPException(status_code=404, detail="Session not found")
-    await db.delete(session)
     await db.commit()
 
 

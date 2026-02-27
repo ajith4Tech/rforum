@@ -3,7 +3,7 @@
   import { RforumWebSocket } from '$lib/ws';
   import { onMount, onDestroy } from 'svelte';
   import {
-    Radio, Send, ChevronUp, BarChart3, MessageSquare, AlignLeft, FileText, CheckCircle2, Cloud
+    RadioTower, Send, ChevronUp, BarChart3, MessageSquare, AlignLeft, FileText, CheckCircle2, Cloud
   } from 'lucide-svelte';
 
   let code = $state('');
@@ -182,7 +182,7 @@
   <!-- Header -->
   <header class="flex items-center justify-between px-4 py-3 border-b border-surface-800">
     <div class="flex items-center gap-2">
-      <Radio class="w-5 h-5 text-brand-400" />
+      <RadioTower class="w-5 h-5 text-brand-500" />
       <span class="font-bold text-sm">Rforum</span>
     </div>
     <span class="font-mono text-xs text-surface-500 bg-surface-900 px-3 py-1 rounded-lg">{code}</span>
@@ -194,11 +194,11 @@
     {:else if error && !activeSlide}
       <div class="text-center">
         <p class="text-danger text-lg mb-2">{error}</p>
-        <a href="/" class="text-brand-400 hover:underline text-sm">Go home</a>
+        <a href="/" class="text-brand-600 hover:underline text-sm">Go home</a>
       </div>
     {:else if !activeSlide}
       <div class="text-center text-surface-500 animate-fade-in">
-        <Radio class="w-16 h-16 mx-auto mb-4 text-surface-700 animate-pulse-live" />
+        <RadioTower class="w-16 h-16 mx-auto mb-4 text-brand-400 animate-pulse-live" />
         <p class="text-lg font-medium">Waiting for the presenter...</p>
         <p class="text-sm mt-2">The next slide will appear here automatically</p>
       </div>
@@ -207,7 +207,7 @@
         <!-- Poll Slide -->
         {#if activeSlide.type === 'POLL'}
           <div class="text-center mb-8">
-            <BarChart3 class="w-10 h-10 text-brand-400 mx-auto mb-3" />
+            <BarChart3 class="w-10 h-10 text-brand-600 mx-auto mb-3" />
             <h1 class="text-2xl font-bold">{activeSlide.content_json?.question}</h1>
           </div>
 
@@ -236,7 +236,7 @@
         <!-- Q&A Slide -->
         {#if activeSlide.type === 'QNA'}
           <div class="text-center mb-8">
-            <MessageSquare class="w-10 h-10 text-brand-400 mx-auto mb-3" />
+            <MessageSquare class="w-10 h-10 text-brand-600 mx-auto mb-3" />
             <h1 class="text-2xl font-bold">{activeSlide.content_json?.prompt}</h1>
           </div>
 
@@ -276,7 +276,7 @@
               <div class="card flex items-start gap-3 animate-slide-up">
                 <button
                   onclick={() => handleUpvote(response.id)}
-                  class="flex flex-col items-center text-surface-400 hover:text-brand-400 transition-colors shrink-0"
+                  class="flex flex-col items-center text-surface-400 hover:text-brand-600 transition-colors shrink-0"
                 >
                   <ChevronUp class="w-5 h-5" />
                   <span class="text-xs font-bold">{response.upvotes}</span>
@@ -295,7 +295,7 @@
         <!-- Feedback Slide -->
         {#if activeSlide.type === 'FEEDBACK'}
           <div class="text-center mb-8">
-            <AlignLeft class="w-10 h-10 text-brand-400 mx-auto mb-3" />
+            <AlignLeft class="w-10 h-10 text-brand-600 mx-auto mb-3" />
             <h1 class="text-2xl font-bold">{activeSlide.content_json?.prompt}</h1>
           </div>
 
@@ -340,7 +340,7 @@
         <!-- Word Cloud Slide -->
         {#if activeSlide.type === 'WORD_CLOUD'}
           <div class="text-center mb-8">
-            <Cloud class="w-10 h-10 text-brand-400 mx-auto mb-3" />
+            <Cloud class="w-10 h-10 text-brand-600 mx-auto mb-3" />
             <h1 class="text-2xl font-bold">{activeSlide.content_json?.prompt}</h1>
           </div>
 
@@ -379,7 +379,7 @@
         <!-- Content Slide -->
         {#if activeSlide.type === 'CONTENT'}
           <div class="card text-center animate-fade-in">
-            <FileText class="w-10 h-10 text-brand-400 mx-auto mb-4" />
+            <FileText class="w-10 h-10 text-brand-600 mx-auto mb-4" />
             <h1 class="text-2xl font-bold mb-4">{activeSlide.content_json?.title}</h1>
             <p class="text-surface-300 leading-relaxed">{activeSlide.content_json?.body}</p>
               {#if (activeSlide.content_json?.file_url || activeSlide.content_json?.has_file) && session?.id}

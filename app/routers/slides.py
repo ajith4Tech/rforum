@@ -7,7 +7,7 @@ from pathlib import Path
 import fitz  # PyMuPDF
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user
@@ -122,12 +122,10 @@ async def delete_slide(
         raise HTTPException(status_code=400, detail="Invalid ID format")
     
     result = await db.execute(
-        select(Slide).where(Slide.id == slide_uuid, Slide.session_id == session_uuid)
+        delete(Slide).where(Slide.id == slide_uuid, Slide.session_id == session_uuid)
     )
-    slide = result.scalar_one_or_none()
-    if not slide:
+    if result.rowcount == 0:
         raise HTTPException(status_code=404, detail="Slide not found")
-    await db.delete(slide)
     await db.commit()
 
 

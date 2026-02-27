@@ -2,7 +2,7 @@ import uuid
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -54,6 +54,26 @@ async def _get_public_event_for_date(
     return result.unique().scalars().first()
 
 
+async def _get_event_sessions_payload(
+    event_id: uuid.UUID,
+    db: AsyncSession,
+) -> list[dict]:
+    result = await db.execute(
+        select(Session)
+        .where(Session.event_id == event_id)
+        .order_by(Session.created_at.asc())
+    )
+    sessions = []
+    for session in result.scalars().all():
+        sessions.append({
+            "id": str(session.id),
+            "title": session.title,
+            "is_live": session.is_live,
+            "unique_code": session.unique_code if session.is_live else None,
+        })
+    return sessions
+
+
 @router.post("/", response_model=EventWithSessions, status_code=status.HTTP_201_CREATED)
 async def create_event(
     payload: EventCreate,
@@ -68,13 +88,6 @@ async def create_event(
     )
     db.add(event)
     await db.flush()
-
-    if payload.session_ids:
-        await db.execute(
-            update(Session)
-            .where(Session.id.in_(payload.session_ids), Session.owner_id == user.id)
-            .values(event_id=event.id)
-        )
 
     await db.commit()
     await db.refresh(event)
@@ -96,7 +109,7 @@ async def list_events(
 
 
 # ── Guest endpoint (no auth) ─────────────────────────
-@router.get("/public/today", response_model=dict)
+@router.get("/public/today", response_model=list[dict])
 async def get_today_event(db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(Event)
@@ -104,26 +117,18 @@ async def get_today_event(db: AsyncSession = Depends(get_db)):
         .where(Event.event_date == date.today(), Event.is_published == True)
         .order_by(Event.created_at.desc())
     )
-    event = result.unique().scalars().first()
-    if not event:
-        raise HTTPException(status_code=404, detail="No event scheduled for today")
-    
-    sessions = []
-    for session in event.sessions:
-        sessions.append({
-            "id": str(session.id),
-            "title": session.title,
-            "is_live": session.is_live,
-            "unique_code": session.unique_code if session.is_live else None,
+    events = result.unique().scalars().all()
+    payload = []
+    for event in events:
+        sessions = await _get_event_sessions_payload(event.id, db)
+        payload.append({
+            "id": str(event.id),
+            "title": event.title,
+            "event_date": event.event_date.isoformat(),
+            "description": event.description,
+            "sessions": sessions,
         })
-    
-    return {
-        "id": str(event.id),
-        "title": event.title,
-        "event_date": event.event_date.isoformat(),
-        "description": event.description,
-        "sessions": sessions,
-    }
+    return payload
 
 
 @router.get("/public", response_model=list[dict])
@@ -141,14 +146,7 @@ async def list_public_events(
     events = result.unique().scalars().all()
     payload = []
     for event in events:
-        sessions = []
-        for session in event.sessions:
-            sessions.append({
-                "id": str(session.id),
-                "title": session.title,
-                "is_live": session.is_live,
-                "unique_code": session.unique_code if session.is_live else None,
-            })
+        sessions = await _get_event_sessions_payload(event.id, db)
         payload.append({
             "id": str(event.id),
             "title": event.title,
@@ -187,7 +185,12 @@ async def update_event(
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
 
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    updates = payload.model_dump(exclude_unset=True)
+    if "event_date" in updates and updates["event_date"] != event.event_date:
+        event.is_published = False
+        updates.pop("is_published", None)
+
+    for field, value in updates.items():
         setattr(event, field, value)
 
     await db.commit()
@@ -202,13 +205,10 @@ async def delete_event(
 ):
     event_uuid = _parse_uuid(event_id, "event ID")
     result = await db.execute(
-        select(Event).where(Event.id == event_uuid, Event.owner_id == user.id)
+        delete(Event).where(Event.id == event_uuid, Event.owner_id == user.id)
     )
-    event = result.scalar_one_or_none()
-    if not event:
+    if result.rowcount == 0:
         raise HTTPException(status_code=404, detail="Event not found")
-
-    await db.delete(event)
     await db.commit()
 
 

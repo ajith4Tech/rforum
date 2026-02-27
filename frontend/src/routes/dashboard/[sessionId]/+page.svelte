@@ -475,7 +475,7 @@
                   <div class={`flex items-center justify-between gap-2 p-2 rounded-lg border ${slide.id === activeSlideId ? 'border-brand-500/60 bg-surface-900' : 'border-surface-800'}`}>
                     <button class="flex items-center gap-2 text-left flex-1" onclick={() => activateSlide(slide.id)}>
                       {#if Icon}
-                        <Icon class="w-4 h-4 text-brand-400" />
+                        <Icon class="w-4 h-4 text-brand-600" />
                       {/if}
                       <span class="text-xs">{slideLabels[getSlideTypeKey(slide)] || getSlideTypeKey(slide) || 'Slide'}</span>
                     </button>
@@ -644,7 +644,7 @@
                   <div class="border border-surface-800 rounded-xl p-6 flex flex-wrap items-center justify-center gap-3 min-h-[200px]">
                     {#each getWordCloudData() as item}
                       <span
-                        class="text-brand-400 font-semibold transition-all"
+                        class="text-brand-600 font-semibold transition-all"
                         style={`font-size: ${item.size}rem; opacity: ${0.5 + (item.count / (slideResponses.length || 1)) * 0.5}`}
                       >{item.word}</span>
                     {/each}

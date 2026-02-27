@@ -5,20 +5,48 @@
 @tailwind utilities;
 
 @layer base {
+  /* Dark mode (default) */
+  :root,
+  [data-theme="dark"] {
+    color-scheme: dark;
+  }
+
+  /* Light mode */
+  [data-theme="light"] {
+    color-scheme: light;
+  }
+
   body {
-    @apply bg-surface-950 text-surface-100 font-sans antialiased;
+    @apply font-sans antialiased;
+  }
+
+  [data-theme="dark"] body {
+    @apply bg-surface-950 text-surface-100;
+  }
+
+  [data-theme="light"] body {
+    @apply bg-surface-50 text-surface-950;
   }
 }
 
 @layer components {
   .btn-primary {
-    @apply bg-brand-500 hover:bg-brand-600 text-white font-semibold px-6 py-3 rounded-xl
-           transition-all duration-200 active:scale-95 shadow-lg shadow-brand-500/25;
+    @apply bg-gradient-to-r from-brand-600 to-brand-500 hover:from-brand-700 hover:to-brand-600 text-white font-semibold px-6 py-3 rounded-xl
+           transition-all duration-200 active:scale-95 shadow-lg shadow-brand-600/25;
   }
 
   .btn-secondary {
+    @apply transition-all duration-200;
+  }
+
+  [data-theme="dark"] .btn-secondary {
     @apply bg-surface-800 hover:bg-surface-700 text-surface-200 font-medium px-5 py-2.5 rounded-xl
-           border border-surface-700 transition-all duration-200;
+           border border-surface-700;
+  }
+
+  [data-theme="light"] .btn-secondary {
+    @apply bg-surface-200 hover:bg-surface-300 text-surface-800 font-medium px-5 py-2.5 rounded-xl
+           border border-surface-300;
   }
 
   .btn-danger {
@@ -27,31 +55,88 @@
   }
 
   .btn-live {
-    @apply bg-live hover:bg-red-600 text-white font-bold px-6 py-3 rounded-xl
+    @apply bg-live hover:bg-rose-600 text-white font-bold px-6 py-3 rounded-xl
            animate-pulse-live transition-all duration-200 shadow-lg shadow-live/30;
   }
 
   .card {
-    @apply bg-surface-900 border border-surface-800 rounded-2xl p-6;
+    @apply rounded-2xl p-6;
+  }
+
+  [data-theme="dark"] .card {
+    @apply bg-surface-900 border border-surface-800;
+  }
+
+  [data-theme="light"] .card {
+    @apply bg-white border border-surface-200;
   }
 
   .input-field {
-    @apply w-full bg-surface-900 border border-surface-800 rounded-xl px-4 py-3
-           text-surface-100 placeholder-surface-500 focus:outline-none focus:ring-2
-           focus:ring-brand-500/50 focus:border-brand-500 transition-all duration-200;
+    @apply w-full rounded-xl px-4 py-3 placeholder-surface-500 focus:outline-none focus:ring-2
+           focus:ring-brand-600/50 focus:border-brand-600 transition-all duration-200;
+  }
+
+  [data-theme="dark"] .input-field {
+    @apply bg-surface-900 border border-surface-800 text-surface-100;
+  }
+
+  [data-theme="light"] .input-field {
+    @apply bg-surface-50 border border-surface-300 text-surface-950;
   }
 
   .badge-live {
-    @apply inline-flex items-center gap-1.5 bg-live/10 text-live text-xs font-bold
+    @apply inline-flex items-center gap-1.5 text-live text-xs font-bold
            px-3 py-1 rounded-full uppercase tracking-wider;
   }
 
+  [data-theme="dark"] .badge-live {
+    @apply bg-live/10;
+  }
+
+  [data-theme="light"] .badge-live {
+    @apply bg-live/20;
+  }
+
   .sidebar-item {
-    @apply flex items-center gap-3 px-4 py-3 rounded-xl text-surface-400
-           hover:text-surface-100 hover:bg-surface-800 transition-all duration-200 cursor-pointer;
+    @apply flex items-center gap-3 px-4 py-3 rounded-xl
+           hover:transition-all duration-200 cursor-pointer;
+  }
+
+  [data-theme="dark"] .sidebar-item {
+    @apply text-surface-400 hover:text-surface-100 hover:bg-surface-800;
+  }
+
+  [data-theme="light"] .sidebar-item {
+    @apply text-surface-600 hover:text-surface-900 hover:bg-surface-100;
   }
 
   .sidebar-item.active {
     @apply text-brand-400 bg-brand-500/10 border border-brand-500/20;
+  }
+}
+
+@layer utilities {
+  [data-theme="dark"] nav, [data-theme="dark"] header {
+    @apply border-surface-800;
+  }
+
+  [data-theme="light"] nav, [data-theme="light"] header {
+    @apply border-surface-200;
+  }
+
+  [data-theme="dark"] footer {
+    @apply border-surface-800;
+  }
+
+  [data-theme="light"] footer {
+    @apply border-surface-200;
+  }
+
+  [data-theme="light"] .text-surface-500 {
+    @apply text-surface-600;
+  }
+
+  [data-theme="light"] .text-surface-400 {
+    @apply text-surface-700;
   }
 }

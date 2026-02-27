@@ -2,7 +2,7 @@
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
   import { login, register } from '$lib/api';
-  import { Radio, Mail, Lock } from 'lucide-svelte';
+  import { RadioTower, Mail, Lock } from 'lucide-svelte';
 
   let isRegister = $state(false);
   let email = $state('');
@@ -41,7 +41,7 @@
 <div class="min-h-screen flex items-center justify-center px-6">
   <div class="w-full max-w-sm animate-fade-in">
     <a href="/" class="flex items-center gap-2 justify-center mb-10">
-      <Radio class="w-8 h-8 text-brand-400" />
+      <RadioTower class="w-8 h-8 text-brand-500" />
       <span class="text-2xl font-bold">Rforum</span>
     </a>
 
@@ -84,10 +84,10 @@
       <div class="mt-6 text-center text-sm text-surface-500">
         {#if isRegister}
           Already have an account?
-          <button on:click={() => isRegister = false} class="text-brand-400 hover:underline">Log in</button>
+          <button on:click={() => isRegister = false} class="text-brand-600 hover:underline">Log in</button>
         {:else}
           Don't have an account?
-          <button on:click={() => isRegister = true} class="text-brand-400 hover:underline">Sign up</button>
+          <button on:click={() => isRegister = true} class="text-brand-600 hover:underline">Sign up</button>
         {/if}
       </div>
     </div>

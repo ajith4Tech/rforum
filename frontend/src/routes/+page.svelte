@@ -1,14 +1,11 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
-  import { joinSession, listPublicEvents } from '$lib/api';
-  import { Radio } from 'lucide-svelte';
+  import { listPublicEvents } from '$lib/api';
+  import { theme, toggleTheme } from '$lib/theme';
+  import { RadioTower, Moon, Sun, Zap, Users, BarChart3, MessageSquare } from 'lucide-svelte';
   import { onMount } from 'svelte';
 
-  let joinCode = $state('');
-  let joinError = $state('');
-  let joining = $state(false);
-
-  let todayEvent: any = $state(null);
+  let todayEvents: any[] = $state([]);
   let eventError = $state('');
   let loadingEvent = $state(true);
 
@@ -17,9 +14,8 @@
       const today = new Date().toISOString().slice(0, 10);
       const events = await listPublicEvents(today);
       console.log('Public events response:', { today, events });
-      todayEvent = events?.[0] || null;
-      console.log('Today event:', todayEvent);
-      if (!todayEvent) {
+      todayEvents = Array.isArray(events) ? events : [];
+      if (todayEvents.length === 0) {
         eventError = 'No event scheduled for today';
       }
     } catch (e: any) {
@@ -29,27 +25,6 @@
       loadingEvent = false;
     }
   });
-
-  async function handleJoin() {
-    if (!joinCode.trim()) return;
-    joining = true;
-    joinError = '';
-
-    try {
-      const formatted = joinCode.toUpperCase().replace(/[^A-Z0-9]/g, '');
-      const code =
-        formatted.length > 4
-          ? `${formatted.slice(0, 4)}-${formatted.slice(4, 8)}`
-          : formatted;
-
-      await joinSession(code);
-      goto(`/session/${code}`);
-    } catch (e: any) {
-      joinError = e.message || 'Session not found';
-    } finally {
-      joining = false;
-    }
-  }
 </script>
 
 <svelte:head>
@@ -59,94 +34,146 @@
 <div class="min-h-screen flex flex-col">
 
   <!-- Nav -->
-  <nav class="flex items-center justify-between px-6 py-4 border-b border-surface-800">
+  <nav class="flex items-center justify-between px-6 py-4 border-b">
     <div class="flex items-center gap-2">
-      <Radio class="w-7 h-7 text-brand-400" />
+      <RadioTower class="w-7 h-7 text-brand-500" />
       <span class="text-xl font-bold tracking-tight">Rforum</span>
     </div>
     <div class="flex items-center gap-3">
+      <button
+        on:click={toggleTheme}
+        class="btn-secondary p-2.5"
+        title="Toggle theme"
+      >
+        {#if $theme === 'dark'}
+          <Sun class="w-5 h-5" />
+        {:else}
+          <Moon class="w-5 h-5" />
+        {/if}
+      </button>
       <a href="/login" class="btn-secondary text-sm">Log in</a>
       <a href="/login?mode=register" class="btn-primary text-sm">Sign up</a>
     </div>
   </nav>
 
   <!-- Main -->
-  <main class="flex-1 flex flex-col items-center justify-center px-6 py-16 gap-10">
+  <main class="flex-1 flex flex-col px-6 py-16">
+    <div class="mx-auto w-full max-w-4xl space-y-12">
+      <!-- Hero Section -->
+      <div class="text-center space-y-2">
+        <h1 class="text-5xl font-bold">Rforum</h1>
+        <p class="text-xl text-surface-500">Real-time engagement for live events and presentations</p>
+      </div>
 
-    <!-- Join Session Jumbotron -->
-    <div class="card max-w-md w-full text-center">
-      <h2 class="text-lg font-semibold mb-4">Join a Session</h2>
+      <!-- Features Grid -->
+      <div class="grid md:grid-cols-2 gap-4">
+        <div class="card">
+          <div class="flex items-start gap-3">
+            <Zap class="w-6 h-6 text-amber-400 flex-shrink-0 mt-1" />
+            <div>
+              <h3 class="font-semibold mb-1">Live Interaction</h3>
+              <p class="text-sm text-surface-500">Engage your audience in real-time with instant polls, Q&A sessions, and feedback collection.</p>
+            </div>
+          </div>
+        </div>
 
-      <form on:submit|preventDefault={handleJoin} class="flex gap-3">
-        <input
-          type="text"
-          bind:value={joinCode}
-          placeholder="Enter code (e.g. ABCD-1234)"
-          class="input-field flex-1 font-mono text-center text-lg tracking-widest uppercase"
-          maxlength="9"
-        />
+        <div class="card">
+          <div class="flex items-start gap-3">
+            <Users class="w-6 h-6 text-cyan-400 flex-shrink-0 mt-1" />
+            <div>
+              <h3 class="font-semibold mb-1">Audience Participation</h3>
+              <p class="text-sm text-surface-500">Simple join codes make it easy for participants to join sessions from any device.</p>
+            </div>
+          </div>
+        </div>
 
-        <button
-          type="submit"
-          class="btn-primary whitespace-nowrap"
-          disabled={joining}
-        >
-          {joining ? 'Joining...' : 'Join'}
-        </button>
-      </form>
+        <div class="card">
+          <div class="flex items-start gap-3">
+            <BarChart3 class="w-6 h-6 text-emerald-400 flex-shrink-0 mt-1" />
+            <div>
+              <h3 class="font-semibold mb-1">Real-time Analytics</h3>
+              <p class="text-sm text-surface-500">View live poll results, word clouds, and feedback insights as they happen.</p>
+            </div>
+          </div>
+        </div>
 
-      {#if joinError}
-        <p class="text-danger text-sm mt-3">{joinError}</p>
-      {/if}
-    </div>
-
-    <!-- Today's Event -->
-    <div class="card max-w-2xl w-full text-left">
-      <div class="flex items-start justify-between gap-4">
-        <div>
-          <h2 class="text-xl font-semibold mb-1">{todayEvent?.title || "Today's Event"}</h2>
-          <p class="text-sm text-surface-500">
-            {todayEvent?.event_date ? new Date(todayEvent.event_date).toLocaleDateString() : ''}
-          </p>
-          {#if todayEvent?.description}
-            <p class="text-surface-400 mt-2">{todayEvent.description}</p>
-          {/if}
+        <div class="card">
+          <div class="flex items-start gap-3">
+            <MessageSquare class="w-6 h-6 text-rose-400 flex-shrink-0 mt-1" />
+            <div>
+              <h3 class="font-semibold mb-1">Multiple Formats</h3>
+              <p class="text-sm text-surface-500">Polls, Q&A, feedback forms, word clouds, and content slides all in one platform.</p>
+            </div>
+          </div>
         </div>
       </div>
 
-      <div class="mt-4">
-        <h3 class="font-medium mb-2">Sessions</h3>
-        {#if loadingEvent}
-          <p class="text-surface-500">Loading event...</p>
-        {:else if eventError && !todayEvent}
+      <!-- Today's Events Section -->
+      {#if loadingEvent}
+        <div class="card">
+          <p class="text-surface-500">Loading events...</p>
+        </div>
+      {:else if eventError && todayEvents.length === 0}
+        <div>
+          <h2 class="text-3xl font-bold mb-2">Today's Events</h2>
           <p class="text-surface-500">{eventError}</p>
-        {:else if !todayEvent?.sessions?.length}
-          <p class="text-surface-500">No sessions scheduled yet.</p>
-        {:else}
-          <div class="space-y-2">
-            {#each todayEvent.sessions as session (session.id)}
-              <div class="flex items-center justify-between gap-4 p-3 rounded-lg border border-surface-800">
-                <div class="flex-1">
-                  <div class="font-medium">{session.title}</div>
-                  <div class="text-xs text-surface-500 font-mono">{session.unique_code || 'Not live yet'}</div>
+        </div>
+      {:else}
+        <div>
+          <h2 class="text-3xl font-bold mb-1">Today's Events</h2>
+          <p class="text-surface-500 mb-4">Join a live session or explore what's happening</p>
+        </div>
+        <div class="space-y-4">
+          {#each todayEvents as event (event.id)}
+            <div class="card">
+              <div class="flex items-start justify-between gap-4">
+                <div>
+                  <h3 class="text-2xl font-bold mb-1">{event.title}</h3>
+                  <p class="text-sm text-surface-500">
+                    {event.event_date ? new Date(event.event_date).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }) : ''}
+                  </p>
+                  {#if event.description}
+                    <p class="text-surface-400 mt-2">{event.description}</p>
+                  {/if}
                 </div>
-                {#if session.is_live}
-                  <a href={`/session/${session.unique_code}`} class="btn-primary text-sm">Join</a>
+              </div>
+
+              <div class="mt-6">
+                <h4 class="font-semibold mb-3 text-lg">Available Sessions</h4>
+                {#if !event.sessions?.length}
+                  <p class="text-surface-500">No sessions scheduled yet.</p>
                 {:else}
-                  <div class="text-xs text-surface-400">Coming soon</div>
+                  <div class="grid gap-3 md:grid-cols-2">
+                    {#each event.sessions as session (session.id)}
+                      <div class="flex items-center justify-between gap-4 p-4 rounded-lg border">
+                        <div class="flex-1">
+                          <div class="font-semibold">{session.title}</div>
+                          <div class="text-xs text-surface-500 font-mono mt-1">
+                            {session.unique_code || 'Not live yet'}
+                          </div>
+                        </div>
+                        {#if session.is_live}
+                          <a href={`/session/${session.unique_code}`} class="btn-primary text-sm whitespace-nowrap">Join</a>
+                        {:else}
+                          <div class="text-xs text-surface-400 whitespace-nowrap">Coming soon</div>
+                        {/if}
+                      </div>
+                    {/each}
+                  </div>
                 {/if}
               </div>
-            {/each}
-          </div>
-        {/if}
-      </div>
+            </div>
+          {/each}
+        </div>
+      {/if}
     </div>
-
   </main>
 
+
   <!-- Footer -->
-  <footer class="text-center text-surface-600 text-sm py-6 border-t border-surface-800">
-    Rforum &copy; {new Date().getFullYear()}
+  <footer class="flex items-center justify-between px-6 py-8 border-t text-surface-500 text-sm mt-auto">
+    <p class="text-xs">Rforum &copy; {new Date().getFullYear()}</p>
+    <p>Made with <span class="text-danger">❤</span> by Ajith</p>
   </footer>
 
 </div>

@@ -2,7 +2,7 @@
   import { joinSession, listResponses, getPageImageUrl } from '$lib/api';
   import { RforumWebSocket } from '$lib/ws';
   import { onMount, onDestroy } from 'svelte';
-  import { BarChart3, MessageSquare, AlignLeft, FileText, Radio, Cloud } from 'lucide-svelte';
+  import { BarChart3, MessageSquare, AlignLeft, FileText, RadioTower, Cloud } from 'lucide-svelte';
 
   let code = $state('');
   let session: any = $state(null);
@@ -105,7 +105,7 @@
 <div class="min-h-screen flex flex-col bg-surface-950">
   <header class="flex items-center justify-between px-6 py-4 border-b border-surface-800">
     <div class="flex items-center gap-2">
-      <Radio class="w-5 h-5 text-brand-400" />
+      <RadioTower class="w-5 h-5 text-brand-500" />
       <span class="font-bold text-sm">Rforum</span>
     </div>
     <div class="flex items-center gap-4">
@@ -130,7 +130,7 @@
       </div>
     {:else if !activeSlide}
       <div class="text-center text-surface-500 animate-fade-in">
-        <Radio class="w-16 h-16 mx-auto mb-4 text-surface-700 animate-pulse-live" />
+        <RadioTower class="w-16 h-16 mx-auto mb-4 text-brand-400 animate-pulse-live" />
         <p class="text-lg font-medium">Waiting for the presenter...</p>
       </div>
     {:else}
@@ -138,7 +138,7 @@
         {#if activeSlide.type === 'POLL'}
           <div class="card space-y-6">
             <div class="text-center">
-              <BarChart3 class="w-10 h-10 text-brand-400 mx-auto mb-3" />
+              <BarChart3 class="w-10 h-10 text-brand-600 mx-auto mb-3" />
               <h1 class="text-2xl font-bold">{activeSlide.content_json?.question}</h1>
             </div>
             <div class="flex items-end gap-4">
@@ -159,7 +159,7 @@
         {:else if activeSlide.type === 'QNA'}
           <div class="card">
             <div class="text-center mb-6">
-              <MessageSquare class="w-10 h-10 text-brand-400 mx-auto mb-3" />
+              <MessageSquare class="w-10 h-10 text-brand-600 mx-auto mb-3" />
               <h1 class="text-2xl font-bold">{activeSlide.content_json?.prompt}</h1>
             </div>
             <div class="space-y-3 max-h-[60vh] overflow-y-auto">
@@ -174,7 +174,7 @@
         {:else if activeSlide.type === 'FEEDBACK'}
           <div class="card">
             <div class="text-center mb-6">
-              <AlignLeft class="w-10 h-10 text-brand-400 mx-auto mb-3" />
+              <AlignLeft class="w-10 h-10 text-brand-600 mx-auto mb-3" />
               <h1 class="text-2xl font-bold">{activeSlide.content_json?.prompt}</h1>
             </div>
             <div class="space-y-3 max-h-[60vh] overflow-y-auto">
@@ -193,7 +193,7 @@
           </div>
         {:else if activeSlide.type === 'WORD_CLOUD'}
           <div class="card text-center">
-            <Cloud class="w-10 h-10 text-brand-400 mx-auto mb-4" />
+            <Cloud class="w-10 h-10 text-brand-600 mx-auto mb-4" />
             <h1 class="text-2xl font-bold mb-6">{activeSlide.content_json?.prompt}</h1>
             {#if responses.length === 0}
               <p class="text-surface-500">Waiting for responses...</p>
@@ -201,7 +201,7 @@
               <div class="flex flex-wrap items-center justify-center gap-4 min-h-[200px] p-6">
                 {#each getWordCloudData() as item}
                   <span
-                    class="text-brand-400 font-bold transition-all"
+                    class="text-brand-600 font-bold transition-all"
                     style={`font-size: ${item.size}rem; opacity: ${0.5 + (item.count / (responses.length || 1)) * 0.5}`}
                   >{item.word}</span>
                 {/each}
@@ -211,7 +211,7 @@
           </div>
         {:else if activeSlide.type === 'CONTENT'}
           <div class="card text-center">
-            <FileText class="w-10 h-10 text-brand-400 mx-auto mb-4" />
+            <FileText class="w-10 h-10 text-brand-600 mx-auto mb-4" />
             <h1 class="text-2xl font-bold mb-4">{activeSlide.content_json?.title}</h1>
             <p class="text-surface-300 leading-relaxed">{activeSlide.content_json?.body}</p>
             {#if (activeSlide.content_json?.file_url || activeSlide.content_json?.has_file) && session?.id}
