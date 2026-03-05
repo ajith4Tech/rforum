@@ -6,6 +6,15 @@
     <meta name="description" content="Rforum – Real-time audience engagement platform" />
     <title>Rforum</title>
     <link rel="icon" href="%sveltekit.assets%/favicon.png" />
+    <script>
+      (function () {
+        var theme = 'dark';
+        try { theme = localStorage.getItem('rforum_theme') || 'dark'; } catch (e) {}
+        var html = document.documentElement;
+        html.className = theme === 'dark' ? 'dark' : '';
+        html.setAttribute('data-theme', theme);
+      })();
+    </script>
     %sveltekit.head%
   </head>
   <body data-sveltekit-preload-data="hover">

@@ -11,8 +11,11 @@
     deleteEvent,
     setEventSessions
   } from '$lib/api';
-  import { RadioTower, Plus, Trash2, LogOut, ExternalLink, Copy, Eye, EyeOff, Pencil } from 'lucide-svelte';
+  import { RadioTower, Plus, Trash2, LogOut, ExternalLink, Copy, Eye, EyeOff, Pencil, Calendar, LayoutDashboard, CalendarDays, Presentation, BarChart3 } from 'lucide-svelte';
   import { onMount } from 'svelte';
+  import { theme, toggleTheme } from '$lib/theme';
+  import { Moon, Sun } from 'lucide-svelte';
+  import EventCard from '$lib/components/EventCard.svelte';
 
   let sessions: any[] = $state([]);
   let events: any[] = $state([]);
@@ -178,11 +181,6 @@
     }
   }
 
-  function handleLogout() {
-    logout();
-    goto('/');
-  }
-
   function copyCode(code: string) {
     navigator.clipboard.writeText(code);
   }
@@ -217,249 +215,81 @@
   <title>Dashboard – Rforum</title>
 </svelte:head>
 
-<div class="min-h-screen flex flex-col">
-  <!-- Top bar -->
-  <nav class="flex items-center justify-between px-6 py-4 border-b border-surface-800">
-    <a href="/" class="flex items-center gap-2">
-      <RadioTower class="w-6 h-6 text-brand-500" />
-      <span class="text-lg font-bold">Rforum</span>
-    </a>
-    <button on:click={handleLogout} class="btn-secondary text-sm flex items-center gap-2">
-      <LogOut class="w-4 h-4" />
-      Log out
-    </button>
-  </nav>
-
-  <main class="flex-1 max-w-4xl mx-auto w-full px-6 py-10">
+<div>
+  <main class="flex-1 max-w-5xl mx-auto w-full px-8 py-8">
     <div class="flex items-center justify-between mb-8">
       <div>
-        <h1 class="text-2xl font-bold">Current Events</h1>
-        <p class="text-sm text-surface-500">Today’s schedule and live sessions</p>
+        <h1 class="text-2xl font-bold text-slate-900 dark:text-white">Current Events</h1>
+        <p class="text-sm text-slate-500 dark:text-slate-400 mt-1">Today's schedule and live sessions</p>
       </div>
-      <button class="btn-primary text-sm" on:click={() => showCreateEvent = true}>Create Event</button>
+      <button class="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-medium px-4 py-2 rounded-lg shadow-lg shadow-purple-500/20 transition active:scale-95 text-sm" on:click={() => showCreateEvent = true}>Create Event</button>
     </div>
 
     {#if loading}
-      <div class="text-center text-surface-500 py-6">Loading events...</div>
+      <div class="text-center text-slate-400 py-6">Loading events...</div>
     {:else if getTodayEvents().length === 0}
-      <div class="card text-center text-surface-500 py-8 mb-10">
-        <p class="text-lg mb-2">No event scheduled for today</p>
-        <p class="text-sm">Create one to start planning sessions.</p>
+      <div class="flex flex-col items-center justify-center text-center gap-4 py-16 mb-10">
+        <div class="w-14 h-14 flex items-center justify-center rounded-2xl bg-purple-500/10">
+          <Calendar class="w-7 h-7 text-purple-500" />
+        </div>
+        <div>
+          <h3 class="text-lg font-semibold text-slate-900 dark:text-white">No events scheduled today</h3>
+          <p class="text-sm text-slate-400 mt-1">Create an event to start engaging your audience</p>
+        </div>
+        <button class="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-medium px-4 py-2 rounded-lg shadow-lg shadow-purple-500/20 transition active:scale-95 text-sm" on:click={() => showCreateEvent = true}>Create Event</button>
       </div>
     {:else}
-      <div class="space-y-3 mb-10">
+      <div class="space-y-4 mb-10">
         {#each getTodayEvents() as event (event.id)}
-          <div class="card grid gap-4">
-            <div class="flex items-start justify-between gap-4">
-              <div class="flex-1">
-                <div class="flex items-center gap-2 mb-1">
-                  <h3 class="text-lg font-semibold">{event.title}</h3>
-                  {#if event.is_published}
-                    <span class="text-xs px-2 py-0.5 rounded-full bg-success/20 text-success font-medium">
-                      Published
-                    </span>
-                  {:else}
-                    <span class="text-xs px-2 py-0.5 rounded-full bg-surface-700 text-surface-400 font-medium">
-                      Draft
-                    </span>
-                  {/if}
-                </div>
-                <p class="text-sm text-surface-500">
-                  {new Date(event.event_date).toLocaleDateString()}
-                </p>
-                {#if event.description}
-                  <p class="text-sm text-surface-400 mt-1">{event.description}</p>
-                {/if}
-              </div>
-              <div class="flex items-center gap-2">
-                <button
-                  on:click={() => startEditEvent(event)}
-                  class="btn-secondary text-sm p-2.5"
-                  title="Edit"
-                >
-                  <Pencil class="w-4 h-4" />
-                </button>
-                <button
-                  on:click={() => handleTogglePublish(event.id, event.is_published)}
-                  class="btn-secondary text-sm p-2.5"
-                  title={event.is_published ? 'Unpublish' : 'Publish'}
-                >
-                  {#if event.is_published}
-                    <EyeOff class="w-4 h-4" />
-                  {:else}
-                    <Eye class="w-4 h-4" />
-                  {/if}
-                </button>
-                <button on:click={() => handleDeleteEvent(event.id)} class="btn-danger text-sm p-2.5">
-                  <Trash2 class="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-
-            <div class="grid gap-3">
-              <div class="text-sm text-surface-500">Sessions</div>
-              {#if getSelectedSessions(event.id).length === 0}
-                <p class="text-sm text-surface-500">No sessions assigned yet.</p>
-              {:else}
-                <div class="space-y-2">
-                  {#each getSelectedSessions(event.id) as session (session.id)}
-                    <div class="flex items-center justify-between gap-3 p-3 rounded-lg border border-surface-800">
-                      <div class="min-w-0">
-                        <div class="font-medium truncate">{session.title}</div>
-                        <div class="text-xs text-surface-500 font-mono">{session.unique_code}</div>
-                      </div>
-                      <button
-                        class="btn-secondary text-xs"
-                        on:click={() => handleRemoveSession(event.id, session.id)}
-                        disabled={savingEventId === event.id}
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  {/each}
-                </div>
-              {/if}
-              <div class="flex items-center gap-2">
-                <select
-                  class="input-field flex-1"
-                  value={addSessionSelections[event.id] || ''}
-                  on:change={(e) => addSessionSelections = {
-                    ...addSessionSelections,
-                    [event.id]: (e.currentTarget as HTMLSelectElement).value
-                  }}
-                >
-                  <option value="" disabled>Select session to add</option>
-                  {#each getAvailableSessions(event.id) as session (session.id)}
-                    <option value={session.id}>{session.title} ({session.unique_code})</option>
-                  {/each}
-                </select>
-                <button
-                  class="btn-secondary text-sm"
-                  on:click={() => handleAddSession(event.id)}
-                  disabled={savingEventId === event.id || !addSessionSelections[event.id]}
-                >
-                  {savingEventId === event.id ? 'Saving...' : 'Add'}
-                </button>
-              </div>
-            </div>
-          </div>
+          <EventCard
+            {event}
+            sessions={getSelectedSessions(event.id)}
+            availableSessions={getAvailableSessions(event.id)}
+            saving={savingEventId === event.id}
+            addSessionSelection={addSessionSelections[event.id] || ''}
+            onEdit={startEditEvent}
+            onTogglePublish={handleTogglePublish}
+            onDelete={handleDeleteEvent}
+            onAddSession={handleAddSession}
+            onRemoveSession={handleRemoveSession}
+            onAddSessionSelectionChange={(eid, val) => addSessionSelections = { ...addSessionSelections, [eid]: val }}
+          />
         {/each}
       </div>
     {/if}
 
     <div class="flex items-center justify-between mb-6">
-      <h2 class="text-xl font-bold">Other Events</h2>
+      <h2 class="text-xl font-bold text-slate-900 dark:text-white">Other Events</h2>
     </div>
 
     {#if !loading && getOtherEvents().length === 0}
-      <div class="text-center text-surface-500 py-6 mb-10">No other events yet.</div>
+      <div class="text-center text-slate-400 py-6 mb-10">No other events yet.</div>
     {:else if !loading}
-      <div class="space-y-3 mb-12">
+      <div class="space-y-4 mb-12">
         {#each getOtherEvents() as event (event.id)}
-          <div class="card grid gap-3 animate-fade-in">
-            <div class="flex items-start justify-between gap-4">
-              <div class="flex-1">
-                <div class="flex items-center gap-2 mb-1">
-                  <h3 class="font-semibold">{event.title}</h3>
-                  {#if event.is_published}
-                    <span class="text-xs px-2 py-0.5 rounded-full bg-success/20 text-success font-medium">
-                      Published
-                    </span>
-                  {:else}
-                    <span class="text-xs px-2 py-0.5 rounded-full bg-surface-700 text-surface-400 font-medium">
-                      Draft
-                    </span>
-                  {/if}
-                </div>
-                <p class="text-sm text-surface-500">
-                  {new Date(event.event_date).toLocaleDateString()}
-                </p>
-                {#if event.description}
-                  <p class="text-sm text-surface-400 mt-1">{event.description}</p>
-                {/if}
-              </div>
-              <div class="flex items-center gap-2">
-                <button
-                  on:click={() => startEditEvent(event)}
-                  class="btn-secondary text-sm p-2.5"
-                  title="Edit"
-                >
-                  <Pencil class="w-4 h-4" />
-                </button>
-                <button
-                  on:click={() => handleTogglePublish(event.id, event.is_published)}
-                  class="btn-secondary text-sm p-2.5"
-                  title={event.is_published ? 'Unpublish' : 'Publish'}
-                >
-                  {#if event.is_published}
-                    <EyeOff class="w-4 h-4" />
-                  {:else}
-                    <Eye class="w-4 h-4" />
-                  {/if}
-                </button>
-                <button on:click={() => handleDeleteEvent(event.id)} class="btn-danger text-sm p-2.5">
-                  <Trash2 class="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-
-            <div class="grid gap-3">
-              <div class="text-sm text-surface-500">Sessions</div>
-              {#if getSelectedSessions(event.id).length === 0}
-                <p class="text-sm text-surface-500">No sessions assigned yet.</p>
-              {:else}
-                <div class="space-y-2">
-                  {#each getSelectedSessions(event.id) as session (session.id)}
-                    <div class="flex items-center justify-between gap-3 p-3 rounded-lg border border-surface-800">
-                      <div class="min-w-0">
-                        <div class="font-medium truncate">{session.title}</div>
-                        <div class="text-xs text-surface-500 font-mono">{session.unique_code}</div>
-                      </div>
-                      <button
-                        class="btn-secondary text-xs"
-                        on:click={() => handleRemoveSession(event.id, session.id)}
-                        disabled={savingEventId === event.id}
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  {/each}
-                </div>
-              {/if}
-              <div class="flex items-center gap-2">
-                <select
-                  class="input-field flex-1"
-                  value={addSessionSelections[event.id] || ''}
-                  on:change={(e) => addSessionSelections = {
-                    ...addSessionSelections,
-                    [event.id]: (e.currentTarget as HTMLSelectElement).value
-                  }}
-                >
-                  <option value="" disabled>Select session to add</option>
-                  {#each getAvailableSessions(event.id) as session (session.id)}
-                    <option value={session.id}>{session.title} ({session.unique_code})</option>
-                  {/each}
-                </select>
-                <button
-                  class="btn-secondary text-sm"
-                  on:click={() => handleAddSession(event.id)}
-                  disabled={savingEventId === event.id || !addSessionSelections[event.id]}
-                >
-                  {savingEventId === event.id ? 'Saving...' : 'Add'}
-                </button>
-              </div>
-            </div>
-          </div>
+          <EventCard
+            {event}
+            sessions={getSelectedSessions(event.id)}
+            availableSessions={getAvailableSessions(event.id)}
+            saving={savingEventId === event.id}
+            addSessionSelection={addSessionSelections[event.id] || ''}
+            onEdit={startEditEvent}
+            onTogglePublish={handleTogglePublish}
+            onDelete={handleDeleteEvent}
+            onAddSession={handleAddSession}
+            onRemoveSession={handleRemoveSession}
+            onAddSessionSelectionChange={(eid, val) => addSessionSelections = { ...addSessionSelections, [eid]: val }}
+          />
         {/each}
       </div>
     {/if}
 
     <div class="flex items-center justify-between mb-8">
-      <h1 class="text-2xl font-bold">Your Sessions</h1>
+      <h1 class="text-2xl font-bold text-slate-900 dark:text-white">Your Sessions</h1>
     </div>
 
     <!-- Create new session -->
-    <form on:submit|preventDefault={handleCreate} class="card flex gap-3 mb-8">
+    <form on:submit|preventDefault={handleCreate} class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm p-6 flex gap-3 mb-8">
       <select
         class="input-field w-52"
         bind:value={newSessionEventId}
@@ -479,7 +309,7 @@
       />
       <button
         type="submit"
-        class="btn-primary flex items-center gap-2 whitespace-nowrap"
+        class="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-medium px-4 py-2 rounded-lg shadow-lg shadow-purple-500/20 transition active:scale-95 flex items-center gap-2 whitespace-nowrap text-sm"
         disabled={creating || !newSessionEventId}
       >
         <Plus class="w-4 h-4" />
@@ -489,19 +319,24 @@
 
     <!-- Sessions list -->
     {#if loading}
-      <div class="text-center text-surface-500 py-20">Loading...</div>
+      <div class="text-center text-slate-400 py-20">Loading...</div>
     {:else if sessions.length === 0}
-      <div class="text-center text-surface-500 py-20">
-        <p class="text-lg mb-2">No sessions yet</p>
-        <p class="text-sm">Create your first session to get started</p>
+      <div class="flex flex-col items-center justify-center text-center gap-4 py-16">
+        <div class="w-14 h-14 flex items-center justify-center rounded-2xl bg-cyan-500/10">
+          <Presentation class="w-7 h-7 text-cyan-500" />
+        </div>
+        <div>
+          <h3 class="text-lg font-semibold text-slate-900 dark:text-white">No sessions yet</h3>
+          <p class="text-sm text-slate-400 mt-1">Create your first session to get started</p>
+        </div>
       </div>
     {:else}
       <div class="space-y-3">
         {#each sessions as session (session.id)}
-          <div class="card flex items-center justify-between gap-4 animate-fade-in">
+          <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm hover:shadow-md transition-all duration-200 hover:scale-[1.01] p-6 flex items-center justify-between gap-4">
             <div class="flex-1 min-w-0">
               <div class="flex items-center gap-3 mb-1">
-                <h3 class="font-semibold truncate">{session.title}</h3>
+                <h3 class="text-lg font-semibold text-slate-900 dark:text-white truncate">{session.title}</h3>
                 {#if session.is_live}
                   <span class="badge-live">
                     <span class="w-1.5 h-1.5 bg-live rounded-full animate-pulse-live"></span>
@@ -509,26 +344,26 @@
                   </span>
                 {/if}
               </div>
-              <div class="flex items-center gap-3 text-sm text-surface-500">
+              <div class="flex items-center gap-3 text-sm text-slate-500 dark:text-slate-400">
                 <button
                   on:click={() => copyCode(session.unique_code)}
-                  class="flex items-center gap-1 font-mono hover:text-surface-300 transition-colors"
+                  class="flex items-center gap-1 font-mono hover:text-slate-700 dark:hover:text-slate-300 transition-colors"
                 >
                   <Copy class="w-3 h-3" />
                   {session.unique_code}
                 </button>
-                <span>·</span>
-                <span>{new Date(session.created_at).toLocaleDateString()}</span>
+                <span>&middot;</span>
+                <span class="text-xs text-slate-500">{new Date(session.created_at).toLocaleDateString()}</span>
               </div>
             </div>
 
             <div class="flex items-center gap-2">
-              <a href="/dashboard/{session.id}" class="btn-secondary text-sm flex items-center gap-1.5">
+              <a href="/dashboard/{session.id}" class="border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 px-4 py-2 rounded-lg text-sm font-medium text-slate-600 dark:text-slate-300 transition active:scale-95 flex items-center gap-1.5">
                 <ExternalLink class="w-3.5 h-3.5" />
                 Manage
               </a>
-              <button on:click={() => handleDelete(session.id)} class="btn-danger text-sm p-2.5">
-                <Trash2 class="w-4 h-4" />
+              <button on:click={() => handleDelete(session.id)} class="border border-red-200 dark:border-red-900/50 hover:bg-red-50 dark:hover:bg-red-900/20 p-2.5 rounded-lg transition active:scale-95">
+                <Trash2 class="w-4 h-4 text-red-400" />
               </button>
             </div>
           </div>
@@ -539,36 +374,20 @@
 
   {#if showCreateEvent}
     <div class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center px-4 z-50">
-      <div class="card w-full max-w-lg">
+      <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xl w-full max-w-lg p-6">
         <div class="flex items-center justify-between mb-4">
-          <h2 class="text-lg font-semibold">Create Event</h2>
-          <button class="btn-secondary text-sm" on:click={() => showCreateEvent = false}>Close</button>
+          <h2 class="text-lg font-semibold text-slate-900 dark:text-white">Create Event</h2>
+          <button class="border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 px-3 py-1.5 rounded-lg text-sm transition" on:click={() => showCreateEvent = false}>Close</button>
         </div>
         <form on:submit|preventDefault={handleCreateEvent} class="grid gap-3">
           <div class="grid gap-3 md:grid-cols-2">
-            <input
-              type="text"
-              bind:value={newEventTitle}
-              placeholder="Event title..."
-              class="input-field"
-            />
-            <input
-              type="date"
-              bind:value={newEventDate}
-              class="input-field"
-            />
+            <input type="text" bind:value={newEventTitle} placeholder="Event title..." class="input-field" />
+            <input type="date" bind:value={newEventDate} class="input-field" />
           </div>
-          <textarea
-            rows="2"
-            bind:value={newEventDescription}
-            placeholder="Description (optional)"
-            class="input-field"
-          ></textarea>
+          <textarea rows="2" bind:value={newEventDescription} placeholder="Description (optional)" class="input-field"></textarea>
           <div class="flex justify-end gap-2">
-            <button type="button" class="btn-secondary" on:click={() => showCreateEvent = false}>
-              Cancel
-            </button>
-            <button type="submit" class="btn-primary" disabled={creatingEvent}>
+            <button type="button" class="border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 px-4 py-2 rounded-lg text-sm transition" on:click={() => showCreateEvent = false}>Cancel</button>
+            <button type="submit" class="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-medium px-4 py-2 rounded-lg shadow-lg shadow-purple-500/20 transition active:scale-95 text-sm" disabled={creatingEvent}>
               {creatingEvent ? 'Creating...' : 'Create Event'}
             </button>
           </div>
@@ -579,36 +398,20 @@
 
   {#if showEditEvent}
     <div class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center px-4 z-50">
-      <div class="card w-full max-w-lg">
+      <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xl w-full max-w-lg p-6">
         <div class="flex items-center justify-between mb-4">
-          <h2 class="text-lg font-semibold">Edit Event</h2>
-          <button class="btn-secondary text-sm" on:click={() => showEditEvent = false}>Close</button>
+          <h2 class="text-lg font-semibold text-slate-900 dark:text-white">Edit Event</h2>
+          <button class="border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 px-3 py-1.5 rounded-lg text-sm transition" on:click={() => showEditEvent = false}>Close</button>
         </div>
         <form on:submit|preventDefault={handleUpdateEvent} class="grid gap-3">
           <div class="grid gap-3 md:grid-cols-2">
-            <input
-              type="text"
-              bind:value={editEventTitle}
-              placeholder="Event title..."
-              class="input-field"
-            />
-            <input
-              type="date"
-              bind:value={editEventDate}
-              class="input-field"
-            />
+            <input type="text" bind:value={editEventTitle} placeholder="Event title..." class="input-field" />
+            <input type="date" bind:value={editEventDate} class="input-field" />
           </div>
-          <textarea
-            rows="2"
-            bind:value={editEventDescription}
-            placeholder="Description (optional)"
-            class="input-field"
-          ></textarea>
+          <textarea rows="2" bind:value={editEventDescription} placeholder="Description (optional)" class="input-field"></textarea>
           <div class="flex justify-end gap-2">
-            <button type="button" class="btn-secondary" on:click={() => showEditEvent = false}>
-              Cancel
-            </button>
-            <button type="submit" class="btn-primary" disabled={savingEditEvent}>
+            <button type="button" class="border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 px-4 py-2 rounded-lg text-sm transition" on:click={() => showEditEvent = false}>Cancel</button>
+            <button type="submit" class="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-medium px-4 py-2 rounded-lg shadow-lg shadow-purple-500/20 transition active:scale-95 text-sm" disabled={savingEditEvent}>
               {savingEditEvent ? 'Saving...' : 'Save Changes'}
             </button>
           </div>

@@ -8,7 +8,7 @@ from redis.asyncio import Redis
 
 from app.config import get_settings
 from app.database import engine
-from app.routers import auth, responses, sessions, slides, ws, polls, qna, feedback, events
+from app.routers import auth, responses, sessions, slides, ws, polls, qna, feedback, events, analytics
 
 # Ensure the 'rforum' directory is in PYTHONPATH
 sys.path.append(str(Path(__file__).resolve().parent.parent))
@@ -49,6 +49,7 @@ app.include_router(sessions.router)
 app.include_router(slides.router)
 app.include_router(responses.router)
 app.include_router(events.router)
+app.include_router(analytics.router)
 app.include_router(ws.router)
 app.include_router(polls.router)
 app.include_router(qna.router)
