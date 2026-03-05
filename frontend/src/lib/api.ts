@@ -222,6 +222,11 @@ export async function upvoteResponse(slideId: string, responseId: string) {
   });
 }
 
+// ── Analytics ─────────────────────────────────────────
+export async function getAnalytics() {
+  return fetchJson('/analytics', { method: 'GET' }, true);
+}
+
 // ── Utilities ─────────────────────────────────────────
 export function resolveFileUrl(fileUrl?: string | null) {
   if (!fileUrl) return '';

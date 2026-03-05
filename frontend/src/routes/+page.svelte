@@ -2,8 +2,10 @@
   import { goto } from '$app/navigation';
   import { listPublicEvents } from '$lib/api';
   import { theme, toggleTheme } from '$lib/theme';
-  import { RadioTower, Moon, Sun, Zap, Users, BarChart3, MessageSquare } from 'lucide-svelte';
+  import { RadioTower, Moon, Sun, Zap, Users, BarChart3, MessageSquare, Calendar } from 'lucide-svelte';
   import { onMount } from 'svelte';
+  import FeatureCard from '$lib/components/FeatureCard.svelte';
+  import Nav from '$lib/components/Nav.svelte';
 
   let todayEvents: any[] = $state([]);
   let eventError = $state('');
@@ -31,131 +33,84 @@
   <title>Rforum</title>
 </svelte:head>
 
-<div class="min-h-screen flex flex-col">
+<div class="min-h-screen flex flex-col bg-slate-50 dark:bg-slate-950">
 
   <!-- Nav -->
-  <nav class="flex items-center justify-between px-6 py-4 border-b">
-    <div class="flex items-center gap-2">
-      <RadioTower class="w-7 h-7 text-brand-500" />
-      <span class="text-xl font-bold tracking-tight">Rforum</span>
-    </div>
-    <div class="flex items-center gap-3">
-      <button
-        on:click={toggleTheme}
-        class="btn-secondary p-2.5"
-        title="Toggle theme"
-      >
-        {#if $theme === 'dark'}
-          <Sun class="w-5 h-5" />
-        {:else}
-          <Moon class="w-5 h-5" />
-        {/if}
-      </button>
-      <a href="/login" class="btn-secondary text-sm">Log in</a>
-      <a href="/login?mode=register" class="btn-primary text-sm">Sign up</a>
-    </div>
-  </nav>
+  <Nav />
 
   <!-- Main -->
-  <main class="flex-1 flex flex-col px-6 py-16">
+  <main class="flex-1 flex flex-col px-8 py-16">
     <div class="mx-auto w-full max-w-4xl space-y-12">
       <!-- Hero Section -->
-      <div class="text-center space-y-2">
-        <h1 class="text-5xl font-bold">Rforum</h1>
-        <p class="text-xl text-surface-500">Real-time engagement for live events and presentations</p>
+      <div class="text-center space-y-3">
+        <h1 class="text-5xl font-bold text-slate-900 dark:text-white">Rforum</h1>
+        <p class="text-xl text-slate-500 dark:text-slate-400">Real-time engagement for live events and presentations</p>
       </div>
 
       <!-- Features Grid -->
       <div class="grid md:grid-cols-2 gap-4">
-        <div class="card">
-          <div class="flex items-start gap-3">
-            <Zap class="w-6 h-6 text-amber-400 flex-shrink-0 mt-1" />
-            <div>
-              <h3 class="font-semibold mb-1">Live Interaction</h3>
-              <p class="text-sm text-surface-500">Engage your audience in real-time with instant polls, Q&A sessions, and feedback collection.</p>
-            </div>
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="flex items-start gap-3">
-            <Users class="w-6 h-6 text-cyan-400 flex-shrink-0 mt-1" />
-            <div>
-              <h3 class="font-semibold mb-1">Audience Participation</h3>
-              <p class="text-sm text-surface-500">Simple join codes make it easy for participants to join sessions from any device.</p>
-            </div>
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="flex items-start gap-3">
-            <BarChart3 class="w-6 h-6 text-emerald-400 flex-shrink-0 mt-1" />
-            <div>
-              <h3 class="font-semibold mb-1">Real-time Analytics</h3>
-              <p class="text-sm text-surface-500">View live poll results, word clouds, and feedback insights as they happen.</p>
-            </div>
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="flex items-start gap-3">
-            <MessageSquare class="w-6 h-6 text-rose-400 flex-shrink-0 mt-1" />
-            <div>
-              <h3 class="font-semibold mb-1">Multiple Formats</h3>
-              <p class="text-sm text-surface-500">Polls, Q&A, feedback forms, word clouds, and content slides all in one platform.</p>
-            </div>
-          </div>
-        </div>
+        <FeatureCard icon={Zap} title="Live Interaction" description="Engage your audience in real-time with instant polls, Q&A sessions, and feedback collection." color="amber" />
+        <FeatureCard icon={Users} title="Audience Participation" description="Simple join codes make it easy for participants to join sessions from any device." color="cyan" />
+        <FeatureCard icon={BarChart3} title="Real-time Analytics" description="View live poll results, word clouds, and feedback insights as they happen." color="emerald" />
+        <FeatureCard icon={MessageSquare} title="Multiple Formats" description="Polls, Q&A, feedback forms, word clouds, and content slides all in one platform." color="rose" />
       </div>
 
       <!-- Today's Events Section -->
       {#if loadingEvent}
-        <div class="card">
-          <p class="text-surface-500">Loading events...</p>
+        <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm p-6">
+          <p class="text-slate-400">Loading events...</p>
         </div>
       {:else if eventError && todayEvents.length === 0}
-        <div>
-          <h2 class="text-3xl font-bold mb-2">Today's Events</h2>
-          <p class="text-surface-500">{eventError}</p>
+        <div class="space-y-4">
+          <h2 class="text-3xl font-bold text-slate-900 dark:text-white">Today's Events</h2>
+          <div class="flex flex-col items-center justify-center text-center gap-4 py-16">
+            <div class="w-14 h-14 flex items-center justify-center rounded-2xl bg-purple-500/10">
+              <Calendar class="w-7 h-7 text-purple-500" />
+            </div>
+            <div>
+              <h3 class="text-lg font-semibold text-slate-900 dark:text-white">No events scheduled today</h3>
+              <p class="text-sm text-slate-400 mt-1">Create an event to start engaging your audience</p>
+            </div>
+          </div>
         </div>
       {:else}
         <div>
-          <h2 class="text-3xl font-bold mb-1">Today's Events</h2>
-          <p class="text-surface-500 mb-4">Join a live session or explore what's happening</p>
+          <h2 class="text-3xl font-bold text-slate-900 dark:text-white mb-1">Today's Events</h2>
+          <p class="text-slate-500 dark:text-slate-400 mb-4">Join a live session or explore what's happening</p>
         </div>
         <div class="space-y-4">
           {#each todayEvents as event (event.id)}
-            <div class="card">
+            <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm hover:shadow-md transition-all duration-200 hover:scale-[1.01] p-6">
               <div class="flex items-start justify-between gap-4">
                 <div>
-                  <h3 class="text-2xl font-bold mb-1">{event.title}</h3>
-                  <p class="text-sm text-surface-500">
+                  <h3 class="text-2xl font-bold text-slate-900 dark:text-white mb-1">{event.title}</h3>
+                  <p class="text-xs text-slate-500">
                     {event.event_date ? new Date(event.event_date).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }) : ''}
                   </p>
                   {#if event.description}
-                    <p class="text-surface-400 mt-2">{event.description}</p>
+                    <p class="text-sm text-slate-400 mt-2">{event.description}</p>
                   {/if}
                 </div>
               </div>
 
-              <div class="mt-6">
-                <h4 class="font-semibold mb-3 text-lg">Available Sessions</h4>
+              <div class="mt-6 space-y-3">
+                <h4 class="text-base font-semibold text-slate-700 dark:text-slate-300">Available Sessions</h4>
                 {#if !event.sessions?.length}
-                  <p class="text-surface-500">No sessions scheduled yet.</p>
+                  <p class="text-sm text-slate-400">No sessions scheduled yet.</p>
                 {:else}
                   <div class="grid gap-3 md:grid-cols-2">
                     {#each event.sessions as session (session.id)}
-                      <div class="flex items-center justify-between gap-4 p-4 rounded-lg border">
+                      <div class="flex items-center justify-between gap-4 p-3 rounded-lg bg-slate-100 dark:bg-slate-800/40 hover:bg-slate-200 dark:hover:bg-slate-700/40 transition">
                         <div class="flex-1">
-                          <div class="font-semibold">{session.title}</div>
-                          <div class="text-xs text-surface-500 font-mono mt-1">
+                          <div class="text-sm font-medium text-slate-900 dark:text-white">{session.title}</div>
+                          <div class="text-xs text-slate-400 font-mono mt-1">
                             {session.unique_code || 'Not live yet'}
                           </div>
                         </div>
                         {#if session.is_live}
-                          <a href={`/session/${session.unique_code}`} class="btn-primary text-sm whitespace-nowrap">Join</a>
+                          <a href={`/session/${session.unique_code}`} class="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-medium px-3 py-1.5 rounded-lg shadow-lg shadow-purple-500/20 transition active:scale-95 text-sm whitespace-nowrap">Join</a>
                         {:else}
-                          <div class="text-xs text-surface-400 whitespace-nowrap">Coming soon</div>
+                          <div class="text-xs text-slate-500 whitespace-nowrap">Coming soon</div>
                         {/if}
                       </div>
                     {/each}
@@ -169,11 +124,10 @@
     </div>
   </main>
 
-
   <!-- Footer -->
-  <footer class="flex items-center justify-between px-6 py-8 border-t text-surface-500 text-sm mt-auto">
+  <footer class="flex items-center justify-between px-8 py-8 border-t border-slate-200 dark:border-slate-800 text-slate-500 text-sm mt-auto">
     <p class="text-xs">Rforum &copy; {new Date().getFullYear()}</p>
-    <p>Made with <span class="text-danger">❤</span> by Ajith</p>
+    <p>Made with <span class="text-red-500">❤</span> by Ajith</p>
   </footer>
 
 </div>

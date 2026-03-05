@@ -3,6 +3,7 @@
     getSession, updateSession, createSlide, updateSlide, deleteSlide, listResponses, resolveFileUrl, getPageImageUrl
   } from '$lib/api';
   import { RforumWebSocket } from '$lib/ws';
+  import type { ConnectionStatus as WsStatus } from '$lib/ws';
   import { onMount, onDestroy } from 'svelte';
   import {
     BarChart3,
@@ -12,6 +13,7 @@
     Pencil,
     Cloud
   } from 'lucide-svelte';
+  import Sidebar from '$lib/components/Sidebar.svelte';
 
   let sessionId = $state('');
 
@@ -20,6 +22,7 @@
   let activeSlideId: string | null = $state(null);
   let slideResponses: any[] = $state([]);
   let ws: RforumWebSocket | null = $state(null);
+  let wsStatus: WsStatus = $state('disconnected');
   let loading = $state(true);
   let errorMessage = $state('');
   let slideTitle = $state('');
@@ -97,6 +100,7 @@
 
       // Connect WebSocket
       ws = new RforumWebSocket(session.unique_code);
+      ws.onStatusChange((s) => { wsStatus = s; });
       ws.connect();
       ws.onMessage(handleWsMessage);
       console.log('WebSocket connected');
@@ -133,13 +137,22 @@
   }
 
   async function addSlide(type: string) {
-    const slide = await createSlide(sessionId, {
-      type,
-      order: slides.length,
-      content_json: getDefaultContent(type)
-    });
-    slides = [...slides, slide];
-    await activateSlide(slide.id);
+    // Optimistic: add a temporary slide immediately
+    const tempId = `temp-${Date.now()}`;
+    const tempSlide = { id: tempId, type, order: slides.length, content_json: getDefaultContent(type), is_active: false, _temp: true };
+    slides = [...slides, tempSlide];
+    try {
+      const slide = await createSlide(sessionId, {
+        type,
+        order: tempSlide.order,
+        content_json: tempSlide.content_json
+      });
+      slides = slides.map((s) => s.id === tempId ? slide : s);
+      await activateSlide(slide.id);
+    } catch {
+      // Revert on failure
+      slides = slides.filter((s) => s.id !== tempId);
+    }
   }
 
   function getDefaultContent(type: string): object {
@@ -177,11 +190,19 @@
 
   async function removeSlide(slideId: string) {
     if (!confirm('Delete this slide?')) return;
-    await deleteSlide(sessionId, slideId);
+    // Optimistic removal
+    const removedSlide = slides.find((s) => s.id === slideId);
+    const removedIndex = slides.indexOf(removedSlide);
     slides = slides.filter((s) => s.id !== slideId);
     if (activeSlideId === slideId) {
       activeSlideId = null;
       slideResponses = [];
+    }
+    try {
+      await deleteSlide(sessionId, slideId);
+    } catch {
+      // Revert on failure
+      slides = [...slides.slice(0, removedIndex), removedSlide, ...slides.slice(removedIndex)];
     }
   }
 
@@ -426,77 +447,46 @@
   <title>Manage Session – Rforum</title>
 </svelte:head>
 
-<div class="min-h-screen flex flex-col">
-  <header class="flex items-center justify-between px-6 py-4 border-b border-surface-800">
-    <button onclick={() => { window.location.href = '/dashboard'; }} class="btn-secondary text-sm">Back to dashboard</button>
+<div>
+  <!-- Sub-header with session actions -->
+  <div class="flex items-center justify-between px-8 py-3 border-b border-slate-200 dark:border-slate-800 bg-white/60 dark:bg-slate-900/60 backdrop-blur-sm">
+    <button onclick={() => { window.location.href = '/dashboard'; }} class="text-sm font-medium text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition">&larr; Back to dashboard</button>
     <div class="flex items-center gap-3">
       {#if session?.unique_code}
-        <a class="btn-secondary text-sm" href={`/screen/${session.unique_code}`} target="_blank" rel="noreferrer">Open screen</a>
+        <a class="border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 px-3 py-1.5 rounded-lg text-sm font-medium text-slate-600 dark:text-slate-300 transition" href={`/screen/${session.unique_code}`} target="_blank" rel="noreferrer">Open screen</a>
       {/if}
-      <div class="text-sm text-surface-400 font-mono">{session?.unique_code}</div>
+      <span class="text-sm text-slate-400 font-mono">{session?.unique_code}</span>
     </div>
-  </header>
+  </div>
 
   <main class="flex-1 px-6 py-8">
     {#if loading}
-      <div class="text-center text-surface-500 py-20">Loading...</div>
+      <div class="text-center text-slate-400 py-20">Loading...</div>
     {:else if errorMessage}
-      <div class="card text-center text-danger py-10">{errorMessage}</div>
+      <div class="rounded-2xl border border-red-200 dark:border-red-900/50 bg-white dark:bg-slate-900 text-center text-red-500 py-10 px-6">{errorMessage}</div>
     {:else}
       <div class="grid grid-cols-12 gap-6">
-        <aside class="col-span-12 lg:col-span-3 space-y-4">
-          <div class="card">
-            <div class="text-lg font-semibold">{session?.title}</div>
-            <div class="text-xs text-surface-500 mt-1">{session?.unique_code}</div>
-            <button onclick={toggleLive} class={session?.is_live ? 'btn-danger w-full mt-4' : 'btn-primary w-full mt-4'}>
-              {session?.is_live ? 'Stop session' : 'Start session'}
-            </button>
-          </div>
-
-          <div class="card">
-            <div class="text-sm font-semibold mb-3">Add slide</div>
-            <div class="grid grid-cols-2 gap-2">
-              {#each Object.keys(slideLabels) as key}
-                <button onclick={() => addSlide(key)} class="btn-secondary text-xs">
-                  {slideLabels[key]}
-                </button>
-              {/each}
-            </div>
-          </div>
-
-          <div class="card">
-            <div class="text-sm font-semibold mb-3">Slides</div>
-            {#if slides.length === 0}
-              <div class="text-xs text-surface-500">No slides yet.</div>
-            {:else}
-              <div class="space-y-2">
-                {#each slides as slide (slide.id)}
-                  {@const Icon = slideIcons[getSlideTypeKey(slide)]}
-                  <div class={`flex items-center justify-between gap-2 p-2 rounded-lg border ${slide.id === activeSlideId ? 'border-brand-500/60 bg-surface-900' : 'border-surface-800'}`}>
-                    <button class="flex items-center gap-2 text-left flex-1" onclick={() => activateSlide(slide.id)}>
-                      {#if Icon}
-                        <Icon class="w-4 h-4 text-brand-600" />
-                      {/if}
-                      <span class="text-xs">{slideLabels[getSlideTypeKey(slide)] || getSlideTypeKey(slide) || 'Slide'}</span>
-                    </button>
-                    <button onclick={() => startEditing(slide.id)} class="text-xs text-surface-400">
-                      <Pencil class="w-3.5 h-3.5" />
-                    </button>
-                    <button onclick={() => removeSlide(slide.id)} class="text-danger text-xs">Delete</button>
-                  </div>
-                {/each}
-              </div>
-            {/if}
-          </div>
-        </aside>
+        <Sidebar
+          {session}
+          {slides}
+          {activeSlideId}
+          {slideIcons}
+          {slideLabels}
+          {wsStatus}
+          onToggleLive={toggleLive}
+          onAddSlide={addSlide}
+          onActivateSlide={activateSlide}
+          onStartEditing={startEditing}
+          onRemoveSlide={removeSlide}
+        />
 
         <section class="col-span-12 lg:col-span-9">
           {#if !activeSlide}
-            <div class="card text-center text-surface-500 py-20">Select a slide to get started.</div>
+            <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-center text-slate-400 py-20">Select a slide to get started.</div>
           {:else}
             {#if activeType === 'POLL'}
-              <div class="card space-y-4">
-                <div class="text-lg font-semibold">Poll</div>
+              <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 space-y-4">
+                <div class="text-lg font-semibold text-slate-900 dark:text-white">Poll</div>
                 {#if editingSlideId === activeSlideId}
                   <input class="input-field" type="text" bind:value={pollQuestion} placeholder="Poll question" />
                   <div class="space-y-2">
@@ -509,151 +499,151 @@
                           oninput={(event) => updatePollOption(index, event.currentTarget.value)}
                           placeholder={`Option ${index + 1}`}
                         />
-                        <button onclick={() => removePollOption(index)} class="btn-danger text-xs">Remove</button>
+                        <button onclick={() => removePollOption(index)} class="border border-red-200 dark:border-red-900/50 hover:bg-red-50 dark:hover:bg-red-900/20 text-red-500 text-xs font-medium px-3 py-1.5 rounded-lg transition">Remove</button>
                       </div>
                     {/each}
                   </div>
                   <div class="flex items-center gap-2">
-                    <button onclick={addPollOption} class="btn-secondary text-sm">Add option</button>
-                    <button onclick={savePollSlide} class="btn-primary text-sm">Save</button>
-                    <button onclick={stopEditing} class="btn-secondary text-sm">Done</button>
+                    <button onclick={addPollOption} class="border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 px-3 py-1.5 rounded-lg text-sm font-medium text-slate-600 dark:text-slate-300 transition">Add option</button>
+                    <button onclick={savePollSlide} class="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-medium px-3 py-1.5 rounded-lg shadow-lg shadow-purple-500/20 transition active:scale-95 text-sm">Save</button>
+                    <button onclick={stopEditing} class="border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 px-3 py-1.5 rounded-lg text-sm font-medium text-slate-600 dark:text-slate-300 transition">Done</button>
                   </div>
                 {/if}
-                <div class="border border-surface-800 rounded-xl p-4">
-                  <div class="text-sm font-semibold mb-3">Live results</div>
+                <div class="border border-slate-200 dark:border-slate-800 rounded-xl p-4">
+                  <div class="text-sm font-semibold text-slate-900 dark:text-white mb-3">Live results</div>
                   <div class="flex items-end gap-4">
                     {#each getPollResults(activeSlide) as row}
                       <div class="flex flex-col items-center gap-2 flex-1">
-                        <div class="relative w-full h-28 bg-surface-800 rounded-lg overflow-hidden">
+                        <div class="relative w-full h-28 bg-slate-100 dark:bg-slate-800 rounded-lg overflow-hidden">
                           <div
-                            class="absolute bottom-0 left-0 right-0 bg-brand-500 rounded-lg"
+                            class="absolute bottom-0 left-0 right-0 bg-purple-500 rounded-lg transition-all duration-500"
                             style={`height: ${row.percent}%; min-height: ${row.percent > 0 ? '6px' : '0px'}`}
                           ></div>
                         </div>
-                        <div class="text-xs text-surface-400">{row.label}</div>
-                        <div class="text-xs text-surface-500">{row.percent}%</div>
+                        <div class="text-xs text-slate-500 dark:text-slate-400">{row.label}</div>
+                        <div class="text-xs text-slate-400 dark:text-slate-500">{row.percent}%</div>
                       </div>
                     {/each}
                   </div>
                 </div>
               </div>
             {:else if activeType === 'QNA'}
-              <div class="card space-y-4">
-                <div class="text-lg font-semibold">Questions</div>
+              <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 space-y-4">
+                <div class="text-lg font-semibold text-slate-900 dark:text-white">Questions</div>
                 {#if editingSlideId === activeSlideId}
                   <input class="input-field" type="text" bind:value={qnaPrompt} placeholder="Prompt" />
                   <div class="flex items-center gap-2">
-                    <button onclick={saveQnaSlide} class="btn-primary text-sm">Save prompt</button>
-                    <button onclick={stopEditing} class="btn-secondary text-sm">Done</button>
+                    <button onclick={saveQnaSlide} class="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-medium px-3 py-1.5 rounded-lg shadow-lg shadow-purple-500/20 transition active:scale-95 text-sm">Save prompt</button>
+                    <button onclick={stopEditing} class="border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 px-3 py-1.5 rounded-lg text-sm font-medium text-slate-600 dark:text-slate-300 transition">Done</button>
                   </div>
                 {/if}
                 {#if slideResponses.length === 0}
-                  <div class="text-sm text-surface-500">No questions yet.</div>
+                  <div class="text-sm text-slate-400">No questions yet.</div>
                 {:else}
                   <div class="space-y-3">
                     {#each slideResponses as response (response.id)}
-                      <div class="p-3 rounded-lg border border-surface-800">
-                        <div class="text-xs text-surface-500 mb-1">{response.name || response.guest_identifier}</div>
-                        <div class="text-sm">{response.value}</div>
+                      <div class="p-3 rounded-xl border border-slate-200 dark:border-slate-800">
+                        <div class="text-xs text-slate-500 mb-1">{response.name || response.guest_identifier}</div>
+                        <div class="text-sm text-slate-900 dark:text-slate-100">{response.value}</div>
                       </div>
                     {/each}
                   </div>
                 {/if}
               </div>
             {:else if activeType === 'FEEDBACK'}
-              <div class="card space-y-4">
-                <div class="text-lg font-semibold">Feedback</div>
+              <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 space-y-4">
+                <div class="text-lg font-semibold text-slate-900 dark:text-white">Feedback</div>
                 {#if editingSlideId === activeSlideId}
                   <input class="input-field" type="text" bind:value={feedbackPrompt} placeholder="Prompt" />
                   <div class="flex items-center gap-2">
-                    <button onclick={saveFeedbackSlide} class="btn-primary text-sm">Save prompt</button>
-                    <button onclick={stopEditing} class="btn-secondary text-sm">Done</button>
+                    <button onclick={saveFeedbackSlide} class="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-medium px-3 py-1.5 rounded-lg shadow-lg shadow-purple-500/20 transition active:scale-95 text-sm">Save prompt</button>
+                    <button onclick={stopEditing} class="border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 px-3 py-1.5 rounded-lg text-sm font-medium text-slate-600 dark:text-slate-300 transition">Done</button>
                   </div>
                 {/if}
                 {#if slideResponses.length === 0}
-                  <div class="text-sm text-surface-500">No feedback yet.</div>
+                  <div class="text-sm text-slate-400">No feedback yet.</div>
                 {:else}
                   <div class="space-y-3">
                     {#each slideResponses as response (response.id)}
-                      <div class="p-3 rounded-lg border border-surface-800">
-                        <div class="flex items-center justify-between text-xs text-surface-500 mb-1">
+                      <div class="p-3 rounded-xl border border-slate-200 dark:border-slate-800">
+                        <div class="flex items-center justify-between text-xs text-slate-500 mb-1">
                           <span>{response.name || response.guest_identifier}</span>
                           {#if response.rating}
-                            <span>Rating: {response.rating}</span>
+                            <span class="font-medium">Rating: {response.rating}</span>
                           {/if}
                         </div>
-                        <div class="text-sm">{response.value}</div>
+                        <div class="text-sm text-slate-900 dark:text-slate-100">{response.value}</div>
                       </div>
                     {/each}
                   </div>
                 {/if}
               </div>
             {:else if activeType === 'CONTENT'}
-              <div class="card space-y-4">
-                <div class="text-lg font-semibold">Content slide</div>
+              <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 space-y-4">
+                <div class="text-lg font-semibold text-slate-900 dark:text-white">Content slide</div>
                 {#if editingSlideId === activeSlideId}
                   <input class="input-field" type="text" bind:value={contentTitle} placeholder="Slide title" />
                   <textarea class="input-field" rows="6" bind:value={contentBody} placeholder="Slide content"></textarea>
                   <div class="flex items-center gap-2">
-                    <button onclick={saveContentSlide} class="btn-primary text-sm">Save</button>
-                    <button onclick={stopEditing} class="btn-secondary text-sm">Done</button>
+                    <button onclick={saveContentSlide} class="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-medium px-3 py-1.5 rounded-lg shadow-lg shadow-purple-500/20 transition active:scale-95 text-sm">Save</button>
+                    <button onclick={stopEditing} class="border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 px-3 py-1.5 rounded-lg text-sm font-medium text-slate-600 dark:text-slate-300 transition">Done</button>
                   </div>
                   <div class="flex items-center gap-3">
                     <input type="file" bind:files={contentFile} accept=".pdf,.ppt,.pptx" class="input-field" />
-                    <button onclick={uploadContentFile} class="btn-secondary text-sm">Upload file</button>
+                    <button onclick={uploadContentFile} class="border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 px-3 py-1.5 rounded-lg text-sm font-medium text-slate-600 dark:text-slate-300 transition">Upload file</button>
                   </div>
                 {/if}
                 <div class="flex items-center gap-2">
-                  <button onclick={() => goToContentSlide('prev')} class="btn-secondary text-sm">Previous</button>
-                  <button onclick={() => goToContentSlide('next')} class="btn-secondary text-sm">Next</button>
+                  <button onclick={() => goToContentSlide('prev')} class="border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 px-3 py-1.5 rounded-lg text-sm font-medium text-slate-600 dark:text-slate-300 transition">Previous</button>
+                  <button onclick={() => goToContentSlide('next')} class="border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 px-3 py-1.5 rounded-lg text-sm font-medium text-slate-600 dark:text-slate-300 transition">Next</button>
                 </div>
                 {#if activeSlide.content_json?.file_url}
                     <div class="flex items-center gap-2">
-                      <button onclick={() => changeContentPage(-1)} class="btn-secondary text-sm" disabled={(activeSlide.content_json?.file_page || 1) <= 1}>Prev page</button>
-                      <button onclick={() => changeContentPage(1)} class="btn-secondary text-sm">Next page</button>
-                      <div class="text-xs text-surface-500">Page {activeSlide.content_json?.file_page || 1}{activeSlide.content_json?.total_pages ? ` / ${activeSlide.content_json.total_pages}` : ''}</div>
+                      <button onclick={() => changeContentPage(-1)} class="border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 px-3 py-1.5 rounded-lg text-sm font-medium text-slate-600 dark:text-slate-300 transition" disabled={(activeSlide.content_json?.file_page || 1) <= 1}>Prev page</button>
+                      <button onclick={() => changeContentPage(1)} class="border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 px-3 py-1.5 rounded-lg text-sm font-medium text-slate-600 dark:text-slate-300 transition">Next page</button>
+                      <div class="text-xs text-slate-400">Page {activeSlide.content_json?.file_page || 1}{activeSlide.content_json?.total_pages ? ` / ${activeSlide.content_json.total_pages}` : ''}</div>
                     </div>
                     <div class="overflow-x-auto">
                       {#key activeSlide.content_json?.file_page}
                         <img
                           alt={`Page ${activeSlide.content_json?.file_page || 1}`}
                           src={getPageImageUrl(sessionId, activeSlide.id, activeSlide.content_json?.file_page || 1)}
-                          class="max-h-[500px] rounded-xl border border-surface-800 mx-auto"
+                          class="max-h-[500px] rounded-xl border border-slate-200 dark:border-slate-800 mx-auto"
                         />
                       {/key}
                     </div>
                 {/if}
-                <div class="border border-surface-800 rounded-xl p-6 bg-surface-900">
-                  <div class="text-xl font-semibold mb-3">{contentTitle || 'Untitled slide'}</div>
-                  <div class="text-sm text-surface-200 whitespace-pre-wrap">{contentBody || 'Add your slide content...'}</div>
+                <div class="border border-slate-200 dark:border-slate-800 rounded-xl p-6 bg-slate-50 dark:bg-slate-900">
+                  <div class="text-xl font-semibold text-slate-900 dark:text-white mb-3">{contentTitle || 'Untitled slide'}</div>
+                  <div class="text-sm text-slate-700 dark:text-slate-200 whitespace-pre-wrap">{contentBody || 'Add your slide content...'}</div>
                 </div>
               </div>
             {:else if activeType === 'WORD_CLOUD'}
-              <div class="card space-y-4">
-                <div class="text-lg font-semibold">Word Cloud</div>
+              <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 space-y-4">
+                <div class="text-lg font-semibold text-slate-900 dark:text-white">Word Cloud</div>
                 {#if editingSlideId === activeSlideId}
                   <input class="input-field" type="text" bind:value={wordCloudPrompt} placeholder="Prompt" />
                   <div class="flex items-center gap-2">
-                    <button onclick={saveWordCloudSlide} class="btn-primary text-sm">Save prompt</button>
-                    <button onclick={stopEditing} class="btn-secondary text-sm">Done</button>
+                    <button onclick={saveWordCloudSlide} class="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-medium px-3 py-1.5 rounded-lg shadow-lg shadow-purple-500/20 transition active:scale-95 text-sm">Save prompt</button>
+                    <button onclick={stopEditing} class="border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 px-3 py-1.5 rounded-lg text-sm font-medium text-slate-600 dark:text-slate-300 transition">Done</button>
                   </div>
                 {/if}
                 {#if slideResponses.length === 0}
-                  <div class="text-sm text-surface-500">No responses yet.</div>
+                  <div class="text-sm text-slate-400">No responses yet.</div>
                 {:else}
-                  <div class="border border-surface-800 rounded-xl p-6 flex flex-wrap items-center justify-center gap-3 min-h-[200px]">
+                  <div class="border border-slate-200 dark:border-slate-800 rounded-xl p-6 flex flex-wrap items-center justify-center gap-3 min-h-[200px]">
                     {#each getWordCloudData() as item}
                       <span
-                        class="text-brand-600 font-semibold transition-all"
+                        class="text-purple-600 dark:text-purple-400 font-semibold transition-all"
                         style={`font-size: ${item.size}rem; opacity: ${0.5 + (item.count / (slideResponses.length || 1)) * 0.5}`}
                       >{item.word}</span>
                     {/each}
                   </div>
-                  <div class="text-xs text-surface-500">{slideResponses.length} response{slideResponses.length === 1 ? '' : 's'}</div>
+                  <div class="text-xs text-slate-400">{slideResponses.length} response{slideResponses.length === 1 ? '' : 's'}</div>
                 {/if}
               </div>
             {:else}
-              <div class="card text-center text-surface-500 py-20">Unsupported slide type.</div>
+              <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-center text-slate-400 py-20">Unsupported slide type.</div>
             {/if}
           {/if}
         </section>

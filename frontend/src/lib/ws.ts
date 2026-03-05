@@ -1,18 +1,31 @@
 import { WS_ORIGIN } from './api';
 
 export type MessageHandler = (data: any) => void;
+export type ConnectionStatus = 'connected' | 'disconnected' | 'reconnecting';
+export type StatusHandler = (status: ConnectionStatus) => void;
 
 export class RforumWebSocket {
   private code: string;
   private socket: WebSocket | null = null;
   private reconnectBackoff = 500;
   private handler: MessageHandler | null = null;
+  private statusHandler: StatusHandler | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private closed = false;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  public status: ConnectionStatus = 'disconnected';
 
   constructor(code: string) {
     this.code = code;
+  }
+
+  onStatusChange(handler: StatusHandler) {
+    this.statusHandler = handler;
+  }
+
+  private setStatus(status: ConnectionStatus) {
+    this.status = status;
+    this.statusHandler?.(status);
   }
 
   connect(handler?: MessageHandler) {
@@ -45,6 +58,7 @@ export class RforumWebSocket {
       this.socket.close();
       this.socket = null;
     }
+    this.setStatus('disconnected');
   }
 
   private openSocket() {
@@ -62,12 +76,18 @@ export class RforumWebSocket {
 
     this.socket.onopen = () => {
       this.reconnectBackoff = 500;
+      this.setStatus('connected');
       this.startHeartbeat();
     };
 
     this.socket.onclose = () => {
       this.stopHeartbeat();
-      if (!this.closed) this.scheduleReconnect();
+      if (!this.closed) {
+        this.setStatus('reconnecting');
+        this.scheduleReconnect();
+      } else {
+        this.setStatus('disconnected');
+      }
     };
 
     this.socket.onerror = () => {
