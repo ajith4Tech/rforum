@@ -1,7 +1,7 @@
 <script lang="ts">
   import { page } from '$app/stores';
   import { theme, toggleTheme } from '$lib/theme';
-  import { RadioTower, Moon, Sun, LogOut, ChevronDown, User } from 'lucide-svelte';
+  import { Orbit, Moon, Sun, LogOut, ChevronDown, User } from 'lucide-svelte';
 
   let {
     authenticated = false,
@@ -39,7 +39,7 @@
 <nav class="sticky top-0 z-40 flex items-center justify-between px-8 py-3 border-b border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-950/80 backdrop-blur-md">
   <div class="flex items-center gap-8">
     <a href={authenticated ? '/dashboard' : '/'} class="flex items-center gap-2">
-      <RadioTower class="w-6 h-6 text-purple-500" />
+      <Orbit class="w-6 h-6 text-purple-500" />
       <span class="text-lg font-bold text-slate-900 dark:text-white">Rforum</span>
     </a>
 

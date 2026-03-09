@@ -2,7 +2,7 @@
   import { joinSession, listResponses, getPageImageUrl } from '$lib/api';
   import { RforumWebSocket } from '$lib/ws';
   import { onMount, onDestroy } from 'svelte';
-  import { BarChart3, MessageSquare, AlignLeft, FileText, RadioTower, Cloud } from 'lucide-svelte';
+  import { BarChart3, MessageSquare, AlignLeft, FileText, Orbit, Cloud } from 'lucide-svelte';
 
   let code = $state('');
   let session: any = $state(null);
@@ -105,7 +105,7 @@
 <div class="min-h-screen flex flex-col bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white">
   <header class="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800">
     <div class="flex items-center gap-2">
-      <RadioTower class="w-5 h-5 text-purple-500" />
+      <Orbit class="w-5 h-5 text-purple-500" />
       <span class="font-bold text-sm">Rforum</span>
     </div>
     <div class="flex items-center gap-4">
@@ -130,7 +130,7 @@
       </div>
     {:else if !activeSlide}
       <div class="text-center text-slate-500 animate-fade-in">
-        <RadioTower class="w-16 h-16 mx-auto mb-4 text-purple-400 animate-pulse-live" />
+        <Orbit class="w-16 h-16 mx-auto mb-4 text-purple-400 animate-pulse-live" />
         <p class="text-lg font-medium">Waiting for the presenter...</p>
       </div>
     {:else}

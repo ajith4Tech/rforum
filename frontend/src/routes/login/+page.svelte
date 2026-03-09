@@ -2,7 +2,7 @@
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
   import { login, register } from '$lib/api';
-  import { RadioTower, Mail, Lock } from 'lucide-svelte';
+  import { Orbit, Mail, Lock } from 'lucide-svelte';
 
   let isRegister = $state(false);
   let email = $state('');
@@ -41,7 +41,7 @@
 <div class="min-h-screen flex items-center justify-center px-6 bg-slate-50 dark:bg-slate-950">
   <div class="w-full max-w-sm animate-fade-in">
     <a href="/" class="flex items-center gap-2 justify-center mb-10">
-      <RadioTower class="w-8 h-8 text-purple-500" />
+      <Orbit class="w-8 h-8 text-purple-500" />
       <span class="text-2xl font-bold text-slate-900 dark:text-white">Rforum</span>
     </a>
 
