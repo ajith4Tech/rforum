@@ -153,12 +153,47 @@ async def get_analytics(
             "avg_rating": round(float(row.avg_rating), 2) if row.avg_rating else None,
         })
 
+    # Total slides
+    total_slides_result = await db.execute(
+        select(func.count(Slide.id))
+        .join(Session, Session.id == Slide.session_id)
+        .where(Session.owner_id == user_id)
+    )
+    total_slides = total_slides_result.scalar() or 0
+
+    # Response counts grouped by slide type (different from slide counts – shows actual engagement per format)
+    response_by_type_result = await db.execute(
+        select(Slide.type, func.count(Response.id))
+        .select_from(Response)
+        .join(Slide, Slide.id == Response.slide_id)
+        .join(Session, Session.id == Slide.session_id)
+        .where(Session.owner_id == user_id)
+        .group_by(Slide.type)
+    )
+    response_counts_by_type = {
+        row[0].value if hasattr(row[0], "value") else str(row[0]): row[1]
+        for row in response_by_type_result.all()
+    }
+
+    # Total responses across all slides
+    total_responses_result = await db.execute(
+        select(func.count(Response.id))
+        .select_from(Response)
+        .join(Slide, Slide.id == Response.slide_id)
+        .join(Session, Session.id == Slide.session_id)
+        .where(Session.owner_id == user_id)
+    )
+    total_responses = total_responses_result.scalar() or 0
+
     return {
         "total_events": total_events,
         "total_sessions": total_sessions,
+        "total_slides": total_slides,
+        "total_responses": total_responses,
         "active_sessions": active_sessions,
         "total_participants": total_participants,
         "slide_type_distribution": slide_type_distribution,
+        "response_counts_by_type": response_counts_by_type,
         "engagement_over_time": engagement_over_time,
         "avg_rating": avg_rating,
         "rating_distribution": rating_distribution,

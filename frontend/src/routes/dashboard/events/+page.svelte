@@ -166,27 +166,27 @@
 <main class="flex-1 max-w-5xl mx-auto w-full px-8 py-8">
   <div class="flex items-center justify-between mb-8">
     <div>
-      <h1 class="text-2xl font-bold text-slate-900 dark:text-white">All Events</h1>
-      <p class="text-sm text-slate-500 dark:text-slate-400 mt-1">Manage your events and their sessions</p>
+      <h1 class="text-3xl font-heading font-bold tracking-wide">All Events</h1>
+      <p class="text-sm text-surface-500 mt-1.5">Manage your events and their sessions</p>
     </div>
-    <button class="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-medium px-4 py-2 rounded-lg shadow-lg shadow-purple-500/20 transition active:scale-95 text-sm flex items-center gap-2" on:click={() => showCreateEvent = true}>
+    <button class="btn-primary text-sm flex items-center gap-2" on:click={() => showCreateEvent = true}>
       <Plus class="w-4 h-4" />
       Create Event
     </button>
   </div>
 
   {#if loading}
-    <div class="text-center text-slate-400 py-16">Loading events...</div>
+    <div class="text-center text-surface-400 py-16">Loading events...</div>
   {:else if events.length === 0}
     <div class="flex flex-col items-center justify-center text-center gap-4 py-20">
-      <div class="w-14 h-14 flex items-center justify-center rounded-2xl bg-purple-500/10">
-        <Calendar class="w-7 h-7 text-purple-500" />
+      <div class="w-14 h-14 flex items-center justify-center rounded-2xl bg-brand-500/10">
+        <Calendar class="w-7 h-7 text-brand-500" />
       </div>
       <div>
-        <h3 class="text-lg font-semibold text-slate-900 dark:text-white">No events yet</h3>
-        <p class="text-sm text-slate-400 mt-1">Create your first event to get started</p>
+        <h3 class="text-lg font-semibold">No events yet</h3>
+        <p class="text-sm text-surface-400 mt-1">Create your first event to get started</p>
       </div>
-      <button class="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-medium px-4 py-2 rounded-lg shadow-lg shadow-purple-500/20 transition active:scale-95 text-sm" on:click={() => showCreateEvent = true}>Create Event</button>
+      <button class="btn-primary text-sm" on:click={() => showCreateEvent = true}>Create Event</button>
     </div>
   {:else}
     <div class="space-y-4">
@@ -211,10 +211,10 @@
 
 {#if showCreateEvent}
   <div class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center px-4 z-50">
-    <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xl w-full max-w-lg p-6">
+    <div class="card w-full max-w-lg">
       <div class="flex items-center justify-between mb-4">
-        <h2 class="text-lg font-semibold text-slate-900 dark:text-white">Create Event</h2>
-        <button class="border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 px-3 py-1.5 rounded-lg text-sm transition" on:click={() => showCreateEvent = false}>Close</button>
+        <h2 class="text-lg font-semibold">Create Event</h2>
+        <button class="btn-secondary text-sm" on:click={() => showCreateEvent = false}>Close</button>
       </div>
       <form on:submit|preventDefault={handleCreateEvent} class="grid gap-3">
         <div class="grid gap-3 md:grid-cols-2">
@@ -223,8 +223,8 @@
         </div>
         <textarea rows="2" bind:value={newEventDescription} placeholder="Description (optional)" class="input-field"></textarea>
         <div class="flex justify-end gap-2">
-          <button type="button" class="border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 px-4 py-2 rounded-lg text-sm transition" on:click={() => showCreateEvent = false}>Cancel</button>
-          <button type="submit" class="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-medium px-4 py-2 rounded-lg shadow-lg shadow-purple-500/20 transition active:scale-95 text-sm" disabled={creatingEvent}>
+          <button type="button" class="btn-secondary" on:click={() => showCreateEvent = false}>Cancel</button>
+          <button type="submit" class="btn-primary text-sm" disabled={creatingEvent}>
             {creatingEvent ? 'Creating...' : 'Create Event'}
           </button>
         </div>
@@ -235,10 +235,10 @@
 
 {#if showEditEvent}
   <div class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center px-4 z-50">
-    <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xl w-full max-w-lg p-6">
+    <div class="card w-full max-w-lg">
       <div class="flex items-center justify-between mb-4">
-        <h2 class="text-lg font-semibold text-slate-900 dark:text-white">Edit Event</h2>
-        <button class="border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 px-3 py-1.5 rounded-lg text-sm transition" on:click={() => showEditEvent = false}>Close</button>
+        <h2 class="text-lg font-semibold">Edit Event</h2>
+        <button class="btn-secondary text-sm" on:click={() => showEditEvent = false}>Close</button>
       </div>
       <form on:submit|preventDefault={handleUpdateEvent} class="grid gap-3">
         <div class="grid gap-3 md:grid-cols-2">
@@ -247,8 +247,8 @@
         </div>
         <textarea rows="2" bind:value={editEventDescription} placeholder="Description (optional)" class="input-field"></textarea>
         <div class="flex justify-end gap-2">
-          <button type="button" class="border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 px-4 py-2 rounded-lg text-sm transition" on:click={() => showEditEvent = false}>Cancel</button>
-          <button type="submit" class="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-medium px-4 py-2 rounded-lg shadow-lg shadow-purple-500/20 transition active:scale-95 text-sm" disabled={savingEditEvent}>
+          <button type="button" class="btn-secondary" on:click={() => showEditEvent = false}>Cancel</button>
+          <button type="submit" class="btn-primary text-sm" disabled={savingEditEvent}>
             {savingEditEvent ? 'Saving...' : 'Save Changes'}
           </button>
         </div>

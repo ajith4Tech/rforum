@@ -139,6 +139,10 @@ export async function listPublicEvents(date?: string) {
   return fetchJson(`/events/public${query}`, { method: 'GET' });
 }
 
+export async function listUpcomingPublicEvents() {
+  return fetchJson('/events/public?upcoming=true', { method: 'GET' });
+}
+
 export async function createEvent(payload: Record<string, unknown>) {
   return fetchJson('/events', {
     method: 'POST',

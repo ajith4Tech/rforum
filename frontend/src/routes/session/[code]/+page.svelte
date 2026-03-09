@@ -24,6 +24,30 @@
   let actionError = $state('');
   let thankYou = $state(false);
 
+  // Countdown
+  let countdown = $state<{ days: number; hours: number; minutes: number; seconds: number } | null>(null);
+  let countdownInterval: ReturnType<typeof setInterval> | null = null;
+
+  function getEventDate(): Date | null {
+    const eventDate = session?.event?.event_date;
+    if (!eventDate) return null;
+    // event_date is YYYY-MM-DD; treat as start of that day in local time
+    return new Date(eventDate + 'T00:00:00');
+  }
+
+  function updateCountdown() {
+    const target = getEventDate();
+    if (!target) { countdown = null; return; }
+    const now = new Date();
+    const diff = target.getTime() - now.getTime();
+    if (diff <= 0) { countdown = null; return; }
+    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+    const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+    const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+    countdown = { days, hours, minutes, seconds };
+  }
+
   function generateGuestId() {
     if (typeof crypto !== 'undefined') {
       if (typeof crypto.randomUUID === 'function') {
@@ -69,6 +93,10 @@
       ws = new RforumWebSocket(code);
       ws.connect();
       ws.onMessage(handleWsMessage);
+
+      // Start countdown if event has a future date
+      updateCountdown();
+      countdownInterval = setInterval(updateCountdown, 1000);
     } catch (e: any) {
       error = e.message || 'Session not found';
     } finally {
@@ -78,6 +106,7 @@
 
   onDestroy(() => {
     ws?.disconnect();
+    if (countdownInterval) clearInterval(countdownInterval);
   });
 
   async function handleWsMessage(msg: any) {
@@ -184,7 +213,7 @@
   <header class="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-800">
     <div class="flex items-center gap-2">
       <Orbit class="w-5 h-5 text-purple-500" />
-      <span class="font-bold text-sm">Rforum</span>
+      <span class="font-heading font-bold text-sm tracking-wide">Rforum</span>
     </div>
     <div class="flex items-center gap-2">
       <button
@@ -211,10 +240,27 @@
         <a href="/" class="text-purple-600 hover:underline text-sm">Go home</a>
       </div>
     {:else if !activeSlide}
-      <div class="text-center text-slate-500 animate-fade-in">
+      <div class="text-center text-slate-500 animate-fade-in max-w-sm w-full">
         <Orbit class="w-16 h-16 mx-auto mb-4 text-purple-400 animate-pulse-live" />
-        <p class="text-lg font-medium">Waiting for the presenter...</p>
-        <p class="text-sm mt-2">The next slide will appear here automatically</p>
+        {#if session?.event?.title}
+          <h2 class="text-xl font-heading font-bold text-slate-900 dark:text-white mb-1">{session.event.title}</h2>
+        {/if}
+        <p class="text-base font-medium mb-1">Waiting for the presenter...</p>
+        <p class="text-sm mt-1 mb-6">The next slide will appear here automatically</p>
+
+        {#if countdown}
+          <div class="mt-4">
+            <p class="text-xs uppercase tracking-widest text-slate-400 mb-3">Event starts in</p>
+            <div class="grid grid-cols-4 gap-3">
+              {#each [{ label: 'Days', value: countdown.days }, { label: 'Hours', value: countdown.hours }, { label: 'Min', value: countdown.minutes }, { label: 'Sec', value: countdown.seconds }] as unit}
+                <div class="rounded-2xl bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 px-3 py-4 flex flex-col items-center gap-1">
+                  <span class="text-2xl font-heading font-bold text-slate-900 dark:text-white tabular-nums">{String(unit.value).padStart(2, '0')}</span>
+                  <span class="text-xs text-slate-400 uppercase tracking-wider">{unit.label}</span>
+                </div>
+              {/each}
+            </div>
+          </div>
+        {/if}
       </div>
     {:else}
       <div class="w-full max-w-lg animate-fade-in">

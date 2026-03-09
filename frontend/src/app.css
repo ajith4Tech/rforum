@@ -1,4 +1,12 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://fonts.cdnfonts.com/css/glacial-indifference-2');
+
+@layer base {
+  :root {
+    --font-heading: 'Glacial Indifference', 'Inter', system-ui, sans-serif;
+    --font-body: 'Inter', system-ui, sans-serif;
+  }
+}
 
 @tailwind base;
 @tailwind components;
@@ -18,6 +26,13 @@
 
   body {
     @apply font-sans antialiased;
+    font-family: var(--font-body);
+    letter-spacing: 0.01em;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-heading);
+    letter-spacing: 0.02em;
   }
 
   [data-theme="dark"] body {
@@ -97,6 +112,19 @@
     @apply bg-live/20;
   }
 
+  /* Uniform interactive card hover – no hue-shifting, just a subtle surface lift */
+  .card-interactive {
+    @apply transition-all duration-200 cursor-pointer;
+  }
+
+  [data-theme="dark"] .card-interactive:hover {
+    @apply border-surface-700 shadow-xl shadow-black/20;
+  }
+
+  [data-theme="light"] .card-interactive:hover {
+    @apply border-surface-300 shadow-lg shadow-black/5;
+  }
+
   .sidebar-item {
     @apply flex items-center gap-3 px-4 py-3 rounded-xl
            hover:transition-all duration-200 cursor-pointer;
@@ -122,6 +150,14 @@
 
   [data-theme="light"] nav, [data-theme="light"] header {
     @apply border-surface-200;
+  }
+
+  [data-theme="dark"] .nav-bg {
+    background-color: rgba(15, 17, 23, 0.92);
+  }
+
+  [data-theme="light"] .nav-bg {
+    background-color: rgba(255, 255, 255, 0.92);
   }
 
   [data-theme="dark"] footer {

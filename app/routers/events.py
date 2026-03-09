@@ -134,15 +134,24 @@ async def get_today_event(db: AsyncSession = Depends(get_db)):
 @router.get("/public", response_model=list[dict])
 async def list_public_events(
     event_date: date | None = None,
+    upcoming: bool = False,
     db: AsyncSession = Depends(get_db),
 ):
-    target_date = event_date or date.today()
-    result = await db.execute(
-        select(Event)
-        .options(selectinload(Event.sessions))
-        .where(Event.event_date == target_date, Event.is_published == True)
-        .order_by(Event.created_at.desc())
-    )
+    if upcoming:
+        result = await db.execute(
+            select(Event)
+            .options(selectinload(Event.sessions))
+            .where(Event.event_date >= date.today(), Event.is_published == True)
+            .order_by(Event.event_date.asc())
+        )
+    else:
+        target_date = event_date or date.today()
+        result = await db.execute(
+            select(Event)
+            .options(selectinload(Event.sessions))
+            .where(Event.event_date == target_date, Event.is_published == True)
+            .order_by(Event.created_at.desc())
+        )
     events = result.unique().scalars().all()
     payload = []
     for event in events:

@@ -64,13 +64,13 @@
 <main class="flex-1 max-w-5xl mx-auto w-full px-8 py-8">
   <div class="flex items-center justify-between mb-8">
     <div>
-      <h1 class="text-2xl font-bold text-slate-900 dark:text-white">All Sessions</h1>
-      <p class="text-sm text-slate-500 dark:text-slate-400 mt-1">Manage your presentation sessions</p>
+      <h1 class="text-3xl font-heading font-bold tracking-wide">All Sessions</h1>
+      <p class="text-sm text-surface-500 mt-1.5">Manage your presentation sessions</p>
     </div>
   </div>
 
   <!-- Create new session -->
-  <form on:submit|preventDefault={handleCreate} class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm p-6 flex gap-3 mb-8">
+  <form on:submit|preventDefault={handleCreate} class="card p-6 flex gap-3 mb-8">
     <select class="input-field w-52" bind:value={newSessionEventId}>
       <option value="" disabled>Select event</option>
       {#each events as event (event.id)}
@@ -82,7 +82,7 @@
     <input type="text" bind:value={newTitle} placeholder="New session title..." class="input-field flex-1" />
     <button
       type="submit"
-      class="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-medium px-4 py-2 rounded-lg shadow-lg shadow-purple-500/20 transition active:scale-95 flex items-center gap-2 whitespace-nowrap text-sm"
+      class="btn-primary flex items-center gap-2 whitespace-nowrap text-sm"
       disabled={creating || !newSessionEventId}
     >
       <Plus class="w-4 h-4" />
@@ -91,24 +91,24 @@
   </form>
 
   {#if loading}
-    <div class="text-center text-slate-400 py-20">Loading...</div>
+    <div class="text-center text-surface-400 py-20">Loading...</div>
   {:else if sessions.length === 0}
     <div class="flex flex-col items-center justify-center text-center gap-4 py-16">
       <div class="w-14 h-14 flex items-center justify-center rounded-2xl bg-cyan-500/10">
         <Presentation class="w-7 h-7 text-cyan-500" />
       </div>
       <div>
-        <h3 class="text-lg font-semibold text-slate-900 dark:text-white">No sessions yet</h3>
-        <p class="text-sm text-slate-400 mt-1">Create your first session to get started</p>
+        <h3 class="text-lg font-semibold">No sessions yet</h3>
+        <p class="text-sm text-surface-400 mt-1">Create your first session to get started</p>
       </div>
     </div>
   {:else}
     <div class="space-y-3">
       {#each sessions as session (session.id)}
-        <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm hover:shadow-md transition-all duration-200 hover:scale-[1.01] p-6 flex items-center justify-between gap-4">
+        <div class="card p-6 hover:shadow-md transition-all duration-200 hover:scale-[1.01] flex items-center justify-between gap-4">
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-3 mb-1">
-              <h3 class="text-lg font-semibold text-slate-900 dark:text-white truncate">{session.title}</h3>
+              <h3 class="text-lg font-semibold truncate">{session.title}</h3>
               {#if session.is_live}
                 <span class="badge-live">
                   <span class="w-1.5 h-1.5 bg-live rounded-full animate-pulse-live"></span>
@@ -116,25 +116,25 @@
                 </span>
               {/if}
             </div>
-            <div class="flex items-center gap-3 text-sm text-slate-500 dark:text-slate-400">
+            <div class="flex items-center gap-3 text-sm text-surface-500">
               <button
                 on:click={() => copyCode(session.unique_code)}
-                class="flex items-center gap-1 font-mono hover:text-slate-700 dark:hover:text-slate-300 transition-colors"
+                class="flex items-center gap-1 font-mono hover:text-surface-300 transition-colors"
               >
                 <Copy class="w-3 h-3" />
                 {session.unique_code}
               </button>
               <span>&middot;</span>
-              <span class="text-xs text-slate-500">{new Date(session.created_at).toLocaleDateString()}</span>
+              <span class="text-xs text-surface-500">{new Date(session.created_at).toLocaleDateString()}</span>
             </div>
           </div>
           <div class="flex items-center gap-2">
-            <a href="/dashboard/{session.id}" class="border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 px-4 py-2 rounded-lg text-sm font-medium text-slate-600 dark:text-slate-300 transition active:scale-95 flex items-center gap-1.5">
+            <a href="/dashboard/{session.id}" class="btn-secondary flex items-center gap-1.5">
               <ExternalLink class="w-3.5 h-3.5" />
               Manage
             </a>
-            <button on:click={() => handleDelete(session.id)} class="border border-red-200 dark:border-red-900/50 hover:bg-red-50 dark:hover:bg-red-900/20 p-2.5 rounded-lg transition active:scale-95">
-              <Trash2 class="w-4 h-4 text-red-400" />
+            <button on:click={() => handleDelete(session.id)} class="btn-danger p-2.5">
+              <Trash2 class="w-4 h-4" />
             </button>
           </div>
         </div>

@@ -34,50 +34,50 @@
   }
 </script>
 
-<div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm hover:shadow-md transition-all duration-200 hover:scale-[1.01] p-6 space-y-4">
+<div class="card p-6 hover:shadow-md transition-all duration-200 hover:scale-[1.01] space-y-4">
   <!-- Header -->
   <div class="flex justify-between items-start">
     <div class="flex-1 min-w-0">
       <div class="flex items-center gap-2 mb-1">
-        <h3 class="text-lg font-semibold text-slate-900 dark:text-white truncate">{event.title}</h3>
+        <h3 class="text-lg font-semibold truncate">{event.title}</h3>
         <StatusBadge published={event.is_published} />
       </div>
-      <p class="text-xs text-slate-500">
+      <p class="text-xs text-surface-500">
         {event.is_published ? 'Published' : 'Draft'} &bull; {formatDate(event.event_date)}
       </p>
       {#if event.description}
-        <p class="text-sm text-slate-400 mt-1">{event.description}</p>
+        <p class="text-sm text-surface-400 mt-1">{event.description}</p>
       {/if}
     </div>
     <div class="flex items-center gap-1.5 ml-4 flex-shrink-0">
       {#if onEdit}
         <button
           onclick={() => onEdit(event)}
-          class="border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 p-2 rounded-lg text-sm transition active:scale-95"
+          class="btn-secondary p-2"
           title="Edit"
         >
-          <Pencil class="w-4 h-4 text-slate-500 dark:text-slate-400" />
+          <Pencil class="w-4 h-4 text-surface-500" />
         </button>
       {/if}
       {#if onTogglePublish}
         <button
           onclick={() => onTogglePublish(event.id, event.is_published)}
-          class="border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 p-2 rounded-lg text-sm transition active:scale-95"
+          class="btn-secondary p-2"
           title={event.is_published ? 'Unpublish' : 'Publish'}
         >
           {#if event.is_published}
-            <EyeOff class="w-4 h-4 text-slate-500 dark:text-slate-400" />
+            <EyeOff class="w-4 h-4 text-surface-500" />
           {:else}
-            <Eye class="w-4 h-4 text-slate-500 dark:text-slate-400" />
+            <Eye class="w-4 h-4 text-surface-500" />
           {/if}
         </button>
       {/if}
       {#if onDelete}
         <button
           onclick={() => onDelete(event.id)}
-          class="border border-red-200 dark:border-red-900/50 hover:bg-red-50 dark:hover:bg-red-900/20 p-2 rounded-lg text-sm transition active:scale-95"
+          class="btn-danger p-2"
         >
-          <Trash2 class="w-4 h-4 text-red-400" />
+          <Trash2 class="w-4 h-4" />
         </button>
       {/if}
     </div>
@@ -85,9 +85,9 @@
 
   <!-- Sessions -->
   <div class="space-y-2">
-    <div class="text-base font-semibold text-slate-700 dark:text-slate-300">Sessions</div>
+    <div class="text-base font-semibold text-surface-300">Sessions</div>
     {#if sessions.length === 0}
-      <p class="text-sm text-slate-400">No sessions assigned yet.</p>
+      <p class="text-sm text-surface-400">No sessions assigned yet.</p>
     {:else}
       <div class="space-y-1.5">
         {#each sessions as session (session.id)}
@@ -111,7 +111,7 @@
         {/each}
       </select>
       <button
-        class="border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 px-4 py-2 rounded-lg text-sm transition active:scale-95"
+        class="btn-secondary"
         onclick={() => onAddSession?.(event.id)}
         disabled={saving || !addSessionSelection}
       >
