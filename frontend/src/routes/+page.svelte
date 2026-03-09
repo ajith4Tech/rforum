@@ -1,6 +1,6 @@
 <script lang="ts">
   import { listUpcomingPublicEvents } from '$lib/api';
-  import { Orbit, Zap, Users, BarChart3, MessageSquare, Calendar, ExternalLink } from 'lucide-svelte';
+  import { Calendar, ExternalLink } from 'lucide-svelte';
   import { onMount, onDestroy } from 'svelte';
   import Nav from '$lib/components/Nav.svelte';
 
@@ -168,56 +168,10 @@
     </div>
   </main>
 
-  <!-- Footer with about info -->
   <footer class="border-t mt-auto">
-    <!-- About strip -->
-    <div class="px-8 py-8 border-b border-surface-200 dark:border-surface-800">
-      <div class="max-w-4xl mx-auto">
-        <p class="text-xs font-heading uppercase tracking-widest text-surface-500 mb-5">About Rforum</p>
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-5">
-          <div class="flex items-start gap-3">
-            <div class="w-8 h-8 flex items-center justify-center rounded-lg bg-amber-500/10 flex-shrink-0 mt-0.5">
-              <Zap class="w-4 h-4 text-amber-500" />
-            </div>
-            <div>
-              <p class="text-sm font-semibold">Live Interaction</p>
-              <p class="text-xs text-surface-500 mt-0.5 leading-relaxed">Real-time polls, Q&A and feedback</p>
-            </div>
-          </div>
-          <div class="flex items-start gap-3">
-            <div class="w-8 h-8 flex items-center justify-center rounded-lg bg-cyan-500/10 flex-shrink-0 mt-0.5">
-              <Users class="w-4 h-4 text-cyan-500" />
-            </div>
-            <div>
-              <p class="text-sm font-semibold">Easy Join</p>
-              <p class="text-xs text-surface-500 mt-0.5 leading-relaxed">Join any session with a short code</p>
-            </div>
-          </div>
-          <div class="flex items-start gap-3">
-            <div class="w-8 h-8 flex items-center justify-center rounded-lg bg-emerald-500/10 flex-shrink-0 mt-0.5">
-              <BarChart3 class="w-4 h-4 text-emerald-500" />
-            </div>
-            <div>
-              <p class="text-sm font-semibold">Live Analytics</p>
-              <p class="text-xs text-surface-500 mt-0.5 leading-relaxed">Results and insights as they happen</p>
-            </div>
-          </div>
-          <div class="flex items-start gap-3">
-            <div class="w-8 h-8 flex items-center justify-center rounded-lg bg-rose-500/10 flex-shrink-0 mt-0.5">
-              <MessageSquare class="w-4 h-4 text-rose-500" />
-            </div>
-            <div>
-              <p class="text-sm font-semibold">Multiple Formats</p>
-              <p class="text-xs text-surface-500 mt-0.5 leading-relaxed">Polls, Q&A, word clouds and more</p>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-    <!-- Bottom bar -->
-    <div class="flex items-center justify-between px-8 py-5 text-surface-500 text-sm max-w-full">
+    <div class="flex items-center justify-between px-8 py-5 text-surface-500 text-sm">
       <p class="text-xs">Rforum &copy; {new Date().getFullYear()}</p>
-      <p class="text-xs">Made with <span class="text-red-500">❤</span> by Ajith</p>
+      <p class="text-xs">Built with <span class="text-red-500">❤</span> by Ajith</p>
     </div>
   </footer>
 </div>
