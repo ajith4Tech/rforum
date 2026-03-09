@@ -11,7 +11,7 @@
     deleteEvent,
     setEventSessions
   } from '$lib/api';
-  import { RadioTower, Plus, Trash2, LogOut, ExternalLink, Copy, Eye, EyeOff, Pencil, Calendar, LayoutDashboard, CalendarDays, Presentation, BarChart3 } from 'lucide-svelte';
+  import { Orbit, Plus, Trash2, LogOut, ExternalLink, Copy, Eye, EyeOff, Pencil, Calendar, LayoutDashboard, CalendarDays, Presentation, BarChart3 } from 'lucide-svelte';
   import { onMount } from 'svelte';
   import { theme, toggleTheme } from '$lib/theme';
   import { Moon, Sun } from 'lucide-svelte';

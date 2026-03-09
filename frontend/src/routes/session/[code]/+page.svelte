@@ -4,7 +4,7 @@
   import { theme, toggleTheme } from '$lib/theme';
   import { onMount, onDestroy } from 'svelte';
   import {
-    RadioTower, Send, ChevronUp, BarChart3, MessageSquare, AlignLeft, FileText, CheckCircle2, Cloud, Sun, Moon
+    Orbit, Send, ChevronUp, BarChart3, MessageSquare, AlignLeft, FileText, CheckCircle2, Cloud, Sun, Moon
   } from 'lucide-svelte';
 
   let code = $state('');
@@ -183,7 +183,7 @@
   <!-- Header -->
   <header class="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-800">
     <div class="flex items-center gap-2">
-      <RadioTower class="w-5 h-5 text-purple-500" />
+      <Orbit class="w-5 h-5 text-purple-500" />
       <span class="font-bold text-sm">Rforum</span>
     </div>
     <div class="flex items-center gap-2">
@@ -212,7 +212,7 @@
       </div>
     {:else if !activeSlide}
       <div class="text-center text-slate-500 animate-fade-in">
-        <RadioTower class="w-16 h-16 mx-auto mb-4 text-purple-400 animate-pulse-live" />
+        <Orbit class="w-16 h-16 mx-auto mb-4 text-purple-400 animate-pulse-live" />
         <p class="text-lg font-medium">Waiting for the presenter...</p>
         <p class="text-sm mt-2">The next slide will appear here automatically</p>
       </div>

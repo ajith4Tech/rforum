@@ -2,7 +2,7 @@
   import { goto } from '$app/navigation';
   import { listPublicEvents } from '$lib/api';
   import { theme, toggleTheme } from '$lib/theme';
-  import { RadioTower, Moon, Sun, Zap, Users, BarChart3, MessageSquare, Calendar } from 'lucide-svelte';
+  import { Orbit, Moon, Sun, Zap, Users, BarChart3, MessageSquare, Calendar } from 'lucide-svelte';
   import { onMount } from 'svelte';
   import FeatureCard from '$lib/components/FeatureCard.svelte';
   import Nav from '$lib/components/Nav.svelte';
