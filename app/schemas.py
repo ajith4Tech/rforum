@@ -9,6 +9,12 @@ from app.models import SlideType
 class UserCreate(BaseModel):
     email: EmailStr
     password: str
+    invite_code: str
+
+
+class ChangePasswordPayload(BaseModel):
+    current_password: str
+    new_password: str
 
 
 class UserOut(BaseModel):

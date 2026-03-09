@@ -74,6 +74,13 @@ export const logout = () => {
   }
 };
 
+export async function changePassword(currentPassword: string, newPassword: string) {
+  return fetchJson('/auth/change-password', {
+    method: 'POST',
+    body: JSON.stringify({ current_password: currentPassword, new_password: newPassword })
+  }, true);
+}
+
 export async function login(email: string, password: string) {
   const form = new FormData();
   form.append('username', email);
@@ -95,10 +102,10 @@ export async function login(email: string, password: string) {
   return data;
 }
 
-export async function register(email: string, password: string) {
+export async function register(email: string, password: string, inviteCode: string) {
   return fetchJson('/auth/register', {
     method: 'POST',
-    body: JSON.stringify({ email, password })
+    body: JSON.stringify({ email, password, invite_code: inviteCode })
   });
 }
 

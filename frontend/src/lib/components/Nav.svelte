@@ -1,7 +1,8 @@
 <script lang="ts">
   import { page } from '$app/stores';
   import { theme, toggleTheme } from '$lib/theme';
-  import { Orbit, Moon, Sun, LogOut, ChevronDown, User } from 'lucide-svelte';
+  import { changePassword } from '$lib/api';
+  import { Orbit, Moon, Sun, LogOut, ChevronDown, User, Lock } from 'lucide-svelte';
 
   let {
     authenticated = false,
@@ -12,6 +13,12 @@
   } = $props();
 
   let profileOpen = $state(false);
+  let showChangePwd = $state(false);
+  let currentPwd = $state('');
+  let newPwd = $state('');
+  let pwdError = $state('');
+  let pwdSuccess = $state('');
+  let pwdLoading = $state(false);
 
   const navLinks = [
     { label: 'Dashboard', href: '/dashboard' },
@@ -30,6 +37,33 @@
     const target = event.target as HTMLElement;
     if (!target.closest('[data-profile-menu]')) {
       profileOpen = false;
+    }
+  }
+
+  function openChangePwd() {
+    profileOpen = false;
+    currentPwd = '';
+    newPwd = '';
+    pwdError = '';
+    pwdSuccess = '';
+    showChangePwd = true;
+  }
+
+  async function handleChangePwd(e: Event) {
+    e.preventDefault();
+    pwdError = '';
+    pwdSuccess = '';
+    pwdLoading = true;
+    try {
+      await changePassword(currentPwd, newPwd);
+      pwdSuccess = 'Password updated successfully';
+      currentPwd = '';
+      newPwd = '';
+      setTimeout(() => { showChangePwd = false; pwdSuccess = ''; }, 1500);
+    } catch (err: any) {
+      pwdError = err?.message || 'Could not update password';
+    } finally {
+      pwdLoading = false;
     }
   }
 </script>
@@ -83,7 +117,15 @@
         </button>
 
         {#if profileOpen}
-          <div class="absolute right-0 mt-2 w-44 card rounded-xl shadow-lg py-1 animate-fade-in">
+          <div class="absolute right-0 mt-2 w-52 card rounded-xl shadow-lg py-1 animate-fade-in">
+            <button
+              onclick={openChangePwd}
+              class="flex items-center gap-2 w-full px-4 py-2.5 text-sm text-surface-400 hover:text-surface-100 hover:bg-surface-800 transition"
+            >
+              <Lock class="w-4 h-4" />
+              Change Password
+            </button>
+            <div class="my-1 border-t border-surface-800"></div>
             <button
               onclick={() => { profileOpen = false; onLogout(); }}
               class="flex items-center gap-2 w-full px-4 py-2.5 text-sm text-surface-400 hover:text-surface-100 hover:bg-surface-800 transition"
@@ -96,7 +138,59 @@
       </div>
     {:else}
       <a href="/login" class="btn-secondary text-sm">Log in</a>
-      <a href="/login?mode=register" class="btn-primary text-sm">Sign up</a>
     {/if}
   </div>
 </nav>
+
+<!-- Change Password Modal -->
+{#if showChangePwd}
+  <div
+    class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center px-4 z-50"
+    onclick={(e) => { if (e.target === e.currentTarget) showChangePwd = false; }}
+    role="dialog"
+    aria-modal="true"
+  >
+    <div class="card w-full max-w-sm shadow-2xl animate-fade-in">
+      <div class="flex items-center justify-between mb-5">
+        <h2 class="text-lg font-heading font-bold tracking-wide">Change Password</h2>
+        <button onclick={() => showChangePwd = false} class="btn-secondary px-3 py-1.5 text-xs">Close</button>
+      </div>
+      <form onsubmit={handleChangePwd} class="space-y-4">
+        <div class="relative">
+          <Lock class="absolute left-3.5 top-3.5 w-4 h-4 text-surface-400" />
+          <input
+            type="password"
+            bind:value={currentPwd}
+            placeholder="Current password"
+            class="input-field pl-10"
+            required
+            minlength="1"
+          />
+        </div>
+        <div class="relative">
+          <Lock class="absolute left-3.5 top-3.5 w-4 h-4 text-surface-400" />
+          <input
+            type="password"
+            bind:value={newPwd}
+            placeholder="New password (min 6 chars)"
+            class="input-field pl-10"
+            required
+            minlength="6"
+          />
+        </div>
+        {#if pwdError}
+          <p class="text-danger text-sm">{pwdError}</p>
+        {/if}
+        {#if pwdSuccess}
+          <p class="text-emerald-500 text-sm">{pwdSuccess}</p>
+        {/if}
+        <div class="flex gap-2 pt-1">
+          <button type="button" onclick={() => showChangePwd = false} class="btn-secondary flex-1 text-sm">Cancel</button>
+          <button type="submit" class="btn-primary flex-1 text-sm" disabled={pwdLoading}>
+            {pwdLoading ? 'Updating…' : 'Update'}
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+{/if}

@@ -2,11 +2,12 @@
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
   import { login, register } from '$lib/api';
-  import { Orbit, Mail, Lock } from 'lucide-svelte';
+  import { Orbit, Mail, Lock, KeyRound } from 'lucide-svelte';
 
   let isRegister = $state(false);
   let email = $state('');
   let password = $state('');
+  let inviteCode = $state('');
   let error = $state('');
   let loading = $state(false);
 
@@ -21,8 +22,12 @@
     loading = true;
     try {
       if (isRegister) {
-        await register(email, password);
-        // Auto-login after registration
+        if (!inviteCode.trim()) {
+          error = 'Invite code is required';
+          loading = false;
+          return;
+        }
+        await register(email, password, inviteCode.trim());
       }
       await login(email, password);
       goto('/dashboard');
@@ -42,13 +47,32 @@
   <div class="w-full max-w-sm animate-fade-in">
     <a href="/" class="flex items-center gap-2 justify-center mb-10">
       <Orbit class="w-8 h-8 text-brand-500" />
-      <span class="text-2xl font-bold">Rforum</span>
+      <span class="text-2xl font-heading font-bold tracking-wide">Rforum</span>
     </a>
 
     <div class="card p-6">
-      <h1 class="text-xl font-bold mb-6">{isRegister ? 'Create an account' : 'Welcome back'}</h1>
+      <h1 class="text-xl font-heading font-bold mb-1">{isRegister ? 'Create an account' : 'Welcome back'}</h1>
+      {#if isRegister}
+        <p class="text-xs text-surface-500 mb-6">You need an invite code to register.</p>
+      {:else}
+        <p class="text-xs text-surface-500 mb-6">Sign in to manage your events and sessions.</p>
+      {/if}
 
-      <form on:submit|preventDefault={handleSubmit} class="space-y-4">
+      <form onsubmit={(e) => { e.preventDefault(); handleSubmit(); }} class="space-y-4">
+        {#if isRegister}
+          <div class="relative">
+            <KeyRound class="absolute left-3.5 top-3.5 w-4 h-4 text-surface-400" />
+            <input
+              type="text"
+              bind:value={inviteCode}
+              placeholder="Invite code"
+              class="input-field pl-10 uppercase tracking-widest"
+              maxlength="20"
+              autocomplete="off"
+            />
+          </div>
+        {/if}
+
         <div class="relative">
           <Mail class="absolute left-3.5 top-3.5 w-4 h-4 text-surface-400" />
           <input
@@ -73,7 +97,7 @@
         </div>
 
         {#if error}
-          <p class="text-red-500 text-sm">{error}</p>
+          <p class="text-danger text-sm">{error}</p>
         {/if}
 
         <button type="submit" class="btn-primary w-full" disabled={loading}>
@@ -84,10 +108,10 @@
       <div class="mt-6 text-center text-sm text-surface-500">
         {#if isRegister}
           Already have an account?
-          <button on:click={() => isRegister = false} class="text-brand-500 hover:underline font-medium">Log in</button>
+          <button onclick={() => { isRegister = false; error = ''; }} class="text-brand-500 hover:underline font-medium">Log in</button>
         {:else}
-          Don't have an account?
-          <button on:click={() => isRegister = true} class="text-brand-500 hover:underline font-medium">Sign up</button>
+          Need an account?
+          <button onclick={() => { isRegister = true; error = ''; }} class="text-brand-500 hover:underline font-medium">Sign up</button>
         {/if}
       </div>
     </div>

@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     SECRET_KEY: str = "change-me-in-production-use-a-real-secret"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 24 hours
+    INVITE_CODE: str = "RFORUM01"  # Override via INVITE_CODE env var
     CORS_ORIGINS: list[str] = [
     "http://localhost:5173",
     "http://localhost:3000",
