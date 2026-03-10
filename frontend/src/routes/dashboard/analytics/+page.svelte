@@ -1,7 +1,7 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
-  import { getAnalytics, isAuthenticated } from '$lib/api';
-  import { CalendarDays, Users, Radio, BarChart3, Star, TrendingUp, Layers, MessageSquare, Zap } from 'lucide-svelte';
+  import { getAnalytics, formatBytes, isAuthenticated } from '$lib/api';
+  import { CalendarDays, Users, Radio, BarChart3, Star, TrendingUp, Layers, MessageSquare, Zap, HardDrive } from 'lucide-svelte';
   import { onMount } from 'svelte';
 
   let loading = $state(true);
@@ -18,6 +18,7 @@
   let avgRating: number | null = $state(null);
   let ratingDistribution: Record<string, number> = $state({});
   let sessionEngagement: { session_id: string; title: string; total_responses: number; unique_participants: number; avg_rating: number | null }[] = $state([]);
+  let storageUsedBytes = $state(0);
 
   onMount(async () => {
     if (!isAuthenticated()) {
@@ -38,6 +39,7 @@
       avgRating = data.avg_rating ?? null;
       ratingDistribution = data.rating_distribution ?? {};
       sessionEngagement = data.session_engagement ?? [];
+      storageUsedBytes = data.storage_used_bytes ?? 0;
     } catch (e: any) {
       const msg = e?.message || '';
       if (msg.includes('Unauthorized') || msg.includes('Not authenticated')) {
@@ -185,7 +187,7 @@
     </div>
   {:else}
     <!-- Stat Cards -->
-    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-10">
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
       {#each statCards as card}
         {@const Icon = card.icon}
         <div class="card">
@@ -198,6 +200,29 @@
           <div class="text-xs text-surface-500 mt-1.5 uppercase tracking-widest">{card.label}</div>
         </div>
       {/each}
+    </div>
+
+    <!-- Storage Usage card -->
+    <div class="card mb-10">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-4">
+          <div class="w-11 h-11 flex items-center justify-center rounded-xl bg-warning/10">
+            <HardDrive class="w-5 h-5 text-warning" />
+          </div>
+          <div>
+            <p class="text-xs text-surface-500 uppercase tracking-widest font-semibold">Storage Usage</p>
+            <p class="text-2xl font-heading font-bold mt-0.5">{formatBytes(storageUsedBytes)}</p>
+          </div>
+        </div>
+        <a href="/dashboard/assets" class="btn-secondary text-xs px-3 py-1.5">Manage Assets →</a>
+      </div>
+      <div class="mt-4 w-full h-2 rounded-full bg-surface-100 dark:bg-surface-800 overflow-hidden">
+        <div
+          class="h-full rounded-full transition-all duration-500 {Math.min((storageUsedBytes / (500 * 1024 * 1024)) * 100, 100) > 80 ? 'bg-danger' : Math.min((storageUsedBytes / (500 * 1024 * 1024)) * 100, 100) > 50 ? 'bg-warning' : 'bg-brand-500'}"
+          style="width:{Math.min((storageUsedBytes / (500 * 1024 * 1024)) * 100, 100)}%"
+        ></div>
+      </div>
+      <p class="text-xs text-surface-500 mt-2">Reference quota: 500 MB</p>
     </div>
 
     <!-- Row 2: Content Distribution + Response Activity by Type -->

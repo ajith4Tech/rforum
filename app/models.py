@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, DateTime, Enum, ForeignKey, Integer, String, Text, func
+from sqlalchemy import BigInteger, Boolean, Date, DateTime, Enum, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSON, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -20,6 +20,10 @@ class SlideType(str, enum.Enum):
     WORD_CLOUD = "WORD_CLOUD"
 
 
+class UserRole(str, enum.Enum):
+    USER = "USER"
+    SUPER_ADMIN = "SUPER_ADMIN"
+
 
 class User(Base):
     __tablename__ = "users"
@@ -29,12 +33,20 @@ class User(Base):
     )
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
+    role: Mapped[UserRole] = mapped_column(
+        Enum(UserRole, native_enum=True, name="userrole"),
+        nullable=False,
+        default=UserRole.USER,
+        server_default=UserRole.USER.value,
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true", nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
 
     sessions: Mapped[list["Session"]] = relationship(back_populates="owner")
     events: Mapped[list["Event"]] = relationship(back_populates="owner")
+    session_assets: Mapped[list["SessionAsset"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
 
 class Event(Base):
@@ -178,6 +190,38 @@ class Question(Base):
     question: Mapped[str] = mapped_column(Text, nullable=False)
 
     session: Mapped["Session"] = relationship(back_populates="questions")
+
+
+class SessionAsset(Base):
+    """Tracks every file uploaded by a user (linked to a slide/session/event)."""
+    __tablename__ = "session_assets"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    session_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("sessions.id", ondelete="SET NULL"), nullable=True
+    )
+    event_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("events.id", ondelete="SET NULL"), nullable=True
+    )
+    slide_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("slides.id", ondelete="SET NULL"), nullable=True
+    )
+    file_name: Mapped[str] = mapped_column(String(500), nullable=False)
+    file_url: Mapped[str] = mapped_column(String(1000), nullable=False)
+    file_type: Mapped[str] = mapped_column(String(255), nullable=False, server_default="")
+    file_size: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default="0")
+    uploaded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    user: Mapped["User"] = relationship(back_populates="session_assets")
+    session: Mapped["Session | None"] = relationship(foreign_keys=[session_id])
+    event: Mapped["Event | None"] = relationship(foreign_keys=[event_id])
 
 
 class Feedback(Base):

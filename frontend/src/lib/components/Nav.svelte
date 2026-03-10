@@ -2,6 +2,7 @@
   import { page } from '$app/stores';
   import { theme, toggleTheme } from '$lib/theme';
   import { changePassword } from '$lib/api';
+  import { isSuperAdmin, currentUser } from '$lib/stores';
   import { Orbit, Moon, Sun, LogOut, ChevronDown, User, Lock, Info, Shield, Zap, Users, BarChart3, MessageSquare, LogIn, UserPlus, BookOpen, CalendarDays, Presentation, Radio, Layers, BarChart2, MessageCircleQuestion, Star, Cloud, Monitor } from 'lucide-svelte';
 
   let {
@@ -109,6 +110,17 @@
             {link.label}
           </a>
         {/each}
+        {#if $isSuperAdmin}
+          <a
+            href="/dashboard/admin"
+            class="px-3 py-1.5 rounded-lg text-base font-bold transition flex items-center gap-1.5 {isActive('/dashboard/admin')
+              ? 'text-rose-500 bg-rose-500/10'
+              : 'text-surface-500 hover:text-rose-400 hover:bg-rose-500/10'}"
+          >
+            <Shield class="w-3.5 h-3.5" />
+            Admin
+          </a>
+        {/if}
       </div>
     {/if}
   </div>
@@ -120,12 +132,35 @@
         onclick={() => menuOpen = !menuOpen}
         class="btn-secondary flex items-center gap-2 px-3 py-2"
       >
-        <User class="w-4 h-4" />
+        {#if $isSuperAdmin}
+          <Shield class="w-4 h-4 text-rose-500" />
+        {:else}
+          <User class="w-4 h-4" />
+        {/if}
         <ChevronDown class="w-3 h-3 text-surface-400 transition-transform {menuOpen ? 'rotate-180' : ''}" />
       </button>
 
       {#if menuOpen}
-        <div class="absolute right-0 mt-3 w-60 rounded-2xl shadow-2xl border border-surface-200 dark:border-surface-700/60 bg-white dark:bg-surface-900 overflow-hidden animate-fade-in">
+        <div class="absolute right-0 mt-3 w-64 rounded-2xl shadow-2xl border border-surface-200 dark:border-surface-700/60 bg-white dark:bg-surface-900 overflow-hidden animate-fade-in">
+          {#if authenticated && $currentUser}
+            <div class="px-4 py-3 border-b border-surface-200 dark:border-surface-700/60">
+              <p class="text-xs font-semibold text-surface-900 dark:text-surface-100 truncate">{$currentUser.email}</p>
+              <div class="flex items-center gap-1.5 mt-1">
+                {#if $isSuperAdmin}
+                  <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-rose-500/10 text-rose-500">
+                    <Shield class="w-3 h-3" /> Super Admin
+                  </span>
+                {:else}
+                  <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-surface-100 dark:bg-surface-800 text-surface-500">
+                    <User class="w-3 h-3" /> Moderator
+                  </span>
+                {/if}
+                {#if $currentUser && !$currentUser.is_active}
+                  <span class="px-2 py-0.5 rounded-full text-xs font-bold bg-amber-500/10 text-amber-500">Disabled</span>
+                {/if}
+              </div>
+            </div>
+          {/if}
           <div class="px-2 py-2 space-y-0.5">
             <button
               onclick={() => { menuOpen = false; showAbout = true; }}

@@ -1,8 +1,8 @@
 import uuid
 from datetime import date, datetime
-from pydantic import BaseModel, EmailStr, field_validator
+from pydantic import BaseModel, EmailStr, field_validator, Field
 
-from app.models import SlideType
+from app.models import SlideType, UserRole
 
 
 # ── Auth ──────────────────────────────────────────────
@@ -34,9 +34,21 @@ class ChangePasswordPayload(BaseModel):
 class UserOut(BaseModel):
     id: uuid.UUID
     email: str
+    role: UserRole
+    is_active: bool
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class UserRoleUpdate(BaseModel):
+    role: UserRole
+
+
+class UserAdminOut(UserOut):
+    """Extended user info for admin views."""
+    sessions_count: int = 0
+    events_count: int = 0
 
 
 class Token(BaseModel):
@@ -152,9 +164,9 @@ class SlideOut(BaseModel):
 
 # ── Response ──────────────────────────────────────────
 class ResponseCreate(BaseModel):
-    value: str
-    guest_identifier: str
-    name: str | None = None
+    value: str = Field(..., min_length=1, max_length=2000)
+    guest_identifier: str = Field(..., min_length=1, max_length=100)
+    name: str | None = Field(None, max_length=100)
     rating: int | None = None
 
     @field_validator("rating")
@@ -176,6 +188,25 @@ class ResponseOut(BaseModel):
     rating: int | None = None
     upvotes: int
     created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ── Session Assets ────────────────────────────────────
+class SessionAssetOut(BaseModel):
+    id: uuid.UUID
+    user_id: uuid.UUID
+    session_id: uuid.UUID | None = None
+    event_id: uuid.UUID | None = None
+    slide_id: uuid.UUID | None = None
+    file_name: str
+    file_url: str
+    file_type: str
+    file_size: int
+    uploaded_at: datetime
+    # Denormalized titles populated by the router
+    session_title: str | None = None
+    event_title: str | None = None
 
     model_config = {"from_attributes": True}
 

@@ -6,10 +6,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import create_access_token, get_current_user, hash_password, verify_password
 from app.config import get_settings
 from app.database import get_db
-from app.models import User
+from app.models import User, UserRole
 from app.schemas import ChangePasswordPayload, Token, UserCreate, UserOut
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+
+@router.get("/me", response_model=UserOut)
+async def get_me(user: User = Depends(get_current_user)):
+    return user
 
 
 @router.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
@@ -22,7 +27,11 @@ async def register(payload: UserCreate, db: AsyncSession = Depends(get_db)):
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Email already registered")
 
-    user = User(email=payload.email, hashed_password=hash_password(payload.password))
+    role = UserRole.USER
+    if settings.SUPER_ADMIN_EMAIL and payload.email.strip().lower() == settings.SUPER_ADMIN_EMAIL.strip().lower():
+        role = UserRole.SUPER_ADMIN
+
+    user = User(email=payload.email, hashed_password=hash_password(payload.password), role=role)
     db.add(user)
     await db.flush()
     await db.commit()
@@ -56,6 +65,9 @@ async def login(
 
     if not user or not verify_password(form_data.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Incorrect email or password")
+
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="Account is disabled. Contact an administrator.")
 
     token = create_access_token(user.id)
     return Token(access_token=token)

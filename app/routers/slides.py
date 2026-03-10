@@ -11,8 +11,9 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user
+from app.config import get_settings
 from app.database import get_db
-from app.models import Session, Slide, User
+from app.models import Session, SessionAsset, Slide, User, UserRole
 from app.schemas import SlideCreate, SlideOut, SlideUpdate
 
 router = APIRouter(prefix="/api/sessions/{session_id}/slides", tags=["slides"])
@@ -25,10 +26,11 @@ async def _verify_ownership(
         session_uuid = uuid.UUID(session_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid session ID format")
-    
-    result = await db.execute(
-        select(Session).where(Session.id == session_uuid, Session.owner_id == user.id)
-    )
+
+    query = select(Session).where(Session.id == session_uuid)
+    if user.role != UserRole.SUPER_ADMIN:
+        query = query.where(Session.owner_id == user.id)
+    result = await db.execute(query)
     session = result.scalar_one_or_none()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -152,11 +154,32 @@ async def upload_content_file(
     if not slide:
         raise HTTPException(status_code=404, detail="Slide not found")
 
+    settings = get_settings()
+    # Strip any directory components from the filename to prevent path traversal
+    original_name = Path(file.filename or "upload.bin").name or "upload.bin"
+    ext = Path(original_name).suffix.lower()
+
+    # Validate file extension
+    if ext not in settings.UPLOAD_ALLOWED_EXTENSIONS:
+        allowed = ", ".join(settings.UPLOAD_ALLOWED_EXTENSIONS)
+        raise HTTPException(
+            status_code=400,
+            detail=f"File type '{ext}' not allowed. Allowed types: {allowed}",
+        )
+
+    content = await file.read()
+
+    # Validate file size
+    max_bytes = settings.UPLOAD_MAX_MB * 1024 * 1024
+    if len(content) > max_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File size exceeds the {settings.UPLOAD_MAX_MB} MB limit",
+        )
+
     os.makedirs("uploads", exist_ok=True)
-    original_name = file.filename or "upload.bin"
     filename = f"{slide_id}_{original_name}"
     file_path = os.path.join("uploads", filename)
-    content = await file.read()
     with open(file_path, "wb") as handle:
         handle.write(content)
 
@@ -165,7 +188,6 @@ async def upload_content_file(
     file_name = original_name
 
     # Convert PPT/PPTX to PDF if possible
-    ext = Path(original_name).suffix.lower()
     if ext in {".ppt", ".pptx"}:
         try:
             result = subprocess.run(
@@ -210,6 +232,34 @@ async def upload_content_file(
     content_json["total_pages"] = total_pages
     slide.content_json = content_json
 
+    # ── Create or update SessionAsset record ─────────────
+    existing_asset_result = await db.execute(
+        select(SessionAsset).where(SessionAsset.slide_id == slide_uuid)
+    )
+    existing_asset = existing_asset_result.scalar_one_or_none()
+
+    # Fetch the session to get event_id
+    session_row = await db.execute(select(Session).where(Session.id == session_uuid))
+    session_obj = session_row.scalar_one_or_none()
+
+    if existing_asset:
+        existing_asset.file_name = file_name
+        existing_asset.file_url = file_url
+        existing_asset.file_type = content_type
+        existing_asset.file_size = len(content)
+    else:
+        new_asset = SessionAsset(
+            user_id=user.id,
+            session_id=session_uuid,
+            event_id=session_obj.event_id if session_obj else None,
+            slide_id=slide_uuid,
+            file_name=file_name,
+            file_url=file_url,
+            file_type=content_type,
+            file_size=len(content),
+        )
+        db.add(new_asset)
+
     await db.commit()
     return slide
 
@@ -240,8 +290,12 @@ async def get_page_image(
     if not file_url:
         raise HTTPException(status_code=404, detail="No file attached")
 
-    # Resolve to local path
+    # Resolve to local path and confine to the uploads/ directory
     file_path = file_url.lstrip("/")
+    uploads_dir = os.path.realpath("uploads")
+    resolved = os.path.realpath(file_path)
+    if not resolved.startswith(uploads_dir + os.sep) and resolved != uploads_dir:
+        raise HTTPException(status_code=400, detail="Invalid file path")
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="File not found on disk")
 

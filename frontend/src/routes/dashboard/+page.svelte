@@ -5,9 +5,12 @@
     createSession,
     listEvents,
     createEvent,
+    listAssets,
+    getStorageUsage,
+    formatBytes,
     isAuthenticated
   } from '$lib/api';
-  import { Plus, ExternalLink, Copy, Calendar, Presentation, Radio, ArrowRight, CheckSquare, Square, Trash2 } from 'lucide-svelte';
+  import { Plus, ExternalLink, Copy, Calendar, Presentation, Radio, ArrowRight, CheckSquare, Square, Trash2, HardDrive, File, RefreshCw, Upload } from 'lucide-svelte';
   import { onMount, onDestroy } from 'svelte';
 
   const CHECKLIST_KEY = 'rforum_checklist';
@@ -54,6 +57,8 @@
 
   let sessions: any[] = $state([]);
   let events: any[] = $state([]);
+  let recentAssets: any[] = $state([]);
+  let storageBytes = $state(0);
   let loading = $state(true);
 
   // Quick Create Event modal
@@ -95,11 +100,23 @@
     checklist = loadChecklist();
     if (!isAuthenticated()) { goto('/login'); return; }
     try {
-      const [sessionsResult, eventsResult] = await Promise.all([listSessions(), listEvents()]);
+      const [sessionsResult, eventsResult] = await Promise.all([
+        listSessions(), listEvents()
+      ]);
       sessions = sessionsResult;
       events = eventsResult;
     } catch {
       goto('/login');
+    }
+    // Assets/storage are non-critical — fetch separately so failures don't block the dashboard
+    try {
+      const [assetsResult, storageResult] = await Promise.all([
+        listAssets(), getStorageUsage()
+      ]);
+      recentAssets = (assetsResult as any[]).slice(0, 4);
+      storageBytes = (storageResult as any).total_bytes ?? 0;
+    } catch {
+      // silently ignore — dashboard still works without asset data
     } finally {
       loading = false;
       computeCountdowns();
@@ -160,8 +177,8 @@
     <div class="text-center text-surface-400 py-20">Loading…</div>
   {:else}
 
-    <!-- 3 Minimal Shortcuts -->
-    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-10">
+    <!-- 2 Action Shortcuts + Session Assets shortcut -->
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
 
       <!-- Add Event -->
       <button
@@ -190,6 +207,69 @@
           <p class="text-sm text-surface-500 mt-0.5">Start a new session</p>
         </div>
       </button>
+
+      <!-- Session Assets shortcut -->
+      <button
+        onclick={() => goto('/dashboard/assets')}
+        class="card card-interactive group flex items-center gap-5 text-left"
+      >
+        <div class="w-14 h-14 flex items-center justify-center rounded-2xl bg-warning/10 group-hover:bg-warning/20 transition flex-shrink-0">
+          <HardDrive class="w-7 h-7 text-warning" />
+        </div>
+        <div>
+          <h3 class="font-heading font-bold text-lg tracking-wide">Session Assets</h3>
+          <p class="text-sm text-surface-500 mt-0.5">{formatBytes(storageBytes)} used</p>
+        </div>
+      </button>
+    </div>
+
+    <!-- Session Assets card with recent uploads -->
+    <div class="card mb-8">
+      <div class="flex items-center justify-between mb-5">
+        <div class="flex items-center gap-3">
+          <div class="w-9 h-9 flex items-center justify-center rounded-xl bg-warning/10 flex-shrink-0">
+            <HardDrive class="w-4.5 h-4.5 text-warning" />
+          </div>
+          <h2 class="font-heading font-semibold text-sm uppercase tracking-widest text-surface-500">Session Assets</h2>
+        </div>
+        <a href="/dashboard/assets" class="text-xs text-brand-500 hover:underline flex items-center gap-1">
+          Manage Assets <ArrowRight class="w-3 h-3" />
+        </a>
+      </div>
+
+      {#if recentAssets.length === 0}
+        <div class="flex flex-col items-center py-8 gap-3 text-surface-500">
+          <Upload class="w-8 h-8 opacity-30" />
+          <p class="text-sm">No files uploaded yet. Upload slides through a session to get started.</p>
+        </div>
+      {:else}
+        <div class="divide-y divide-surface-100 dark:divide-surface-800 mb-5">
+          {#each recentAssets as asset (asset.id)}
+            <div class="flex items-center gap-4 py-3 first:pt-0">
+              <File class="w-4 h-4 text-surface-400 flex-shrink-0" />
+              <div class="flex-1 min-w-0">
+                <p class="text-sm font-medium truncate">{asset.file_name}</p>
+                <p class="text-xs text-surface-500 mt-0.5 truncate">
+                  {#if asset.session_title}Session: {asset.session_title}
+                  {:else if asset.event_title}Event: {asset.event_title}
+                  {:else}Unlinked{/if}
+                </p>
+              </div>
+              <div class="text-right flex-shrink-0">
+                <p class="text-xs text-surface-500">{formatBytes(asset.file_size)}</p>
+                <p class="text-xs text-surface-600 mt-0.5">{new Date(asset.uploaded_at).toLocaleDateString()}</p>
+              </div>
+            </div>
+          {/each}
+        </div>
+      {/if}
+
+      <div class="flex items-center justify-between pt-2 border-t border-surface-100 dark:border-surface-800">
+        <span class="text-xs text-surface-500">Storage Used: <span class="font-semibold text-surface-300">{formatBytes(storageBytes)}</span></span>
+        <a href="/dashboard/assets" class="btn-secondary text-xs px-3 py-1.5 flex items-center gap-1">
+          <HardDrive class="w-3 h-3" /> Manage Assets
+        </a>
+      </div>
     </div>
 
     <!-- Live Sessions (if any) -->

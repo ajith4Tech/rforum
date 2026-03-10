@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user
 from app.database import get_db
-from app.models import Event, Response, Session, Slide, SlideType, User
+from app.models import Event, Response, Session, SessionAsset, Slide, SlideType, User, UserRole
 
 router = APIRouter(prefix="/api/analytics", tags=["analytics"])
 
@@ -17,46 +17,52 @@ async def get_analytics(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    is_admin = user.role == UserRole.SUPER_ADMIN
+    # Admin sees platform-wide stats; regular user sees only their own
     user_id = user.id
 
     # Total events
-    total_events_result = await db.execute(
-        select(func.count(Event.id)).where(Event.owner_id == user_id)
-    )
+    events_q = select(func.count(Event.id))
+    if not is_admin:
+        events_q = events_q.where(Event.owner_id == user_id)
+    total_events_result = await db.execute(events_q)
     total_events = total_events_result.scalar() or 0
 
     # Total sessions
-    total_sessions_result = await db.execute(
-        select(func.count(Session.id)).where(Session.owner_id == user_id)
-    )
+    sessions_q = select(func.count(Session.id))
+    if not is_admin:
+        sessions_q = sessions_q.where(Session.owner_id == user_id)
+    total_sessions_result = await db.execute(sessions_q)
     total_sessions = total_sessions_result.scalar() or 0
 
     # Active (live) sessions
-    active_sessions_result = await db.execute(
-        select(func.count(Session.id)).where(
-            Session.owner_id == user_id, Session.is_live == True  # noqa: E712
-        )
-    )
+    active_q = select(func.count(Session.id)).where(Session.is_live == True)  # noqa: E712
+    if not is_admin:
+        active_q = active_q.where(Session.owner_id == user_id)
+    active_sessions_result = await db.execute(active_q)
     active_sessions = active_sessions_result.scalar() or 0
 
-    # Total unique participants (unique guest identifiers across all responses
-    # on slides owned by this user's sessions)
-    total_participants_result = await db.execute(
+    # Total unique participants
+    participants_q = (
         select(func.count(func.distinct(Response.guest_identifier)))
         .select_from(Response)
         .join(Slide, Slide.id == Response.slide_id)
         .join(Session, Session.id == Slide.session_id)
-        .where(Session.owner_id == user_id)
     )
+    if not is_admin:
+        participants_q = participants_q.where(Session.owner_id == user_id)
+    total_participants_result = await db.execute(participants_q)
     total_participants = total_participants_result.scalar() or 0
 
     # Slide type distribution
-    slide_type_result = await db.execute(
+    slide_type_q = (
         select(Slide.type, func.count(Slide.id))
         .join(Session, Session.id == Slide.session_id)
-        .where(Session.owner_id == user_id)
-        .group_by(Slide.type)
     )
+    if not is_admin:
+        slide_type_q = slide_type_q.where(Session.owner_id == user_id)
+    slide_type_q = slide_type_q.group_by(Slide.type)
+    slide_type_result = await db.execute(slide_type_q)
     slide_type_distribution = {
         row[0].value if hasattr(row[0], "value") else str(row[0]): row[1]
         for row in slide_type_result.all()
@@ -65,7 +71,7 @@ async def get_analytics(
     # Engagement over time: responses per day for the last 30 days
     now = datetime.now(timezone.utc)
     thirty_days_ago = now - timedelta(days=30)
-    engagement_result = await db.execute(
+    engagement_q = (
         select(
             func.date(Response.created_at).label("day"),
             func.count(Response.id).label("count"),
@@ -73,10 +79,12 @@ async def get_analytics(
         .select_from(Response)
         .join(Slide, Slide.id == Response.slide_id)
         .join(Session, Session.id == Slide.session_id)
-        .where(Session.owner_id == user_id, Response.created_at >= thirty_days_ago)
-        .group_by(func.date(Response.created_at))
-        .order_by(func.date(Response.created_at))
+        .where(Response.created_at >= thirty_days_ago)
     )
+    if not is_admin:
+        engagement_q = engagement_q.where(Session.owner_id == user_id)
+    engagement_q = engagement_q.group_by(func.date(Response.created_at)).order_by(func.date(Response.created_at))
+    engagement_result = await db.execute(engagement_q)
     engagement_over_time = [
         {"date": str(row.day), "responses": row.count}
         for row in engagement_result.all()
@@ -85,7 +93,7 @@ async def get_analytics(
     # ── Advanced Analytics ────────────────────────────
 
     # Average rating & rating distribution (from FEEDBACK slides with ratings)
-    rating_result = await db.execute(
+    rating_q = (
         select(
             func.avg(Response.rating),
             func.count(Response.id),
@@ -99,11 +107,13 @@ async def get_analytics(
         .join(Slide, Slide.id == Response.slide_id)
         .join(Session, Session.id == Slide.session_id)
         .where(
-            Session.owner_id == user_id,
             Slide.type == SlideType.FEEDBACK,
             Response.rating.isnot(None),
         )
     )
+    if not is_admin:
+        rating_q = rating_q.where(Session.owner_id == user_id)
+    rating_result = await db.execute(rating_q)
     rating_row = rating_result.one()
     avg_rating = round(float(rating_row[0]), 2) if rating_row[0] else None
     total_ratings = int(rating_row[1] or 0)
@@ -123,7 +133,7 @@ async def get_analytics(
     }
 
     # Per-session engagement: responses, unique participants, avg feedback rating
-    session_eng_result = await db.execute(
+    session_eng_q = (
         select(
             Session.id,
             Session.title,
@@ -139,10 +149,12 @@ async def get_analytics(
         .select_from(Session)
         .outerjoin(Slide, Slide.session_id == Session.id)
         .outerjoin(Response, Response.slide_id == Slide.id)
-        .where(Session.owner_id == user_id)
         .group_by(Session.id, Session.title)
         .order_by(func.count(Response.id).desc())
     )
+    if not is_admin:
+        session_eng_q = session_eng_q.where(Session.owner_id == user_id)
+    session_eng_result = await db.execute(session_eng_q)
     session_engagement = []
     for row in session_eng_result.all():
         session_engagement.append({
@@ -154,36 +166,45 @@ async def get_analytics(
         })
 
     # Total slides
-    total_slides_result = await db.execute(
-        select(func.count(Slide.id))
-        .join(Session, Session.id == Slide.session_id)
-        .where(Session.owner_id == user_id)
-    )
+    total_slides_q = select(func.count(Slide.id)).join(Session, Session.id == Slide.session_id)
+    if not is_admin:
+        total_slides_q = total_slides_q.where(Session.owner_id == user_id)
+    total_slides_result = await db.execute(total_slides_q)
     total_slides = total_slides_result.scalar() or 0
 
-    # Response counts grouped by slide type (different from slide counts – shows actual engagement per format)
-    response_by_type_result = await db.execute(
+    # Response counts grouped by slide type
+    resp_type_q = (
         select(Slide.type, func.count(Response.id))
         .select_from(Response)
         .join(Slide, Slide.id == Response.slide_id)
         .join(Session, Session.id == Slide.session_id)
-        .where(Session.owner_id == user_id)
         .group_by(Slide.type)
     )
+    if not is_admin:
+        resp_type_q = resp_type_q.where(Session.owner_id == user_id)
+    response_by_type_result = await db.execute(resp_type_q)
     response_counts_by_type = {
         row[0].value if hasattr(row[0], "value") else str(row[0]): row[1]
         for row in response_by_type_result.all()
     }
 
     # Total responses across all slides
-    total_responses_result = await db.execute(
+    total_resp_q = (
         select(func.count(Response.id))
         .select_from(Response)
         .join(Slide, Slide.id == Response.slide_id)
         .join(Session, Session.id == Slide.session_id)
-        .where(Session.owner_id == user_id)
     )
+    if not is_admin:
+        total_resp_q = total_resp_q.where(Session.owner_id == user_id)
+    total_responses_result = await db.execute(total_resp_q)
     total_responses = total_responses_result.scalar() or 0
+
+    # Storage used
+    storage_q = select(func.coalesce(func.sum(SessionAsset.file_size), 0))
+    if not is_admin:
+        storage_q = storage_q.where(SessionAsset.user_id == user_id)
+    storage_used_bytes = int(await db.scalar(storage_q) or 0)
 
     return {
         "total_events": total_events,
@@ -199,4 +220,5 @@ async def get_analytics(
         "rating_distribution": rating_distribution,
         "feedback_sentiment": feedback_sentiment,
         "session_engagement": session_engagement,
+        "storage_used_bytes": storage_used_bytes,
     }

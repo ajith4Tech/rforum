@@ -196,7 +196,7 @@
     slides = slides.map((s) => ({ ...s, is_active: s.id === slideId }));
     activeSlideId = slideId;
     await loadResponses(slideId);
-    ws?.send('slide_change', { slide_id: slideId });
+    ws?.send('slide_change', { slide_id: slideId, slide: slides.find((s) => s.id === slideId), activation: true });
   }
 
   function startEditing(slideId: string) {
@@ -247,7 +247,7 @@
       }
     });
     slides = slides.map((s) => (s.id === active.id ? updated : s));
-    ws?.send('slide_change', { slide_id: active.id });
+    ws?.send('slide_change', { slide_id: active.id, slide: updated, activation: false });
   }
 
   async function uploadContentFile() {
@@ -268,7 +268,7 @@
     const updated = await response.json();
     slides = slides.map((s) => (s.id === active.id ? updated : s));
     contentFile = null;
-    ws?.send('slide_change', { slide_id: active.id });
+    ws?.send('slide_change', { slide_id: active.id, slide: updated, activation: false });
   }
 
   async function changeContentPage(delta: number) {
@@ -330,7 +330,7 @@
       }
     });
     slides = slides.map((s) => (s.id === active.id ? updated : s));
-    ws?.send('slide_change', { slide_id: active.id });
+    ws?.send('slide_change', { slide_id: active.id, slide: updated, activation: false });
   }
 
   async function saveQnaSlide() {
@@ -343,7 +343,7 @@
       }
     });
     slides = slides.map((s) => (s.id === active.id ? updated : s));
-    ws?.send('slide_change', { slide_id: active.id });
+    ws?.send('slide_change', { slide_id: active.id, slide: updated, activation: false });
   }
 
   async function saveFeedbackSlide() {
@@ -356,7 +356,7 @@
       }
     });
     slides = slides.map((s) => (s.id === active.id ? updated : s));
-    ws?.send('slide_change', { slide_id: active.id });
+    ws?.send('slide_change', { slide_id: active.id, slide: updated, activation: false });
   }
 
   async function saveWordCloudSlide() {
@@ -369,7 +369,7 @@
       }
     });
     slides = slides.map((s) => (s.id === active.id ? updated : s));
-    ws?.send('slide_change', { slide_id: active.id });
+    ws?.send('slide_change', { slide_id: active.id, slide: updated, activation: false });
   }
 
   function getWordCloudData() {
@@ -388,12 +388,14 @@
   }
 
   async function goToContentSlide(direction: 'next' | 'prev') {
-    const ids = getContentSlideIds();
+    const ordered = [...slides].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+    const ids = ordered.map((s) => s.id);
     if (ids.length === 0) return;
-    const currentIndex = Math.max(ids.indexOf(activeSlideId || ''), 0);
+    const currentIndex = ids.indexOf(activeSlideId || '');
+    const base = currentIndex === -1 ? 0 : currentIndex;
     const nextIndex = direction === 'next'
-      ? Math.min(currentIndex + 1, ids.length - 1)
-      : Math.max(currentIndex - 1, 0);
+      ? Math.min(base + 1, ids.length - 1)
+      : Math.max(base - 1, 0);
     const nextId = ids[nextIndex];
     if (nextId && nextId !== activeSlideId) {
       await activateSlide(nextId);

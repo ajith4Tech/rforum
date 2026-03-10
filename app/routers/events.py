@@ -8,7 +8,7 @@ from sqlalchemy.orm import selectinload
 
 from app.auth import get_current_user
 from app.database import get_db
-from app.models import Event, Session, User
+from app.models import Event, Session, User, UserRole
 from app.schemas import (
     EventCreate,
     EventOut,
@@ -30,14 +30,17 @@ def _parse_uuid(value: str, label: str) -> uuid.UUID:
 
 async def _get_event_with_sessions(
     event_id: uuid.UUID,
-    user_id: uuid.UUID,
+    user_id: uuid.UUID | None,
     db: AsyncSession,
 ) -> Event | None:
-    result = await db.execute(
+    query = (
         select(Event)
         .options(selectinload(Event.sessions))
-        .where(Event.id == event_id, Event.owner_id == user_id)
+        .where(Event.id == event_id)
     )
+    if user_id is not None:
+        query = query.where(Event.owner_id == user_id)
+    result = await db.execute(query)
     return result.unique().scalar_one_or_none()
 
 
@@ -99,12 +102,14 @@ async def list_events(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(
+    query = (
         select(Event)
         .options(selectinload(Event.sessions))
-        .where(Event.owner_id == user.id)
         .order_by(Event.event_date.desc())
     )
+    if user.role != UserRole.SUPER_ADMIN:
+        query = query.where(Event.owner_id == user.id)
+    result = await db.execute(query)
     return result.unique().scalars().all()
 
 
@@ -173,7 +178,8 @@ async def get_event(
     db: AsyncSession = Depends(get_db),
 ):
     event_uuid = _parse_uuid(event_id, "event ID")
-    event = await _get_event_with_sessions(event_uuid, user.id, db)
+    owner_filter = None if user.role == UserRole.SUPER_ADMIN else user.id
+    event = await _get_event_with_sessions(event_uuid, owner_filter, db)
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
     return event
@@ -187,9 +193,10 @@ async def update_event(
     db: AsyncSession = Depends(get_db),
 ):
     event_uuid = _parse_uuid(event_id, "event ID")
-    result = await db.execute(
-        select(Event).where(Event.id == event_uuid, Event.owner_id == user.id)
-    )
+    query = select(Event).where(Event.id == event_uuid)
+    if user.role != UserRole.SUPER_ADMIN:
+        query = query.where(Event.owner_id == user.id)
+    result = await db.execute(query)
     event = result.scalar_one_or_none()
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
@@ -213,9 +220,10 @@ async def delete_event(
     db: AsyncSession = Depends(get_db),
 ):
     event_uuid = _parse_uuid(event_id, "event ID")
-    result = await db.execute(
-        delete(Event).where(Event.id == event_uuid, Event.owner_id == user.id)
-    )
+    stmt = delete(Event).where(Event.id == event_uuid)
+    if user.role != UserRole.SUPER_ADMIN:
+        stmt = stmt.where(Event.owner_id == user.id)
+    result = await db.execute(stmt)
     if result.rowcount == 0:
         raise HTTPException(status_code=404, detail="Event not found")
     await db.commit()
@@ -229,15 +237,18 @@ async def set_event_sessions(
     db: AsyncSession = Depends(get_db),
 ):
     event_uuid = _parse_uuid(event_id, "event ID")
-    event = await _get_event_with_sessions(event_uuid, user.id, db)
+    is_admin = user.role == UserRole.SUPER_ADMIN
+    owner_filter = None if is_admin else user.id
+    event = await _get_event_with_sessions(event_uuid, owner_filter, db)
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
 
-    # Validate all sessions exist and belong to the user
+    # Validate all sessions exist (and belong to the user if not super admin)
     if payload.session_ids:
-        result = await db.execute(
-            select(Session).where(Session.id.in_(payload.session_ids), Session.owner_id == user.id)
-        )
+        session_query = select(Session).where(Session.id.in_(payload.session_ids))
+        if not is_admin:
+            session_query = session_query.where(Session.owner_id == user.id)
+        result = await db.execute(session_query)
         found_sessions = result.scalars().all()
         found_ids = {s.id for s in found_sessions}
         missing = [str(sid) for sid in payload.session_ids if sid not in found_ids]
@@ -253,19 +264,17 @@ async def set_event_sessions(
         keep_ids = set(payload.session_ids)
         to_detach = current_ids - keep_ids
         if to_detach:
-            await db.execute(
-                update(Session)
-                .where(Session.id.in_(to_detach), Session.owner_id == user.id)
-                .values(event_id=None)
-            )
+            detach_stmt = update(Session).where(Session.id.in_(to_detach))
+            if not is_admin:
+                detach_stmt = detach_stmt.where(Session.owner_id == user.id)
+            await db.execute(detach_stmt.values(event_id=None))
 
     # Then, attach the new sessions
     if payload.session_ids:
-        await db.execute(
-            update(Session)
-            .where(Session.id.in_(payload.session_ids), Session.owner_id == user.id)
-            .values(event_id=event.id)
-        )
+        attach_stmt = update(Session).where(Session.id.in_(payload.session_ids))
+        if not is_admin:
+            attach_stmt = attach_stmt.where(Session.owner_id == user.id)
+        await db.execute(attach_stmt.values(event_id=event.id))
 
     await db.commit()
-    return await _get_event_with_sessions(event.id, user.id, db)
+    return await _get_event_with_sessions(event.id, owner_filter, db)

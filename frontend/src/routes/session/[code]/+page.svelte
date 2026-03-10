@@ -111,17 +111,29 @@
 
   async function handleWsMessage(msg: any) {
     if (msg.event === 'slide_change') {
-      try {
-        // Reload session to get new active slide
-        session = await joinSession(code);
-        const active = normalizeSlide(session.slides?.find((s: any) => s.is_active));
-        activeSlide = active || null;
+      if (msg.data?.slide) {
+        // Use the slide data embedded in the message — no HTTP round-trip needed
+        const cj = { ...(msg.data.slide.content_json || {}) };
+        if ('file_url' in cj) { cj.has_file = true; delete cj.file_url; }
+        delete cj.file_name;
+        activeSlide = normalizeSlide({ ...msg.data.slide, content_json: cj });
         submitted = false;
         selectedOption = '';
         inputValue = '';
-        if (active) responses = await listResponses(active.id);
-      } catch {
-        // Session may have ended; wait for session_update event
+        if (msg.data.activation) responses = [];
+      } else {
+        try {
+          // Fallback: re-fetch session (messages missing slide data)
+          session = await joinSession(code);
+          const active = normalizeSlide(session.slides?.find((s: any) => s.is_active));
+          activeSlide = active || null;
+          submitted = false;
+          selectedOption = '';
+          inputValue = '';
+          if (active) responses = await listResponses(active.id);
+        } catch {
+          // Session may have ended; wait for session_update event
+        }
       }
     } else if (msg.event === 'new_response') {
       responses = [...responses, msg.data];

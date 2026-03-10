@@ -12,6 +12,13 @@ class Settings(BaseSettings):
     CORS_ORIGINS: list[str] = [
     "https://rforum.t4gc.in",
     ]
+    # Super admin: set this env var to auto-promote a user on registration
+    SUPER_ADMIN_EMAIL: str = ""
+    # Upload settings
+    UPLOAD_MAX_MB: int = 20  # Maximum upload file size in MB
+    UPLOAD_ALLOWED_EXTENSIONS: list[str] = [
+        ".pdf", ".ppt", ".pptx", ".doc", ".docx", ".txt", ".odp", ".odt"
+    ]
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 

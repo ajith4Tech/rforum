@@ -4,11 +4,13 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import ORJSONResponse
 from redis.asyncio import Redis
 
 from app.config import get_settings
 from app.database import engine
-from app.routers import auth, responses, sessions, slides, ws, polls, qna, feedback, events, analytics
+from app.routers import auth, responses, sessions, slides, ws, events, analytics
+from app.routers import admin, session_assets
 
 # Ensure the 'rforum' directory is in PYTHONPATH
 sys.path.append(str(Path(__file__).resolve().parent.parent))
@@ -31,6 +33,7 @@ app = FastAPI(
     description="Real-time audience engagement platform",
     version="1.0.0",
     lifespan=lifespan,
+    default_response_class=ORJSONResponse,
     docs_url=None,
     redoc_url=None,
     openapi_url=None,
@@ -54,9 +57,8 @@ app.include_router(responses.router)
 app.include_router(events.router)
 app.include_router(analytics.router)
 app.include_router(ws.router)
-app.include_router(polls.router)
-app.include_router(qna.router)
-app.include_router(feedback.router)
+app.include_router(admin.router)
+app.include_router(session_assets.router)
 
 
 @app.get("/api/health")

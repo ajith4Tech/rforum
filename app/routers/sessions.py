@@ -9,7 +9,7 @@ from sqlalchemy.orm import selectinload
 
 from app.auth import get_current_user
 from app.database import get_db
-from app.models import Event, Session, User
+from app.models import Event, Session, User, UserRole
 from app.schemas import SessionCreate, SessionOut, SessionUpdate, SessionWithSlides
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
@@ -28,9 +28,11 @@ async def create_session(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(
-        select(Event).where(Event.id == payload.event_id, Event.owner_id == user.id)
-    )
+    is_admin = user.role == UserRole.SUPER_ADMIN
+    event_query = select(Event).where(Event.id == payload.event_id)
+    if not is_admin:
+        event_query = event_query.where(Event.owner_id == user.id)
+    result = await db.execute(event_query)
     event = result.scalar_one_or_none()
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
@@ -57,9 +59,10 @@ async def list_sessions(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(
-        select(Session).where(Session.owner_id == user.id).order_by(Session.created_at.desc())
-    )
+    query = select(Session).order_by(Session.created_at.desc())
+    if user.role != UserRole.SUPER_ADMIN:
+        query = query.where(Session.owner_id == user.id)
+    result = await db.execute(query)
     return result.scalars().all()
 
 
@@ -73,12 +76,15 @@ async def get_session(
         session_uuid = uuid.UUID(session_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid session ID format")
-    
-    result = await db.execute(
+
+    query = (
         select(Session)
         .options(selectinload(Session.slides))
-        .where(Session.id == session_uuid, Session.owner_id == user.id)
+        .where(Session.id == session_uuid)
     )
+    if user.role != UserRole.SUPER_ADMIN:
+        query = query.where(Session.owner_id == user.id)
+    result = await db.execute(query)
     session = result.unique().scalar_one_or_none()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -91,11 +97,14 @@ async def get_session_by_code(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(
+    query = (
         select(Session)
         .options(selectinload(Session.slides))
-        .where(Session.unique_code == code, Session.owner_id == user.id)
+        .where(Session.unique_code == code)
     )
+    if user.role != UserRole.SUPER_ADMIN:
+        query = query.where(Session.owner_id == user.id)
+    result = await db.execute(query)
     session = result.unique().scalar_one_or_none()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -113,10 +122,11 @@ async def update_session(
         session_uuid = uuid.UUID(session_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid session ID format")
-    
-    result = await db.execute(
-        select(Session).where(Session.id == session_uuid, Session.owner_id == user.id)
-    )
+
+    query = select(Session).where(Session.id == session_uuid)
+    if user.role != UserRole.SUPER_ADMIN:
+        query = query.where(Session.owner_id == user.id)
+    result = await db.execute(query)
     session = result.scalar_one_or_none()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -138,9 +148,10 @@ async def delete_session(
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid session ID format")
     
-    result = await db.execute(
-        delete(Session).where(Session.id == session_uuid, Session.owner_id == user.id)
-    )
+    stmt = delete(Session).where(Session.id == session_uuid)
+    if user.role != UserRole.SUPER_ADMIN:
+        stmt = stmt.where(Session.owner_id == user.id)
+    result = await db.execute(stmt)
     if result.rowcount == 0:
         raise HTTPException(status_code=404, detail="Session not found")
     await db.commit()
