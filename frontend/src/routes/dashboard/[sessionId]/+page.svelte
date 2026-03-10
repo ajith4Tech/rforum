@@ -1,6 +1,6 @@
 <script lang="ts">
   import {
-    getSession, updateSession, createSlide, updateSlide, deleteSlide, listResponses, resolveFileUrl, getPageImageUrl
+    getSession, updateSession, createSlide, updateSlide, deleteSlide, listResponses, getPageImageUrl
   } from '$lib/api';
   import { RforumWebSocket } from '$lib/ws';
   import type { ConnectionStatus as WsStatus } from '$lib/ws';
@@ -10,8 +10,8 @@
     MessageSquare,
     AlignLeft,
     FileText,
-    Pencil,
-    Cloud
+    Cloud,
+    NotebookPen
   } from 'lucide-svelte';
   import Sidebar from '$lib/components/Sidebar.svelte';
 
@@ -25,9 +25,6 @@
   let wsStatus: WsStatus = $state('disconnected');
   let loading = $state(true);
   let errorMessage = $state('');
-  let slideTitle = $state('');
-  let slideFile: FileList | null = $state(null);
-  let currentSlideIndex = $state(0);
   let contentTitle = $state('');
   let contentBody = $state('');
   let contentFile: FileList | null = $state(null);
@@ -37,6 +34,9 @@
   let feedbackPrompt = $state('');
   let wordCloudPrompt = $state('');
   let editingSlideId = $state<string | null>(null);
+  let moderatorNotes = $state('');
+  let notesSavedFlash = $state(false);
+  let notesSaveTimer: ReturnType<typeof setTimeout> | null = null;
   const activeSlide = $derived(getActiveSlide());
   const activeType = $derived(activeSlide?.type?.toUpperCase());
 
@@ -78,44 +78,50 @@
   });
 
   onMount(async () => {
-    console.log('onMount triggered');
     try {
       sessionId = typeof window !== 'undefined'
         ? window.location.pathname.split('/').pop() || ''
         : '';
-      console.log('Fetching session data for sessionId:', sessionId);
       session = await getSession(sessionId);
-      console.log('Session data:', session);
 
       slides = session.slides || [];
-      console.log('Slides:', slides);
 
       const active = slides.find((s: any) => s.is_active);
       if (active) {
         activeSlideId = active.id;
-        console.log('Active slide ID:', activeSlideId);
         await loadResponses(active.id);
-        console.log('Responses loaded for active slide');
       }
+
+      // Load moderator notes for this session
+      const savedNotes = localStorage.getItem(`rforum_notes_${sessionId}`);
+      if (savedNotes !== null) moderatorNotes = savedNotes;
 
       // Connect WebSocket
       ws = new RforumWebSocket(session.unique_code);
       ws.onStatusChange((s) => { wsStatus = s; });
       ws.connect();
       ws.onMessage(handleWsMessage);
-      console.log('WebSocket connected');
     } catch (error) {
-      console.error('Error in onMount:', error);
       errorMessage = error.message || 'Failed to load session. Please try again later.';
     } finally {
       loading = false;
-      console.log('Loading complete');
     }
   });
 
   onDestroy(() => {
+    if (notesSaveTimer) clearTimeout(notesSaveTimer);
     ws?.disconnect();
   });
+
+  function handleNotesInput(e: Event) {
+    moderatorNotes = (e.currentTarget as HTMLTextAreaElement).value;
+    if (notesSaveTimer) clearTimeout(notesSaveTimer);
+    notesSaveTimer = setTimeout(() => {
+      localStorage.setItem(`rforum_notes_${sessionId}`, moderatorNotes);
+      notesSavedFlash = true;
+      setTimeout(() => { notesSavedFlash = false; }, 1500);
+    }, 600);
+  }
 
   function handleWsMessage(msg: any) {
     if (msg.event === 'new_response') {
@@ -124,6 +130,19 @@
       slideResponses = slideResponses.map((r) =>
         r.id === msg.data.id ? { ...r, upvotes: msg.data.upvotes } : r
       );
+    } else if (msg.event === 'page_change') {
+      const active = getActiveSlide();
+      if (active && msg.data?.slide_id === active.id) {
+        slides = slides.map((s) =>
+          s.id === active.id
+            ? { ...s, content_json: { ...s.content_json, file_page: msg.data.file_page, total_pages: msg.data.total_pages ?? s.content_json?.total_pages } }
+            : s
+        );
+      }
+    } else if (msg.event === 'session_update') {
+      if (session && msg.data?.is_live !== undefined) {
+        session = { ...session, is_live: msg.data.is_live };
+      }
     }
   }
 
@@ -173,7 +192,7 @@
   }
 
   async function activateSlide(slideId: string) {
-    const slide = await updateSlide(sessionId, slideId, { is_active: true });
+    await updateSlide(sessionId, slideId, { is_active: true });
     slides = slides.map((s) => ({ ...s, is_active: s.id === slideId }));
     activeSlideId = slideId;
     await loadResponses(slideId);
@@ -208,10 +227,6 @@
 
   function getActiveSlide() {
     return slides.find((s) => s.id === activeSlideId);
-  }
-
-  function getSlideTypeKey(slide: any) {
-    return slide?.type?.toUpperCase?.() || '';
   }
 
   function getContentSlideIds() {
@@ -260,7 +275,9 @@
     const active = getActiveSlide();
     if (!active) return;
     const current = active.content_json?.file_page || 1;
-    const next = Math.max(1, current + delta);
+    const total = active.content_json?.total_pages;
+    let next = Math.max(1, current + delta);
+    if (total) next = Math.min(next, total);
     slides = slides.map((s) =>
       s.id === active.id
         ? { ...s, content_json: { ...s.content_json, file_page: next } }
@@ -398,49 +415,6 @@
     }));
   }
 
-  async function uploadSlide() {
-    if (!slideTitle || !slideFile || slideFile.length === 0) {
-      alert('Please provide a title and select a file.');
-      return;
-    }
-
-    const formData = new FormData();
-    formData.append('session_id', session.id);
-    formData.append('title', slideTitle);
-    formData.append('file', slideFile[0]);
-
-    try {
-      const response = await fetch('/slides/upload', {
-        method: 'POST',
-        body: formData
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to upload slide');
-      }
-
-      const newSlide = await response.json();
-      slides = [...slides, newSlide];
-      alert('Slide uploaded successfully!');
-      slideTitle = '';
-      slideFile = null;
-    } catch (error) {
-      console.error('Error uploading slide:', error);
-      alert('Failed to upload slide. Please try again.');
-    }
-  }
-
-  function nextSlide() {
-    if (currentSlideIndex < slides.length - 1) {
-      currentSlideIndex++;
-    }
-  }
-
-  function previousSlide() {
-    if (currentSlideIndex > 0) {
-      currentSlideIndex--;
-    }
-  }
 </script>
 
 <svelte:head>
@@ -486,8 +460,9 @@
           {:else}
             {#if activeType === 'POLL'}
               <div class="card p-6 space-y-4">
-                <div class="text-lg font-semibold">Poll</div>
-                {#if editingSlideId === activeSlideId}
+                <div class="text-lg font-semibold">Poll</div>                {#if activeSlide.content_json?.question && editingSlideId !== activeSlideId}
+                  <p class="text-base font-medium text-surface-200">{activeSlide.content_json.question}</p>
+                {/if}                {#if editingSlideId === activeSlideId}
                   <input class="input-field" type="text" bind:value={pollQuestion} placeholder="Poll question" />
                   <div class="space-y-2">
                     {#each pollOptions as option, index (index)}
@@ -600,7 +575,7 @@
                 {#if activeSlide.content_json?.file_url}
                     <div class="flex items-center gap-2">
                       <button onclick={() => changeContentPage(-1)} class="btn-secondary" disabled={(activeSlide.content_json?.file_page || 1) <= 1}>Prev page</button>
-                      <button onclick={() => changeContentPage(1)} class="btn-secondary">Next page</button>
+                      <button onclick={() => changeContentPage(1)} class="btn-secondary" disabled={activeSlide.content_json?.total_pages != null && (activeSlide.content_json?.file_page || 1) >= activeSlide.content_json.total_pages}>Next page</button>
                       <div class="text-xs text-surface-400">Page {activeSlide.content_json?.file_page || 1}{activeSlide.content_json?.total_pages ? ` / ${activeSlide.content_json.total_pages}` : ''}</div>
                     </div>
                     <div class="overflow-x-auto">
@@ -647,6 +622,26 @@
             {/if}
           {/if}
         </section>
+      </div>
+    {/if}
+
+    <!-- Moderator Notes -->
+    {#if !loading && !errorMessage}
+      <div class="card mt-6 mx-0">
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center gap-2">
+            <NotebookPen class="w-4 h-4 text-brand-500" />
+            <h2 class="font-heading font-semibold text-sm uppercase tracking-widest text-surface-500">Moderator Notes</h2>
+          </div>
+          <span class="text-xs transition-opacity duration-300 {notesSavedFlash ? 'text-emerald-500 opacity-100' : 'opacity-0'}">Saved</span>
+        </div>
+        <textarea
+          class="input-field w-full resize-y text-sm"
+          rows="5"
+          placeholder="Jot down notes for this session — talking points, reminders, cues… Only you can see this."
+          value={moderatorNotes}
+          oninput={handleNotesInput}
+        ></textarea>
       </div>
     {/if}
   </main>

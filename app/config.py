@@ -10,17 +10,7 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 24 hours
     INVITE_CODE: str = "RFORUM01"  # Override via INVITE_CODE env var
     CORS_ORIGINS: list[str] = [
-    "http://localhost:5173",
-    "http://localhost:3000",
-    "http://localhost:4173",
-    "http://localhost:8080",
-    "http://localhost:8000",
-    "http://127.0.0.1:5173",
-    "http://127.0.0.1:4173",
-
-    # ✅ ADD THESE
-    "http://13.50.245.253:5173",
-    "http://13.50.245.253",
+    "https://rforum.t4gc.in",
     ]
 
     model_config = {"env_file": ".env", "extra": "ignore"}

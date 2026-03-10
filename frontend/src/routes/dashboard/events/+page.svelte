@@ -169,7 +169,7 @@
       <h1 class="text-3xl font-heading font-bold tracking-wide">All Events</h1>
       <p class="text-sm text-surface-500 mt-1.5">Manage your events and their sessions</p>
     </div>
-    <button class="btn-primary text-sm flex items-center gap-2" on:click={() => showCreateEvent = true}>
+    <button class="btn-primary text-sm flex items-center gap-2" onclick={() => showCreateEvent = true}>
       <Plus class="w-4 h-4" />
       Create Event
     </button>
@@ -186,7 +186,7 @@
         <h3 class="text-lg font-semibold">No events yet</h3>
         <p class="text-sm text-surface-400 mt-1">Create your first event to get started</p>
       </div>
-      <button class="btn-primary text-sm" on:click={() => showCreateEvent = true}>Create Event</button>
+      <button class="btn-primary text-sm" onclick={() => showCreateEvent = true}>Create Event</button>
     </div>
   {:else}
     <div class="space-y-4">
@@ -214,16 +214,16 @@
     <div class="card w-full max-w-lg">
       <div class="flex items-center justify-between mb-4">
         <h2 class="text-lg font-semibold">Create Event</h2>
-        <button class="btn-secondary text-sm" on:click={() => showCreateEvent = false}>Close</button>
+        <button class="btn-secondary text-sm" onclick={() => showCreateEvent = false}>Close</button>
       </div>
-      <form on:submit|preventDefault={handleCreateEvent} class="grid gap-3">
+      <form onsubmit={(e) => { e.preventDefault(); handleCreateEvent(); }} class="grid gap-3">
         <div class="grid gap-3 md:grid-cols-2">
           <input type="text" bind:value={newEventTitle} placeholder="Event title..." class="input-field" />
           <input type="date" bind:value={newEventDate} class="input-field" />
         </div>
         <textarea rows="2" bind:value={newEventDescription} placeholder="Description (optional)" class="input-field"></textarea>
         <div class="flex justify-end gap-2">
-          <button type="button" class="btn-secondary" on:click={() => showCreateEvent = false}>Cancel</button>
+          <button type="button" class="btn-secondary" onclick={() => showCreateEvent = false}>Cancel</button>
           <button type="submit" class="btn-primary text-sm" disabled={creatingEvent}>
             {creatingEvent ? 'Creating...' : 'Create Event'}
           </button>
@@ -238,16 +238,16 @@
     <div class="card w-full max-w-lg">
       <div class="flex items-center justify-between mb-4">
         <h2 class="text-lg font-semibold">Edit Event</h2>
-        <button class="btn-secondary text-sm" on:click={() => showEditEvent = false}>Close</button>
+        <button class="btn-secondary text-sm" onclick={() => showEditEvent = false}>Close</button>
       </div>
-      <form on:submit|preventDefault={handleUpdateEvent} class="grid gap-3">
+      <form onsubmit={(e) => { e.preventDefault(); handleUpdateEvent(); }} class="grid gap-3">
         <div class="grid gap-3 md:grid-cols-2">
           <input type="text" bind:value={editEventTitle} placeholder="Event title..." class="input-field" />
           <input type="date" bind:value={editEventDate} class="input-field" />
         </div>
         <textarea rows="2" bind:value={editEventDescription} placeholder="Description (optional)" class="input-field"></textarea>
         <div class="flex justify-end gap-2">
-          <button type="button" class="btn-secondary" on:click={() => showEditEvent = false}>Cancel</button>
+          <button type="button" class="btn-secondary" onclick={() => showEditEvent = false}>Cancel</button>
           <button type="submit" class="btn-primary text-sm" disabled={savingEditEvent}>
             {savingEditEvent ? 'Saving...' : 'Save Changes'}
           </button>

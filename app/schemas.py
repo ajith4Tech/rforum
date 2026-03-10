@@ -11,10 +11,24 @@ class UserCreate(BaseModel):
     password: str
     invite_code: str
 
+    @field_validator('password')
+    @classmethod
+    def password_strength(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError('Password must be at least 8 characters')
+        return v
+
 
 class ChangePasswordPayload(BaseModel):
     current_password: str
     new_password: str
+
+    @field_validator('new_password')
+    @classmethod
+    def new_password_strength(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError('Password must be at least 8 characters')
+        return v
 
 
 class UserOut(BaseModel):

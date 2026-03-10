@@ -70,7 +70,7 @@
   </div>
 
   <!-- Create new session -->
-  <form on:submit|preventDefault={handleCreate} class="card p-6 flex gap-3 mb-8">
+  <form onsubmit={(e) => { e.preventDefault(); handleCreate(); }} class="card p-6 flex gap-3 mb-8">
     <select class="input-field w-52" bind:value={newSessionEventId}>
       <option value="" disabled>Select event</option>
       {#each events as event (event.id)}
@@ -118,7 +118,7 @@
             </div>
             <div class="flex items-center gap-3 text-sm text-surface-500">
               <button
-                on:click={() => copyCode(session.unique_code)}
+                onclick={() => copyCode(session.unique_code)}
                 class="flex items-center gap-1 font-mono hover:text-surface-300 transition-colors"
               >
                 <Copy class="w-3 h-3" />
@@ -133,7 +133,7 @@
               <ExternalLink class="w-3.5 h-3.5" />
               Manage
             </a>
-            <button on:click={() => handleDelete(session.id)} class="btn-danger p-2.5">
+            <button onclick={() => handleDelete(session.id)} class="btn-danger p-2.5">
               <Trash2 class="w-4 h-4" />
             </button>
           </div>

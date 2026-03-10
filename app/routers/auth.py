@@ -39,8 +39,8 @@ async def change_password(
 ):
     if not verify_password(payload.current_password, user.hashed_password):
         raise HTTPException(status_code=400, detail="Current password is incorrect")
-    if len(payload.new_password) < 6:
-        raise HTTPException(status_code=400, detail="New password must be at least 6 characters")
+    if len(payload.new_password) < 8:
+        raise HTTPException(status_code=400, detail="New password must be at least 8 characters")
     user.hashed_password = hash_password(payload.new_password)
     await db.commit()
     return {"message": "Password updated successfully"}

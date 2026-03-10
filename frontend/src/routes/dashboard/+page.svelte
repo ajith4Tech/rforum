@@ -7,8 +7,50 @@
     createEvent,
     isAuthenticated
   } from '$lib/api';
-  import { Plus, ExternalLink, Copy, Calendar, Presentation, Radio, ArrowRight } from 'lucide-svelte';
+  import { Plus, ExternalLink, Copy, Calendar, Presentation, Radio, ArrowRight, CheckSquare, Square, Trash2 } from 'lucide-svelte';
   import { onMount, onDestroy } from 'svelte';
+
+  const CHECKLIST_KEY = 'rforum_checklist';
+  const DEFAULT_ITEMS = [
+    { id: '1', label: 'Slides uploaded',     done: false },
+    { id: '2', label: 'Poll questions added', done: false },
+    { id: '3', label: 'Test session code',    done: false },
+    { id: '4', label: 'Enable audience Q&A', done: false },
+  ];
+
+  function loadChecklist() {
+    try {
+      const raw = localStorage.getItem(CHECKLIST_KEY);
+      return raw ? JSON.parse(raw) : DEFAULT_ITEMS.map(i => ({ ...i }));
+    } catch { return DEFAULT_ITEMS.map(i => ({ ...i })); }
+  }
+  function saveChecklist(items: typeof checklist) {
+    localStorage.setItem(CHECKLIST_KEY, JSON.stringify(items));
+  }
+
+  let checklist: { id: string; label: string; done: boolean }[] = $state([]);
+  let newCheckItem = $state('');
+  let doneCount = $derived(checklist.filter(i => i.done).length);
+
+  function toggleItem(id: string) {
+    checklist = checklist.map(i => i.id === id ? { ...i, done: !i.done } : i);
+    saveChecklist(checklist);
+  }
+  function addItem() {
+    const label = newCheckItem.trim();
+    if (!label) return;
+    checklist = [...checklist, { id: Date.now().toString(), label, done: false }];
+    newCheckItem = '';
+    saveChecklist(checklist);
+  }
+  function removeItem(id: string) {
+    checklist = checklist.filter(i => i.id !== id);
+    saveChecklist(checklist);
+  }
+  function resetChecklist() {
+    checklist = DEFAULT_ITEMS.map(i => ({ ...i }));
+    saveChecklist(checklist);
+  }
 
   let sessions: any[] = $state([]);
   let events: any[] = $state([]);
@@ -50,6 +92,7 @@
   }
 
   onMount(async () => {
+    checklist = loadChecklist();
     if (!isAuthenticated()) { goto('/login'); return; }
     try {
       const [sessionsResult, eventsResult] = await Promise.all([listSessions(), listEvents()]);
@@ -147,27 +190,6 @@
           <p class="text-sm text-surface-500 mt-0.5">Start a new session</p>
         </div>
       </button>
-
-      <!-- Manage Live Sessions -->
-      <a
-        href="/dashboard/sessions"
-        class="card card-interactive group flex items-center gap-5"
-      >
-        <div class="w-14 h-14 flex items-center justify-center rounded-2xl bg-live/10 group-hover:bg-live/20 transition flex-shrink-0">
-          <Radio class="w-7 h-7 text-live" />
-        </div>
-        <div class="flex-1 min-w-0">
-          <h3 class="font-heading font-bold text-lg tracking-wide">Live Sessions</h3>
-          <p class="text-sm text-surface-500 mt-0.5">
-            {#if liveSessions.length > 0}
-              <span class="text-live font-semibold">{liveSessions.length} live</span> right now
-            {:else}
-              Manage sessions
-            {/if}
-          </p>
-        </div>
-        <ArrowRight class="w-5 h-5 text-surface-500 group-hover:text-live transition flex-shrink-0" />
-      </a>
     </div>
 
     <!-- Live Sessions (if any) -->
@@ -197,6 +219,47 @@
         </div>
       </div>
     {/if}
+
+    <!-- Checklist -->
+    <div class="card mb-8">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="font-heading font-semibold text-sm uppercase tracking-widest text-surface-500">Session Checklist</h2>
+
+        <div class="flex items-center gap-3">
+          <span class="text-xs text-surface-500">{doneCount}/{checklist.length} done</span>
+          <button onclick={resetChecklist} class="text-xs text-surface-500 hover:text-surface-300 transition">Reset</button>
+        </div>
+      </div>
+      <div class="space-y-1 mb-3">
+        {#each checklist as item (item.id)}
+          <div class="flex items-center gap-3 group py-1">
+            <button onclick={() => toggleItem(item.id)} class="flex-shrink-0 text-surface-400 hover:text-brand-400 transition">
+              {#if item.done}
+                <CheckSquare class="w-4 h-4 text-brand-400" />
+              {:else}
+                <Square class="w-4 h-4" />
+              {/if}
+            </button>
+            <span class="flex-1 text-sm font-heading {item.done ? 'line-through text-surface-600' : ''}">{item.label}</span>
+            <button onclick={() => removeItem(item.id)} class="opacity-0 group-hover:opacity-100 transition text-surface-600 hover:text-rose-400">
+              <Trash2 class="w-3.5 h-3.5" />
+            </button>
+          </div>
+        {/each}
+      </div>
+      <form onsubmit={(e) => { e.preventDefault(); addItem(); }} class="flex gap-2">
+        <input
+          type="text"
+          bind:value={newCheckItem}
+          placeholder="Add item…"
+          class="input-field text-sm py-1.5 flex-1"
+          maxlength="100"
+        />
+        <button type="submit" class="btn-secondary text-sm px-3 py-1.5 flex items-center gap-1" disabled={!newCheckItem.trim()}>
+          <Plus class="w-3.5 h-3.5" /> Add
+        </button>
+      </form>
+    </div>
 
     <!-- Upcoming Events -->
     <div class="card">

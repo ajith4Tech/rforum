@@ -1,6 +1,7 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -59,6 +60,7 @@ async def list_responses(
 async def upvote_response(
     slide_id: str,
     response_id: str,
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ):
     try:
@@ -66,7 +68,14 @@ async def upvote_response(
         response_uuid = uuid.UUID(response_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid ID format")
-    
+
+    # Rate-limit: one upvote per IP per response (stored in Redis)
+    redis: Redis = request.app.state.redis
+    rate_key = f"upvote:{response_id}:{request.client.host}"
+    if await redis.exists(rate_key):
+        raise HTTPException(status_code=429, detail="Already upvoted")
+    await redis.setex(rate_key, 86400, "1")  # 24-hour window
+
     result = await db.execute(
         select(Response).where(Response.id == response_uuid, Response.slide_id == slide_uuid)
     )

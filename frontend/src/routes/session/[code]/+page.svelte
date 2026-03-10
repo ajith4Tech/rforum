@@ -111,14 +111,18 @@
 
   async function handleWsMessage(msg: any) {
     if (msg.event === 'slide_change') {
-      // Reload session to get new active slide
-      session = await joinSession(code);
-      const active = normalizeSlide(session.slides?.find((s: any) => s.is_active));
-      activeSlide = active || null;
-      submitted = false;
-      selectedOption = '';
-      inputValue = '';
-      if (active) responses = await listResponses(active.id);
+      try {
+        // Reload session to get new active slide
+        session = await joinSession(code);
+        const active = normalizeSlide(session.slides?.find((s: any) => s.is_active));
+        activeSlide = active || null;
+        submitted = false;
+        selectedOption = '';
+        inputValue = '';
+        if (active) responses = await listResponses(active.id);
+      } catch {
+        // Session may have ended; wait for session_update event
+      }
     } else if (msg.event === 'new_response') {
       responses = [...responses, msg.data];
     } else if (msg.event === 'upvote') {
@@ -176,7 +180,9 @@
       ws?.send('new_response', response);
       inputValue = '';
       actionError = '';
-      if (activeSlide.type !== 'POLL') {
+      if (activeSlide.type === 'FEEDBACK') {
+        submitted = true;
+      } else if (activeSlide.type !== 'POLL') {
         submitted = false;
       }
       if (activeSlide.type === 'QNA' || activeSlide.type === 'WORD_CLOUD') {

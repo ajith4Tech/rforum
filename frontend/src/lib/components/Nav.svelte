@@ -2,7 +2,7 @@
   import { page } from '$app/stores';
   import { theme, toggleTheme } from '$lib/theme';
   import { changePassword } from '$lib/api';
-  import { Orbit, Moon, Sun, LogOut, ChevronDown, User, Lock, Info, Shield, Zap, Users, BarChart3, MessageSquare, LogIn, UserPlus } from 'lucide-svelte';
+  import { Orbit, Moon, Sun, LogOut, ChevronDown, User, Lock, Info, Shield, Zap, Users, BarChart3, MessageSquare, LogIn, UserPlus, BookOpen, CalendarDays, Presentation, Radio, Layers, BarChart2, MessageCircleQuestion, Star, Cloud, Monitor } from 'lucide-svelte';
 
   let {
     authenticated = false,
@@ -14,7 +14,11 @@
 
   let profileOpen = $state(false);
   let moderatorOpen = $state(false);
+  let menuOpen = $state(false);
   let showAbout = $state(false);
+  let showUserGuide = $state(false);
+  let guideSection = $state(0);
+
   let showChangePwd = $state(false);
   let currentPwd = $state('');
   let newPwd = $state('');
@@ -53,10 +57,11 @@
     const target = event.target as HTMLElement;
     if (!target.closest('[data-profile-menu]'))  profileOpen  = false;
     if (!target.closest('[data-moderator-menu]')) moderatorOpen = false;
+    if (!target.closest('[data-menu]')) menuOpen = false;
   }
 
   function openChangePwd() {
-    profileOpen = false;
+    menuOpen = false;
     currentPwd = '';
     newPwd = '';
     pwdError = '';
@@ -97,7 +102,7 @@
         {#each navLinks as link}
           <a
             href={link.href}
-            class="px-3 py-1.5 rounded-lg text-sm font-medium transition {isActive(link.href)
+            class="px-3 py-1.5 rounded-lg text-base font-bold transition {isActive(link.href)
               ? 'text-brand-500 bg-brand-500/10'
               : 'text-surface-500 hover:text-surface-200 hover:bg-surface-800'}"
           >
@@ -109,92 +114,81 @@
   </div>
 
   <div class="flex items-center gap-3">
-    <button
-      onclick={toggleTheme}
-      class="btn-secondary p-2"
-      title="Toggle theme"
-    >
-      {#if $theme === 'dark'}
-        <Sun class="w-4 h-4" />
-      {:else}
-        <Moon class="w-4 h-4" />
+    <!-- Unified menu -->
+    <div class="relative" data-menu>
+      <button
+        onclick={() => menuOpen = !menuOpen}
+        class="btn-secondary flex items-center gap-2 px-3 py-2"
+      >
+        <User class="w-4 h-4" />
+        <ChevronDown class="w-3 h-3 text-surface-400 transition-transform {menuOpen ? 'rotate-180' : ''}" />
+      </button>
+
+      {#if menuOpen}
+        <div class="absolute right-0 mt-3 w-60 rounded-2xl shadow-2xl border border-surface-200 dark:border-surface-700/60 bg-white dark:bg-surface-900 overflow-hidden animate-fade-in">
+          <div class="px-2 py-2 space-y-0.5">
+            <button
+              onclick={() => { menuOpen = false; showAbout = true; }}
+              class="flex items-center gap-3 w-full px-3 py-2.5 rounded-xl text-base font-semibold text-surface-700 dark:text-surface-200 hover:bg-surface-100 dark:hover:bg-surface-800 transition"
+            >
+              <Info class="w-5 h-5 flex-shrink-0 text-brand-500" />
+              About
+            </button>
+            <button
+              onclick={toggleTheme}
+              class="flex items-center gap-3 w-full px-3 py-2.5 rounded-xl text-base font-semibold text-surface-700 dark:text-surface-200 hover:bg-surface-100 dark:hover:bg-surface-800 transition"
+            >
+              {#if $theme === 'dark'}
+                <Sun class="w-5 h-5 flex-shrink-0 text-amber-400" />
+                Light Mode
+              {:else}
+                <Moon class="w-5 h-5 flex-shrink-0 text-indigo-400" />
+                Dark Mode
+              {/if}
+            </button>
+
+            {#if authenticated}
+              <button
+                onclick={() => { menuOpen = false; showUserGuide = true; guideSection = 0; }}
+                class="flex items-center gap-3 w-full px-3 py-2.5 rounded-xl text-base font-semibold text-surface-700 dark:text-surface-200 hover:bg-surface-100 dark:hover:bg-surface-800 transition"
+              >
+                <BookOpen class="w-5 h-5 flex-shrink-0 text-emerald-500" />
+                User Guide
+              </button>
+              <button
+                onclick={openChangePwd}
+                class="flex items-center gap-3 w-full px-3 py-2.5 rounded-xl text-base font-semibold text-surface-700 dark:text-surface-200 hover:bg-surface-100 dark:hover:bg-surface-800 transition"
+              >
+                <Lock class="w-5 h-5 flex-shrink-0 text-surface-400" />
+                Reset Password
+              </button>
+            {:else}
+              <a
+                href="/login"
+                onclick={() => menuOpen = false}
+                class="flex items-center gap-3 px-3 py-2.5 rounded-xl text-base font-semibold text-surface-700 dark:text-surface-200 hover:bg-surface-100 dark:hover:bg-surface-800 transition"
+              >
+                <LogIn class="w-5 h-5 flex-shrink-0 text-brand-500" />
+                Moderator Login
+              </a>
+            {/if}
+          </div>
+
+          {#if authenticated}
+            <div class="px-2 pb-2">
+              <div class="border-t border-surface-200 dark:border-surface-700/60 mt-1 mb-2"></div>
+              <button
+                onclick={() => { menuOpen = false; onLogout(); }}
+                class="flex items-center gap-3 w-full px-3 py-2.5 rounded-xl text-base font-semibold text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 transition"
+              >
+                <LogOut class="w-5 h-5 flex-shrink-0" />
+                Log out
+              </button>
+            </div>
+          {/if}
+        </div>
       {/if}
-    </button>
-
-    <!-- About Rforum button (always visible) -->
-    <button
-      onclick={() => showAbout = true}
-      class="btn-secondary flex items-center gap-2 text-sm px-3 py-2"
-    >
-      <Info class="w-4 h-4" />
-      About
-    </button>
-
-    {#if authenticated}
-      <div class="relative" data-profile-menu>
-        <button
-          onclick={() => profileOpen = !profileOpen}
-          class="btn-secondary flex items-center gap-2 px-3 py-2"
-        >
-          <User class="w-4 h-4" />
-          <ChevronDown class="w-3 h-3 text-surface-400 transition-transform {profileOpen ? 'rotate-180' : ''}" />
-        </button>
-
-        {#if profileOpen}
-          <div class="absolute right-0 mt-2 w-48 card rounded-xl shadow-lg overflow-hidden animate-fade-in">
-            <button
-              onclick={openChangePwd}
-              class="flex items-center gap-3 w-full px-4 py-3 text-sm font-medium text-surface-400 hover:text-surface-100 hover:bg-surface-800/70 transition"
-            >
-              <Lock class="w-4 h-4 flex-shrink-0" />
-              Reset Password
-            </button>
-            <div class="border-t border-surface-800"></div>
-            <button
-              onclick={() => { profileOpen = false; onLogout(); }}
-              class="flex items-center gap-3 w-full px-4 py-3 text-sm font-medium text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 transition"
-            >
-              <LogOut class="w-4 h-4 flex-shrink-0" />
-              Log out
-            </button>
-          </div>
-        {/if}
-      </div>
-    {:else}
-      <!-- Moderator dropdown -->
-      <div class="relative" data-moderator-menu>
-        <button
-          onclick={() => moderatorOpen = !moderatorOpen}
-          class="btn-secondary flex items-center gap-2 text-sm px-3 py-2"
-        >
-          <Shield class="w-4 h-4" />
-          Moderator
-          <ChevronDown class="w-3 h-3 text-surface-400 transition-transform {moderatorOpen ? 'rotate-180' : ''}" />
-        </button>
-
-        {#if moderatorOpen}
-          <div class="absolute right-0 mt-2 w-44 card rounded-xl shadow-lg py-1 animate-fade-in">
-            <a
-              href="/login"
-              onclick={() => moderatorOpen = false}
-              class="flex items-center gap-2 px-4 py-2.5 text-sm text-surface-400 hover:text-surface-100 hover:bg-surface-800 transition"
-            >
-              <LogIn class="w-4 h-4" />
-              Log in
-            </a>
-            <div class="my-1 border-t border-surface-800"></div>
-            <a
-              href="/login?mode=register"
-              onclick={() => moderatorOpen = false}
-              class="flex items-center gap-2 px-4 py-2.5 text-sm text-surface-400 hover:text-surface-100 hover:bg-surface-800 transition"
-            >
-              <UserPlus class="w-4 h-4" />
-              Sign up
-            </a>
-          </div>
-        {/if}
-      </div>
-    {/if}
+    </div>
   </div>
 </nav>
 
@@ -231,6 +225,135 @@
             </div>
           </div>
         {/each}
+      </div>
+    </div>
+  </div>
+{/if}
+
+<!-- User Guide Modal -->
+{#if showUserGuide}
+  <div
+    class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center px-4 z-50"
+    onclick={(e) => { if (e.target === e.currentTarget) showUserGuide = false; }}
+    role="dialog"
+    aria-modal="true"
+  >
+    <div class="card w-full max-w-2xl shadow-2xl animate-fade-in flex flex-col" style="max-height: 88vh;">
+
+      <div class="flex items-center justify-between mb-6 flex-shrink-0">
+        <h2 class="text-2xl font-heading font-bold tracking-wide text-surface-900 dark:text-surface-100">Moderator User Guide</h2>
+        <button onclick={() => showUserGuide = false} class="btn-secondary px-3 py-1.5 text-sm">Close</button>
+      </div>
+
+      <div class="overflow-y-auto flex-1 space-y-8 pr-1">
+
+        <!-- Typical Workflow -->
+        <section>
+          <h3 class="text-lg font-heading font-semibold tracking-wide text-surface-900 dark:text-surface-100 mb-3">Typical Workflow</h3>
+          <ol class="space-y-2">
+            {#each [
+              'Create an Event — set a title, date, and optional description.',
+              'Create one or more Sessions under that Event.',
+              'Add Slides to each Session — choose Poll, Q&A, Feedback, Word Cloud, or Content.',
+              'Go Live — toggle Go Live on the session to activate the join code.',
+              'Share the join code with participants (e.g. ABCD-1234). They open rforum.t4gc.in and enter it.',
+              'Open the Presenter Screen in a new tab and project it to your audience.',
+              'Activate slides one by one from the session dashboard as you present.',
+              'Toggle Go Live off to end the session when finished.',
+            ] as step, i}
+              <li class="flex items-start gap-3 text-base font-heading text-surface-900 dark:text-surface-100">
+                <span class="font-bold flex-shrink-0 w-5">{i + 1}.</span>
+                <span>{step}</span>
+              </li>
+            {/each}
+          </ol>
+        </section>
+
+        <hr class="border-surface-200 dark:border-surface-800" />
+
+        <!-- Key Concepts -->
+        <section>
+          <h3 class="text-lg font-heading font-semibold tracking-wide text-surface-900 dark:text-surface-100 mb-3">Key Concepts</h3>
+          <dl class="space-y-3">
+            {#each [
+              { term: 'Event', def: 'A named occasion (e.g. a conference or lecture day) that groups one or more sessions.' },
+              { term: 'Session', def: 'A single interactive presentation slot. Has its own unique join code and a set of slides.' },
+              { term: 'Slide', def: 'One interactive element inside a session. Can be a Poll, Q&A, Feedback form, Word Cloud, or static Content.' },
+              { term: 'Join Code', def: 'An 8-character code (e.g. ABCD-1234) participants enter to connect to a live session.' },
+              { term: 'Presenter Screen', def: 'A full-screen view at /screen/[code] intended to be projected to your audience.' },
+            ] as item}
+              <div class="flex gap-3 text-base font-heading text-surface-900 dark:text-surface-100">
+                <dt class="font-semibold flex-shrink-0 w-36">{item.term}</dt>
+                <dd>{item.def}</dd>
+              </div>
+            {/each}
+          </dl>
+        </section>
+
+        <hr class="border-surface-200 dark:border-surface-800" />
+
+        <!-- Slide Types -->
+        <section>
+          <h3 class="text-lg font-heading font-semibold tracking-wide text-surface-900 dark:text-surface-100 mb-3">Slide Types</h3>
+          <dl class="space-y-3">
+            {#each [
+              { term: 'Poll',       def: 'Multiple-choice question. Results show as a live bar chart on the presenter screen.' },
+              { term: 'Q&A',        def: 'Audience submits open questions. Others can upvote so the best ones rise to the top.' },
+              { term: 'Feedback',   def: 'Collects written responses with an optional star rating.' },
+              { term: 'Word Cloud', def: 'Participants submit words or short phrases shown as a real-time word cloud.' },
+              { term: 'Content',    def: 'A static display slide — title, body, or bullet points. No audience input.' },
+            ] as item}
+              <div class="flex gap-3 text-base font-heading text-surface-900 dark:text-surface-100">
+                <dt class="font-semibold flex-shrink-0 w-36">{item.term}</dt>
+                <dd>{item.def}</dd>
+              </div>
+            {/each}
+          </dl>
+        </section>
+
+        <hr class="border-surface-200 dark:border-surface-800" />
+
+        <!-- Managing a Session -->
+        <section>
+          <h3 class="text-lg font-heading font-semibold tracking-wide text-surface-900 dark:text-surface-100 mb-3">Managing a Session</h3>
+          <ul class="space-y-2">
+            {#each [
+              'Add slides from the session detail page — click Add Slide and pick a type.',
+              'Use the order arrows on each slide card to reorder them.',
+              'Only one slide can be active at a time. Click Activate on a slide to push it live.',
+              'The active slide is instantly shown to all connected participants.',
+              'Copy the join URL from the session page to share a direct link.',
+              'Session data and all responses are always saved. View them any time from Analytics.',
+            ] as item}
+              <li class="flex items-start gap-3 text-base font-heading text-surface-900 dark:text-surface-100">
+                <span class="flex-shrink-0 mt-1.5 w-1.5 h-1.5 rounded-full bg-surface-400 dark:bg-surface-500"></span>
+                <span>{item}</span>
+              </li>
+            {/each}
+          </ul>
+        </section>
+
+        <hr class="border-surface-200 dark:border-surface-800" />
+
+        <!-- Presenter Screen -->
+        <section>
+          <h3 class="text-lg font-heading font-semibold tracking-wide text-surface-900 dark:text-surface-100 mb-3">Presenter Screen</h3>
+          <ul class="space-y-2">
+            {#each [
+              'Click Open Screen on the session page — it opens /screen/[code] in a new tab.',
+              'Put that tab in full-screen (F11) and project or share it to your display.',
+              'The screen updates automatically as participants respond — no refresh needed.',
+              'Keep the session dashboard open on a separate device to control which slide is active.',
+              'The join code is always visible on screen so latecomers can join at any point.',
+            ] as item}
+              <li class="flex items-start gap-3 text-base font-heading text-surface-900 dark:text-surface-100">
+                <span class="flex-shrink-0 mt-1.5 w-1.5 h-1.5 rounded-full bg-surface-400 dark:bg-surface-500"></span>
+                <span>{item}</span>
+              </li>
+            {/each}
+          </ul>
+        </section>
+
       </div>
     </div>
   </div>
