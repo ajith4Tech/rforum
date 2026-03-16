@@ -91,11 +91,11 @@
 
 <svelte:window onclick={handleClickOutside} />
 
-<nav class="fixed top-0 left-0 right-0 z-40 flex items-center justify-between px-8 py-3 border-b backdrop-blur-md nav-bg">
-  <div class="flex items-center gap-8">
+<nav class="fixed top-0 left-0 right-0 z-40 flex items-center justify-between px-4 sm:px-6 md:px-8 py-2.5 border-b backdrop-blur-md nav-bg">
+  <div class="flex items-center gap-3 sm:gap-6">
     <a href={authenticated ? '/dashboard' : '/'} class="flex items-center gap-2">
       <Orbit class="w-7 h-7 text-brand-500 flex-shrink-0" />
-      <span class="text-2xl font-heading font-bold tracking-wide">Rforum</span>
+      <span class="text-xl sm:text-2xl font-heading font-bold tracking-wide">Rforum</span>
     </a>
 
     {#if authenticated}
@@ -125,12 +125,12 @@
     {/if}
   </div>
 
-  <div class="flex items-center gap-3">
+  <div class="flex items-center gap-2 sm:gap-3">
     <!-- Unified menu -->
     <div class="relative" data-menu>
       <button
         onclick={() => menuOpen = !menuOpen}
-        class="btn-secondary flex items-center gap-2 px-3 py-2"
+        class="btn-secondary flex items-center gap-2 px-2.5 py-1.5"
       >
         {#if $isSuperAdmin}
           <Shield class="w-4 h-4 text-rose-500" />
@@ -141,7 +141,7 @@
       </button>
 
       {#if menuOpen}
-        <div class="absolute right-0 mt-3 w-64 rounded-2xl shadow-2xl border border-surface-200 dark:border-surface-700/60 bg-white dark:bg-surface-900 overflow-hidden animate-fade-in">
+        <div class="absolute right-0 mt-3 w-[min(20rem,calc(100vw-2rem))] rounded-2xl shadow-2xl border border-surface-200 dark:border-surface-700/60 bg-white dark:bg-surface-900 overflow-hidden animate-fade-in">
           {#if authenticated && $currentUser}
             <div class="px-4 py-3 border-b border-surface-200 dark:border-surface-700/60">
               <p class="text-xs font-semibold text-surface-900 dark:text-surface-100 truncate">{$currentUser.email}</p>
@@ -161,17 +161,46 @@
               </div>
             </div>
           {/if}
-          <div class="px-2 py-2 space-y-0.5">
+
+          {#if authenticated}
+            <div class="md:hidden px-2 py-2 border-b border-surface-200 dark:border-surface-700/60">
+              {#each navLinks as link}
+                <a
+                  href={link.href}
+                  onclick={() => menuOpen = false}
+                  class="flex items-center px-3 py-2.5 rounded-xl text-sm font-semibold transition {isActive(link.href)
+                    ? 'text-brand-500 bg-brand-500/10'
+                    : 'text-surface-700 dark:text-surface-200 hover:bg-surface-100 dark:hover:bg-surface-800'}"
+                >
+                  {link.label}
+                </a>
+              {/each}
+              {#if $isSuperAdmin}
+                <a
+                  href="/dashboard/admin"
+                  onclick={() => menuOpen = false}
+                  class="mt-1 flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-semibold transition {isActive('/dashboard/admin')
+                    ? 'text-rose-500 bg-rose-500/10'
+                    : 'text-surface-700 dark:text-surface-200 hover:bg-rose-50 dark:hover:bg-rose-500/10'}"
+                >
+                  <Shield class="w-3.5 h-3.5" />
+                  Admin
+                </a>
+              {/if}
+            </div>
+          {/if}
+
+          <div class="px-2 py-1.5 space-y-0.5">
             <button
               onclick={() => { menuOpen = false; showAbout = true; }}
-              class="flex items-center gap-3 w-full px-3 py-2.5 rounded-xl text-base font-semibold text-surface-700 dark:text-surface-200 hover:bg-surface-100 dark:hover:bg-surface-800 transition"
+              class="flex items-center gap-3 w-full px-3 py-2 rounded-xl text-sm font-semibold text-surface-700 dark:text-surface-200 hover:bg-surface-100 dark:hover:bg-surface-800 transition"
             >
               <Info class="w-5 h-5 flex-shrink-0 text-brand-500" />
               About
             </button>
             <button
               onclick={toggleTheme}
-              class="flex items-center gap-3 w-full px-3 py-2.5 rounded-xl text-base font-semibold text-surface-700 dark:text-surface-200 hover:bg-surface-100 dark:hover:bg-surface-800 transition"
+              class="flex items-center gap-3 w-full px-3 py-2 rounded-xl text-sm font-semibold text-surface-700 dark:text-surface-200 hover:bg-surface-100 dark:hover:bg-surface-800 transition"
             >
               {#if $theme === 'dark'}
                 <Sun class="w-5 h-5 flex-shrink-0 text-amber-400" />
@@ -185,14 +214,14 @@
             {#if authenticated}
               <button
                 onclick={() => { menuOpen = false; showUserGuide = true; guideSection = 0; }}
-                class="flex items-center gap-3 w-full px-3 py-2.5 rounded-xl text-base font-semibold text-surface-700 dark:text-surface-200 hover:bg-surface-100 dark:hover:bg-surface-800 transition"
+                class="flex items-center gap-3 w-full px-3 py-2 rounded-xl text-sm font-semibold text-surface-700 dark:text-surface-200 hover:bg-surface-100 dark:hover:bg-surface-800 transition"
               >
                 <BookOpen class="w-5 h-5 flex-shrink-0 text-emerald-500" />
                 User Guide
               </button>
               <button
                 onclick={openChangePwd}
-                class="flex items-center gap-3 w-full px-3 py-2.5 rounded-xl text-base font-semibold text-surface-700 dark:text-surface-200 hover:bg-surface-100 dark:hover:bg-surface-800 transition"
+                class="flex items-center gap-3 w-full px-3 py-2 rounded-xl text-sm font-semibold text-surface-700 dark:text-surface-200 hover:bg-surface-100 dark:hover:bg-surface-800 transition"
               >
                 <Lock class="w-5 h-5 flex-shrink-0 text-surface-400" />
                 Reset Password
@@ -201,7 +230,7 @@
               <a
                 href="/login"
                 onclick={() => menuOpen = false}
-                class="flex items-center gap-3 px-3 py-2.5 rounded-xl text-base font-semibold text-surface-700 dark:text-surface-200 hover:bg-surface-100 dark:hover:bg-surface-800 transition"
+                class="flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-semibold text-surface-700 dark:text-surface-200 hover:bg-surface-100 dark:hover:bg-surface-800 transition"
               >
                 <LogIn class="w-5 h-5 flex-shrink-0 text-brand-500" />
                 Moderator Login
@@ -214,7 +243,7 @@
               <div class="border-t border-surface-200 dark:border-surface-700/60 mt-1 mb-2"></div>
               <button
                 onclick={() => { menuOpen = false; onLogout(); }}
-                class="flex items-center gap-3 w-full px-3 py-2.5 rounded-xl text-base font-semibold text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 transition"
+                class="flex items-center gap-3 w-full px-3 py-2 rounded-xl text-sm font-semibold text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 transition"
               >
                 <LogOut class="w-5 h-5 flex-shrink-0" />
                 Log out

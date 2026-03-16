@@ -166,9 +166,9 @@
   <title>Dashboard – Rforum</title>
 </svelte:head>
 
-<main class="flex-1 max-w-5xl mx-auto w-full px-8 py-10">
+<main class="flex-1 max-w-5xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
 
-  <div class="mb-10">
+  <div class="mb-8">
     <h1 class="text-3xl font-heading font-bold tracking-wide">Dashboard</h1>
     <p class="text-surface-500 mt-1.5">Quick actions and upcoming schedule</p>
   </div>
@@ -178,12 +178,12 @@
   {:else}
 
     <!-- 2 Action Shortcuts + Session Assets shortcut -->
-    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
 
       <!-- Add Event -->
       <button
         onclick={() => showCreateEvent = true}
-        class="card card-interactive group flex items-center gap-5 text-left"
+        class="card card-interactive group flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-5 text-left"
       >
         <div class="w-14 h-14 flex items-center justify-center rounded-2xl bg-brand-500/10 group-hover:bg-brand-500/20 transition flex-shrink-0">
           <Plus class="w-7 h-7 text-brand-500" />
@@ -197,7 +197,7 @@
       <!-- Add Session -->
       <button
         onclick={() => showCreateSession = true}
-        class="card card-interactive group flex items-center gap-5 text-left"
+        class="card card-interactive group flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-5 text-left"
       >
         <div class="w-14 h-14 flex items-center justify-center rounded-2xl bg-accent-500/10 group-hover:bg-accent-500/20 transition flex-shrink-0">
           <Plus class="w-7 h-7 text-accent-500" />
@@ -211,7 +211,7 @@
       <!-- Session Assets shortcut -->
       <button
         onclick={() => goto('/dashboard/assets')}
-        class="card card-interactive group flex items-center gap-5 text-left"
+        class="card card-interactive group flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-5 text-left"
       >
         <div class="w-14 h-14 flex items-center justify-center rounded-2xl bg-warning/10 group-hover:bg-warning/20 transition flex-shrink-0">
           <HardDrive class="w-7 h-7 text-warning" />
@@ -224,8 +224,8 @@
     </div>
 
     <!-- Session Assets card with recent uploads -->
-    <div class="card mb-8">
-      <div class="flex items-center justify-between mb-5">
+    <div class="card mb-6">
+      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-5">
         <div class="flex items-center gap-3">
           <div class="w-9 h-9 flex items-center justify-center rounded-xl bg-warning/10 flex-shrink-0">
             <HardDrive class="w-4.5 h-4.5 text-warning" />
@@ -264,7 +264,7 @@
         </div>
       {/if}
 
-      <div class="flex items-center justify-between pt-2 border-t border-surface-100 dark:border-surface-800">
+      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-2 border-t border-surface-100 dark:border-surface-800">
         <span class="text-xs text-surface-500">Storage Used: <span class="font-semibold text-surface-300">{formatBytes(storageBytes)}</span></span>
         <a href="/dashboard/assets" class="btn-secondary text-xs px-3 py-1.5 flex items-center gap-1">
           <HardDrive class="w-3 h-3" /> Manage Assets
@@ -274,8 +274,8 @@
 
     <!-- Live Sessions (if any) -->
     {#if liveSessions.length > 0}
-      <div class="card mb-8">
-        <div class="flex items-center justify-between mb-4">
+      <div class="card mb-6">
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
           <h2 class="font-heading font-semibold text-sm uppercase tracking-widest text-surface-500">Live Right Now</h2>
           <a href="/dashboard/sessions" class="text-xs text-brand-500 hover:underline flex items-center gap-1">
             All sessions <ArrowRight class="w-3 h-3" />
@@ -283,15 +283,15 @@
         </div>
         <div class="space-y-2">
           {#each liveSessions.slice(0, 4) as session (session.id)}
-            <div class="flex items-center justify-between gap-3 px-4 py-3 rounded-xl border border-live/20 bg-live/5">
-              <div class="flex items-center gap-3 flex-1 min-w-0">
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-4 py-3 rounded-xl border border-live/20 bg-live/5">
+              <div class="flex items-center gap-3 flex-1 min-w-0 w-full">
                 <span class="w-2 h-2 rounded-full bg-live animate-pulse-live flex-shrink-0"></span>
                 <span class="font-medium text-sm truncate">{session.title}</span>
                 <button onclick={() => copyCode(session.unique_code)} class="font-mono text-xs text-surface-500 hover:text-surface-700 dark:hover:text-surface-300 transition flex items-center gap-1 flex-shrink-0">
                   <Copy class="w-3 h-3" />{session.unique_code}
                 </button>
               </div>
-              <a href="/dashboard/{session.id}" class="btn-secondary text-xs px-3 py-1.5 flex items-center gap-1 flex-shrink-0">
+              <a href="/dashboard/{session.id}" class="btn-secondary text-xs px-3 py-1.5 flex items-center justify-center gap-1 w-full sm:w-auto flex-shrink-0">
                 <ExternalLink class="w-3 h-3" /> Manage
               </a>
             </div>
@@ -301,8 +301,8 @@
     {/if}
 
     <!-- Checklist -->
-    <div class="card mb-8">
-      <div class="flex items-center justify-between mb-4">
+    <div class="card mb-6">
+      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
         <h2 class="font-heading font-semibold text-sm uppercase tracking-widest text-surface-500">Session Checklist</h2>
 
         <div class="flex items-center gap-3">
@@ -310,7 +310,7 @@
           <button onclick={resetChecklist} class="text-xs text-surface-500 hover:text-surface-300 transition">Reset</button>
         </div>
       </div>
-      <div class="space-y-1 mb-3">
+      <div class="space-y-1 mb-2">
         {#each checklist as item (item.id)}
           <div class="flex items-center gap-3 group py-1">
             <button onclick={() => toggleItem(item.id)} class="flex-shrink-0 text-surface-400 hover:text-brand-400 transition">
@@ -327,7 +327,7 @@
           </div>
         {/each}
       </div>
-      <form onsubmit={(e) => { e.preventDefault(); addItem(); }} class="flex gap-2">
+      <form onsubmit={(e) => { e.preventDefault(); addItem(); }} class="flex flex-col sm:flex-row gap-2">
         <input
           type="text"
           bind:value={newCheckItem}
@@ -343,7 +343,7 @@
 
     <!-- Upcoming Events -->
     <div class="card">
-      <div class="flex items-center justify-between mb-5">
+      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-5">
         <h2 class="font-heading font-semibold text-sm uppercase tracking-widest text-surface-500">Upcoming Events</h2>
         <a href="/dashboard/events" class="text-xs text-brand-500 hover:underline flex items-center gap-1">
           All events <ArrowRight class="w-3 h-3" />
@@ -361,9 +361,9 @@
           {#each upcomingEvents as event (event.id)}
             {@const cd = countdowns[event.id]}
             {@const today = isToday(event.event_date)}
-            <div class="flex items-center gap-4 px-4 py-4 rounded-xl border border-surface-200 dark:border-surface-800 hover:border-surface-300 dark:hover:border-surface-700 transition">
+            <div class="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 px-4 py-4 rounded-xl border border-surface-200 dark:border-surface-800 hover:border-surface-300 dark:hover:border-surface-700 transition">
               <!-- Date block -->
-              <div class="flex-shrink-0 w-14 text-center">
+              <div class="flex-shrink-0 w-full sm:w-14 text-left sm:text-center">
                 <div class="text-2xl font-heading font-bold leading-none">
                   {new Date(event.event_date + 'T00:00:00').getDate()}
                 </div>
@@ -400,7 +400,7 @@
                 <span class="text-live text-xs font-bold uppercase tracking-wider flex-shrink-0">Live</span>
               {/if}
 
-              <a href="/dashboard/events" class="btn-secondary text-xs px-3 py-1.5 flex items-center gap-1 flex-shrink-0">
+              <a href="/dashboard/events" class="btn-secondary text-xs px-3 py-1.5 flex items-center justify-center gap-1 w-full sm:w-auto flex-shrink-0">
                 <ExternalLink class="w-3 h-3" /> View
               </a>
             </div>
@@ -436,7 +436,7 @@
           <label class="block text-xs font-medium text-surface-500 uppercase tracking-wider mb-1.5">Description <span class="normal-case text-surface-600">(optional)</span></label>
           <textarea rows="2" bind:value={newEventDescription} placeholder="Brief description…" class="input-field resize-none"></textarea>
         </div>
-        <div class="flex justify-end gap-2 pt-2">
+        <div class="flex flex-col-reverse sm:flex-row justify-end gap-2 pt-2">
           <button type="button" onclick={() => showCreateEvent = false} class="btn-secondary text-sm">Cancel</button>
           <button type="submit" class="btn-primary text-sm" disabled={creatingEvent || !newEventTitle.trim() || !newEventDate}>
             {creatingEvent ? 'Creating…' : 'Create Event'}
@@ -470,7 +470,7 @@
           <label class="block text-xs font-medium text-surface-500 uppercase tracking-wider mb-1.5">Session Title</label>
           <input type="text" bind:value={newSessionTitle} placeholder="e.g. Morning Keynote" class="input-field" />
         </div>
-        <div class="flex justify-end gap-2 pt-2">
+        <div class="flex flex-col-reverse sm:flex-row justify-end gap-2 pt-2">
           <button type="button" onclick={() => showCreateSession = false} class="btn-secondary text-sm">Cancel</button>
           <button type="submit" class="btn-primary text-sm" disabled={creatingSession || !newSessionTitle.trim() || !newSessionEventId}>
             {creatingSession ? 'Creating…' : 'Create Session'}

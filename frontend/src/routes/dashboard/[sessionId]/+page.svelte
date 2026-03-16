@@ -425,9 +425,9 @@
 
 <div>
   <!-- Sub-header with session actions -->
-  <div class="flex items-center justify-between px-8 py-3 border-b border-surface-200 backdrop-blur-sm">
+  <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5 px-4 sm:px-6 lg:px-8 py-2.5 border-b border-surface-200 backdrop-blur-sm">
     <button onclick={() => { window.location.href = '/dashboard'; }} class="text-sm font-medium text-surface-500 hover:text-surface-100 transition">&larr; Back to dashboard</button>
-    <div class="flex items-center gap-3">
+    <div class="flex items-center justify-between sm:justify-end gap-3 w-full sm:w-auto">
       {#if session?.unique_code}
         <a class="btn-secondary" href={`/screen/${session.unique_code}`} target="_blank" rel="noreferrer">Open screen</a>
       {/if}
@@ -435,13 +435,13 @@
     </div>
   </div>
 
-  <main class="flex-1 px-6 py-8">
+  <main class="flex-1 px-4 sm:px-6 py-6 sm:py-7">
     {#if loading}
       <div class="text-center text-surface-400 py-20">Loading...</div>
     {:else if errorMessage}
       <div class="card text-center text-red-500 py-10 px-6">{errorMessage}</div>
     {:else}
-      <div class="grid grid-cols-12 gap-6">
+      <div class="grid grid-cols-12 gap-5">
         <Sidebar
           {session}
           {slides}
@@ -461,10 +461,12 @@
             <div class="card text-center text-surface-400 py-20">Select a slide to get started.</div>
           {:else}
             {#if activeType === 'POLL'}
-              <div class="card p-6 space-y-4">
-                <div class="text-lg font-semibold">Poll</div>                {#if activeSlide.content_json?.question && editingSlideId !== activeSlideId}
+              <div class="card p-4 sm:p-5 space-y-3">
+                <div class="text-lg font-semibold">Poll</div>
+                {#if activeSlide.content_json?.question && editingSlideId !== activeSlideId}
                   <p class="text-base font-medium text-surface-200">{activeSlide.content_json.question}</p>
-                {/if}                {#if editingSlideId === activeSlideId}
+                {/if}
+                {#if editingSlideId === activeSlideId}
                   <input class="input-field" type="text" bind:value={pollQuestion} placeholder="Poll question" />
                   <div class="space-y-2">
                     {#each pollOptions as option, index (index)}
@@ -505,7 +507,7 @@
                 </div>
               </div>
             {:else if activeType === 'QNA'}
-              <div class="card p-6 space-y-4">
+              <div class="card p-4 sm:p-5 space-y-3">
                 <div class="text-lg font-semibold">Questions</div>
                 {#if editingSlideId === activeSlideId}
                   <input class="input-field" type="text" bind:value={qnaPrompt} placeholder="Prompt" />
@@ -528,7 +530,7 @@
                 {/if}
               </div>
             {:else if activeType === 'FEEDBACK'}
-              <div class="card p-6 space-y-4">
+              <div class="card p-4 sm:p-5 space-y-3">
                 <div class="text-lg font-semibold">Feedback</div>
                 {#if editingSlideId === activeSlideId}
                   <input class="input-field" type="text" bind:value={feedbackPrompt} placeholder="Prompt" />
@@ -556,7 +558,7 @@
                 {/if}
               </div>
             {:else if activeType === 'CONTENT'}
-              <div class="card p-6 space-y-4">
+              <div class="card p-4 sm:p-5 space-y-3">
                 <div class="text-lg font-semibold">Content slide</div>
                 {#if editingSlideId === activeSlideId}
                   <input class="input-field" type="text" bind:value={contentTitle} placeholder="Slide title" />
@@ -590,13 +592,13 @@
                       {/key}
                     </div>
                 {/if}
-                <div class="border border-surface-200 rounded-xl p-6 bg-surface-50">
+                <div class="border border-surface-200 rounded-xl p-4 sm:p-5 bg-surface-50">
                   <div class="text-xl font-semibold mb-3">{contentTitle || 'Untitled slide'}</div>
                   <div class="text-sm text-surface-300 whitespace-pre-wrap">{contentBody || 'Add your slide content...'}</div>
                 </div>
               </div>
             {:else if activeType === 'WORD_CLOUD'}
-              <div class="card p-6 space-y-4">
+              <div class="card p-4 sm:p-5 space-y-3">
                 <div class="text-lg font-semibold">Word Cloud</div>
                 {#if editingSlideId === activeSlideId}
                   <input class="input-field" type="text" bind:value={wordCloudPrompt} placeholder="Prompt" />
@@ -608,7 +610,7 @@
                 {#if slideResponses.length === 0}
                   <div class="text-sm text-surface-400">No responses yet.</div>
                 {:else}
-                  <div class="border border-surface-200 rounded-xl p-6 flex flex-wrap items-center justify-center gap-3 min-h-[200px]">
+                  <div class="border border-surface-200 rounded-xl p-4 sm:p-5 flex flex-wrap items-center justify-center gap-3 min-h-[180px]">
                     {#each getWordCloudData() as item}
                       <span
                         class="text-brand-600 font-semibold transition-all"

@@ -46,7 +46,7 @@
 
 @layer components {
   .btn-primary {
-    @apply bg-gradient-to-r from-brand-600 to-brand-500 hover:from-brand-700 hover:to-brand-600 text-white font-semibold px-6 py-3 rounded-xl
+    @apply bg-gradient-to-r from-brand-600 to-brand-500 hover:from-brand-700 hover:to-brand-600 text-white font-semibold px-5 py-2.5 rounded-xl
            transition-all duration-200 active:scale-95 shadow-lg shadow-brand-600/25;
   }
 
@@ -55,27 +55,27 @@
   }
 
   [data-theme="dark"] .btn-secondary {
-    @apply bg-surface-800 hover:bg-surface-700 text-surface-200 font-medium px-5 py-2.5 rounded-xl
+    @apply bg-surface-800 hover:bg-surface-700 text-surface-200 font-medium px-4 py-2 rounded-xl
            border border-surface-700;
   }
 
   [data-theme="light"] .btn-secondary {
-    @apply bg-surface-200 hover:bg-surface-300 text-surface-800 font-medium px-5 py-2.5 rounded-xl
+    @apply bg-surface-200 hover:bg-surface-300 text-surface-800 font-medium px-4 py-2 rounded-xl
            border border-surface-300;
   }
 
   .btn-danger {
-    @apply bg-danger/10 hover:bg-danger/20 text-danger font-medium px-5 py-2.5 rounded-xl
+    @apply bg-danger/10 hover:bg-danger/20 text-danger font-medium px-4 py-2 rounded-xl
            border border-danger/20 transition-all duration-200;
   }
 
   .btn-live {
-    @apply bg-live hover:bg-rose-600 text-white font-bold px-6 py-3 rounded-xl
+    @apply bg-live hover:bg-rose-600 text-white font-bold px-5 py-2.5 rounded-xl
            animate-pulse-live transition-all duration-200 shadow-lg shadow-live/30;
   }
 
   .card {
-    @apply rounded-2xl p-6;
+    @apply rounded-2xl p-4 sm:p-5;
   }
 
   [data-theme="dark"] .card {
@@ -87,7 +87,7 @@
   }
 
   .input-field {
-    @apply w-full rounded-xl px-4 py-3 placeholder-surface-500 focus:outline-none focus:ring-2
+    @apply w-full rounded-xl px-3.5 py-2.5 placeholder-surface-500 focus:outline-none focus:ring-2
            focus:ring-brand-600/50 focus:border-brand-600 transition-all duration-200;
   }
 
@@ -126,7 +126,7 @@
   }
 
   .sidebar-item {
-    @apply flex items-center gap-3 px-4 py-3 rounded-xl
+    @apply flex items-center gap-3 px-3 py-2.5 rounded-xl
            hover:transition-all duration-200 cursor-pointer;
   }
 

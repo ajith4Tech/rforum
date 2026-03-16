@@ -163,13 +163,13 @@
   <title>Events – Rforum</title>
 </svelte:head>
 
-<main class="flex-1 max-w-5xl mx-auto w-full px-8 py-8">
-  <div class="flex items-center justify-between mb-8">
+<main class="flex-1 max-w-5xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-6 sm:py-7">
+  <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
     <div>
       <h1 class="text-3xl font-heading font-bold tracking-wide">All Events</h1>
       <p class="text-sm text-surface-500 mt-1.5">Manage your events and their sessions</p>
     </div>
-    <button class="btn-primary text-sm flex items-center gap-2" onclick={() => showCreateEvent = true}>
+    <button class="btn-primary text-sm flex items-center justify-center gap-2 w-full sm:w-auto" onclick={() => showCreateEvent = true}>
       <Plus class="w-4 h-4" />
       Create Event
     </button>
@@ -189,7 +189,7 @@
       <button class="btn-primary text-sm" onclick={() => showCreateEvent = true}>Create Event</button>
     </div>
   {:else}
-    <div class="space-y-4">
+    <div class="space-y-3">
       {#each events as event (event.id)}
         <EventCard
           {event}
@@ -211,7 +211,7 @@
 
 {#if showCreateEvent}
   <div class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center px-4 z-50">
-    <div class="card w-full max-w-lg">
+    <div class="card w-full max-w-lg max-h-[90vh] overflow-y-auto">
       <div class="flex items-center justify-between mb-4">
         <h2 class="text-lg font-semibold">Create Event</h2>
         <button class="btn-secondary text-sm" onclick={() => showCreateEvent = false}>Close</button>
@@ -222,7 +222,7 @@
           <input type="date" bind:value={newEventDate} class="input-field" />
         </div>
         <textarea rows="2" bind:value={newEventDescription} placeholder="Description (optional)" class="input-field"></textarea>
-        <div class="flex justify-end gap-2">
+        <div class="flex flex-col-reverse sm:flex-row justify-end gap-2">
           <button type="button" class="btn-secondary" onclick={() => showCreateEvent = false}>Cancel</button>
           <button type="submit" class="btn-primary text-sm" disabled={creatingEvent}>
             {creatingEvent ? 'Creating...' : 'Create Event'}
@@ -235,7 +235,7 @@
 
 {#if showEditEvent}
   <div class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center px-4 z-50">
-    <div class="card w-full max-w-lg">
+    <div class="card w-full max-w-lg max-h-[90vh] overflow-y-auto">
       <div class="flex items-center justify-between mb-4">
         <h2 class="text-lg font-semibold">Edit Event</h2>
         <button class="btn-secondary text-sm" onclick={() => showEditEvent = false}>Close</button>
@@ -246,7 +246,7 @@
           <input type="date" bind:value={editEventDate} class="input-field" />
         </div>
         <textarea rows="2" bind:value={editEventDescription} placeholder="Description (optional)" class="input-field"></textarea>
-        <div class="flex justify-end gap-2">
+        <div class="flex flex-col-reverse sm:flex-row justify-end gap-2">
           <button type="button" class="btn-secondary" onclick={() => showEditEvent = false}>Cancel</button>
           <button type="submit" class="btn-primary text-sm" disabled={savingEditEvent}>
             {savingEditEvent ? 'Saving...' : 'Save Changes'}

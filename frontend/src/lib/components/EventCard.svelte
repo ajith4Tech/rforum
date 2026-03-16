@@ -36,7 +36,7 @@
 
 <div class="card p-6 hover:shadow-md transition-all duration-200 hover:scale-[1.01] space-y-4">
   <!-- Header -->
-  <div class="flex justify-between items-start">
+  <div class="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3">
     <div class="flex-1 min-w-0">
       <div class="flex items-center gap-2 mb-1">
         <h3 class="text-lg font-semibold truncate">{event.title}</h3>
@@ -46,10 +46,10 @@
         {event.is_published ? 'Published' : 'Draft'} &bull; {formatDate(event.event_date)}
       </p>
       {#if event.description}
-        <p class="text-sm text-surface-400 mt-1">{event.description}</p>
+        <p class="text-sm text-surface-400 mt-1 break-words">{event.description}</p>
       {/if}
     </div>
-    <div class="flex items-center gap-1.5 ml-4 flex-shrink-0">
+    <div class="flex items-center gap-1.5 sm:ml-4 flex-shrink-0 self-start sm:self-auto">
       {#if onEdit}
         <button
           onclick={() => onEdit(event)}
@@ -99,7 +99,7 @@
         {/each}
       </div>
     {/if}
-    <div class="flex items-center gap-2 pt-1">
+    <div class="flex flex-col sm:flex-row sm:items-center gap-2 pt-1">
       <select
         class="input-field flex-1 !py-2 text-sm"
         value={addSessionSelection}
@@ -111,7 +111,7 @@
         {/each}
       </select>
       <button
-        class="btn-secondary"
+        class="btn-secondary w-full sm:w-auto"
         onclick={() => onAddSession?.(event.id)}
         disabled={saving || !addSessionSelection}
       >

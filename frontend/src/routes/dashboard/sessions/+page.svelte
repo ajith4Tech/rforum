@@ -61,8 +61,8 @@
   <title>Sessions – Rforum</title>
 </svelte:head>
 
-<main class="flex-1 max-w-5xl mx-auto w-full px-8 py-8">
-  <div class="flex items-center justify-between mb-8">
+<main class="flex-1 max-w-5xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-6 sm:py-7">
+  <div class="flex items-center justify-between mb-6">
     <div>
       <h1 class="text-3xl font-heading font-bold tracking-wide">All Sessions</h1>
       <p class="text-sm text-surface-500 mt-1.5">Manage your presentation sessions</p>
@@ -70,8 +70,8 @@
   </div>
 
   <!-- Create new session -->
-  <form onsubmit={(e) => { e.preventDefault(); handleCreate(); }} class="card p-6 flex gap-3 mb-8">
-    <select class="input-field w-52" bind:value={newSessionEventId}>
+  <form onsubmit={(e) => { e.preventDefault(); handleCreate(); }} class="card p-4 sm:p-5 flex flex-col md:flex-row gap-3 mb-6">
+    <select class="input-field w-full md:w-52" bind:value={newSessionEventId}>
       <option value="" disabled>Select event</option>
       {#each events as event (event.id)}
         <option value={event.id}>
@@ -82,7 +82,7 @@
     <input type="text" bind:value={newTitle} placeholder="New session title..." class="input-field flex-1" />
     <button
       type="submit"
-      class="btn-primary flex items-center gap-2 whitespace-nowrap text-sm"
+      class="btn-primary flex items-center justify-center gap-2 whitespace-nowrap text-sm"
       disabled={creating || !newSessionEventId}
     >
       <Plus class="w-4 h-4" />
@@ -103,9 +103,9 @@
       </div>
     </div>
   {:else}
-    <div class="space-y-3">
+    <div class="space-y-2.5">
       {#each sessions as session (session.id)}
-        <div class="card p-6 hover:shadow-md transition-all duration-200 hover:scale-[1.01] flex items-center justify-between gap-4">
+        <div class="card p-4 sm:p-5 hover:shadow-md transition-all duration-200 hover:scale-[1.01] flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-3 mb-1">
               <h3 class="text-lg font-semibold truncate">{session.title}</h3>
@@ -116,7 +116,7 @@
                 </span>
               {/if}
             </div>
-            <div class="flex items-center gap-3 text-sm text-surface-500">
+            <div class="flex items-center gap-3 text-sm text-surface-500 flex-wrap">
               <button
                 onclick={() => copyCode(session.unique_code)}
                 class="flex items-center gap-1 font-mono hover:text-surface-300 transition-colors"
@@ -128,8 +128,8 @@
               <span class="text-xs text-surface-500">{new Date(session.created_at).toLocaleDateString()}</span>
             </div>
           </div>
-          <div class="flex items-center gap-2">
-            <a href="/dashboard/{session.id}" class="btn-secondary flex items-center gap-1.5">
+          <div class="flex items-center gap-2 w-full sm:w-auto">
+            <a href="/dashboard/{session.id}" class="btn-secondary flex items-center justify-center gap-1.5 flex-1 sm:flex-none">
               <ExternalLink class="w-3.5 h-3.5" />
               Manage
             </a>

@@ -172,8 +172,8 @@
   <title>Analytics – Rforum</title>
 </svelte:head>
 
-<main class="flex-1 max-w-6xl mx-auto w-full px-8 py-10">
-  <div class="mb-10">
+<main class="flex-1 max-w-6xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
+  <div class="mb-8">
     <h1 class="text-3xl font-heading font-bold tracking-wide">Analytics</h1>
     <p class="text-surface-500 mt-1.5">Platform engagement insights and audience data</p>
   </div>
@@ -187,7 +187,7 @@
     </div>
   {:else}
     <!-- Stat Cards -->
-    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
       {#each statCards as card}
         {@const Icon = card.icon}
         <div class="card">
@@ -203,8 +203,8 @@
     </div>
 
     <!-- Storage Usage card -->
-    <div class="card mb-10">
-      <div class="flex items-center justify-between">
+    <div class="card mb-8">
+      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div class="flex items-center gap-4">
           <div class="w-11 h-11 flex items-center justify-center rounded-xl bg-warning/10">
             <HardDrive class="w-5 h-5 text-warning" />
@@ -214,7 +214,7 @@
             <p class="text-2xl font-heading font-bold mt-0.5">{formatBytes(storageUsedBytes)}</p>
           </div>
         </div>
-        <a href="/dashboard/assets" class="btn-secondary text-xs px-3 py-1.5">Manage Assets →</a>
+        <a href="/dashboard/assets" class="btn-secondary text-xs px-3 py-1.5 text-center w-full sm:w-auto">Manage Assets →</a>
       </div>
       <div class="mt-4 w-full h-2 rounded-full bg-surface-100 dark:bg-surface-800 overflow-hidden">
         <div
@@ -226,7 +226,7 @@
     </div>
 
     <!-- Row 2: Content Distribution + Response Activity by Type -->
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
 
       <!-- Donut: Slide Type Distribution (what content you have) -->
       <div class="card">
@@ -238,7 +238,7 @@
             <p class="text-sm">No slides created yet</p>
           </div>
         {:else}
-          <div class="flex items-center gap-8">
+          <div class="flex flex-col md:flex-row md:items-center gap-6 md:gap-8">
             <svg viewBox="0 0 200 200" class="w-40 h-40 flex-shrink-0">
               {#each getDonutSegments() as seg}
                 <path d={describeArc(100, 100, 70, seg.startAngle, seg.endAngle)} fill="none" stroke={seg.color} stroke-width="28" stroke-linecap="round" />
@@ -295,7 +295,7 @@
     </div>
 
     <!-- Row 3: Engagement Timeline + Rating Distribution -->
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
 
       <!-- Line Chart: Engagement over time -->
       <div class="card">
@@ -372,7 +372,7 @@
     </div>
 
     <!-- Row 4: Participation Funnel + Session Leaderboard -->
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-10">
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-8">
 
       <!-- Participation Funnel -->
       <div class="card lg:col-span-1">
@@ -412,7 +412,7 @@
           </div>
         {:else}
           <div class="overflow-x-auto">
-            <table class="w-full text-sm">
+            <table class="w-full min-w-[640px] text-sm">
               <thead>
                 <tr class="border-b border-surface-200 dark:border-surface-800 text-left">
                   <th class="pb-3 font-medium text-surface-500 text-xs uppercase tracking-widest w-8">#</th>
