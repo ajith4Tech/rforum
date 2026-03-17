@@ -164,7 +164,24 @@
   </header>
 
   <!-- Main -->
-  <main class="flex-1 flex items-center justify-center px-8 py-6 overflow-hidden">
+  <main class="relative flex-1 flex items-center justify-center px-8 py-6 overflow-hidden">
+    {#if session && (session.moderator_name || (session.speaker_names && session.speaker_names.length > 0))}
+      <div class="absolute left-8 top-28 z-10 max-w-md rounded-2xl border border-white/10 bg-white/5 backdrop-blur-sm px-4 py-3">
+        {#if session.moderator_name}
+          <p class="text-[11px] uppercase tracking-widest text-white/50">Moderator</p>
+          <p class="text-sm font-semibold text-white">{session.moderator_name}</p>
+        {/if}
+        {#if session.speaker_names && session.speaker_names.length > 0}
+          <p class="text-[11px] uppercase tracking-widest text-white/50 mt-2">Speakers</p>
+          <div class="flex flex-wrap gap-1.5 mt-1">
+            {#each session.speaker_names as speaker, index (speaker + index)}
+              <span class="text-[11px] px-2 py-1 rounded-full bg-white/10">{speaker}</span>
+            {/each}
+          </div>
+        {/if}
+      </div>
+    {/if}
+
     {#if loading}
       <div class="text-center">
         <Orbit class="w-12 h-12 text-brand-400 mx-auto mb-4 animate-pulse" />

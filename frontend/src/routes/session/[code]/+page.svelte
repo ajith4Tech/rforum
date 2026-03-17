@@ -250,6 +250,23 @@
   </header>
 
   <main class="flex-1 flex flex-col items-center justify-center px-4 py-6">
+    {#if session && (session.moderator_name || (session.speaker_names && session.speaker_names.length > 0))}
+      <div class="w-full max-w-lg mb-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-4 py-3">
+        {#if session.moderator_name}
+          <p class="text-xs uppercase tracking-widest text-slate-500">Moderator</p>
+          <p class="text-sm font-semibold text-slate-900 dark:text-white">{session.moderator_name}</p>
+        {/if}
+        {#if session.speaker_names && session.speaker_names.length > 0}
+          <p class="text-xs uppercase tracking-widest text-slate-500 mt-2">Speakers</p>
+          <div class="flex flex-wrap gap-2 mt-1">
+            {#each session.speaker_names as speaker, index (speaker + index)}
+              <span class="text-xs px-2.5 py-1 rounded-full bg-slate-100 dark:bg-slate-800">{speaker}</span>
+            {/each}
+          </div>
+        {/if}
+      </div>
+    {/if}
+
     {#if loading}
       <p class="text-slate-500">Connecting...</p>
     {:else if error && !activeSlide}

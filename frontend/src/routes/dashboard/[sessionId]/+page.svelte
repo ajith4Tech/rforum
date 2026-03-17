@@ -11,7 +11,9 @@
     AlignLeft,
     FileText,
     Cloud,
-    NotebookPen
+    NotebookPen,
+    UserRound,
+    Users
   } from 'lucide-svelte';
   import Sidebar from '$lib/components/Sidebar.svelte';
 
@@ -35,6 +37,10 @@
   let wordCloudPrompt = $state('');
   let editingSlideId = $state<string | null>(null);
   let moderatorNotes = $state('');
+  let moderatorName = $state('');
+  let speakerNameInput = $state('');
+  let speakerNames = $state<string[]>([]);
+  let savingModeratorSetup = $state(false);
   let notesSavedFlash = $state(false);
   let notesSaveTimer: ReturnType<typeof setTimeout> | null = null;
   const activeSlide = $derived(getActiveSlide());
@@ -85,6 +91,8 @@
       session = await getSession(sessionId);
 
       slides = session.slides || [];
+      moderatorName = session.moderator_name || '';
+      speakerNames = Array.isArray(session.speaker_names) ? [...session.speaker_names] : [];
 
       const active = slides.find((s: any) => s.is_active);
       if (active) {
@@ -153,6 +161,35 @@
   async function toggleLive() {
     session = await updateSession(sessionId, { is_live: !session.is_live });
     ws?.send('session_update', { is_live: session.is_live });
+  }
+
+  function addSpeakerName() {
+    const name = speakerNameInput.trim();
+    if (!name) return;
+    if (speakerNames.some((item) => item.toLowerCase() === name.toLowerCase())) {
+      speakerNameInput = '';
+      return;
+    }
+    speakerNames = [...speakerNames, name];
+    speakerNameInput = '';
+  }
+
+  function removeSpeakerName(index: number) {
+    speakerNames = speakerNames.filter((_, i) => i !== index);
+  }
+
+  async function saveModeratorSetup() {
+    savingModeratorSetup = true;
+    try {
+      session = await updateSession(sessionId, {
+        moderator_name: moderatorName.trim() || null,
+        speaker_names: speakerNames
+      });
+      moderatorName = session.moderator_name || '';
+      speakerNames = Array.isArray(session.speaker_names) ? [...session.speaker_names] : [];
+    } finally {
+      savingModeratorSetup = false;
+    }
   }
 
   async function addSlide(type: string) {
@@ -626,6 +663,63 @@
             {/if}
           {/if}
         </section>
+      </div>
+    {/if}
+
+    <!-- Moderator Setup -->
+    {#if !loading && !errorMessage}
+      <div class="card mt-6 mx-0">
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center gap-2">
+            <Users class="w-4 h-4 text-brand-500" />
+            <h2 class="font-heading font-semibold text-sm uppercase tracking-widest text-surface-500">Moderator Setup</h2>
+          </div>
+        </div>
+        <div class="grid gap-3 sm:grid-cols-2">
+          <label class="block sm:col-span-2">
+            <span class="text-xs text-surface-500 uppercase tracking-widest">Moderator Name</span>
+            <input
+              class="input-field mt-1"
+              type="text"
+              bind:value={moderatorName}
+              placeholder="Who is moderating this session?"
+            />
+          </label>
+          <label class="block sm:col-span-2">
+            <span class="text-xs text-surface-500 uppercase tracking-widest">Guest Speakers / Panelists</span>
+            <div class="flex gap-2 mt-1">
+              <input
+                class="input-field"
+                type="text"
+                bind:value={speakerNameInput}
+                onkeydown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    addSpeakerName();
+                  }
+                }}
+                placeholder="Add speaker name"
+              />
+              <button type="button" class="btn-secondary" onclick={addSpeakerName}>Add</button>
+            </div>
+          </label>
+          {#if speakerNames.length > 0}
+            <div class="sm:col-span-2 flex flex-wrap gap-2">
+              {#each speakerNames as speaker, index (speaker + index)}
+                <span class="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-surface-200 text-xs">
+                  <UserRound class="w-3 h-3" />
+                  {speaker}
+                  <button type="button" class="text-surface-500 hover:text-danger" onclick={() => removeSpeakerName(index)}>x</button>
+                </span>
+              {/each}
+            </div>
+          {/if}
+          <div class="sm:col-span-2">
+            <button type="button" class="btn-primary" onclick={saveModeratorSetup} disabled={savingModeratorSetup}>
+              {savingModeratorSetup ? 'Saving...' : 'Save moderator setup'}
+            </button>
+          </div>
+        </div>
       </div>
     {/if}
 

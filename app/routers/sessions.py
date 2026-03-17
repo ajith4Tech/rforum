@@ -45,6 +45,8 @@ async def create_session(
     session = Session(
         owner_id=user.id,
         title=payload.title,
+        moderator_name=payload.moderator_name,
+        speaker_names=payload.speaker_names,
         unique_code=code,
         event_id=payload.event_id,
     )

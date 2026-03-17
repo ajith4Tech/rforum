@@ -72,6 +72,9 @@
   let showCreateSession = $state(false);
   let newSessionTitle = $state('');
   let newSessionEventId = $state('');
+  let newSessionModerator = $state('');
+  let newSessionSpeakerInput = $state('');
+  let newSessionSpeakers = $state<string[]>([]);
   let creatingSession = $state(false);
 
   // Per-event countdowns
@@ -142,12 +145,36 @@
     if (!newSessionTitle.trim() || !newSessionEventId) return;
     creatingSession = true;
     try {
-      const session = await createSession(newSessionTitle.trim(), newSessionEventId);
+      const session = await createSession(
+        newSessionTitle.trim(),
+        newSessionEventId,
+        newSessionModerator.trim() || null,
+        newSessionSpeakers
+      );
       sessions = [session, ...sessions];
-      newSessionTitle = ''; newSessionEventId = '';
+      newSessionTitle = '';
+      newSessionEventId = '';
+      newSessionModerator = '';
+      newSessionSpeakerInput = '';
+      newSessionSpeakers = [];
       showCreateSession = false;
       goto('/dashboard/sessions');
     } catch (e: any) { alert(e.message); } finally { creatingSession = false; }
+  }
+
+  function addNewSessionSpeaker() {
+    const name = newSessionSpeakerInput.trim();
+    if (!name) return;
+    if (newSessionSpeakers.some((s) => s.toLowerCase() === name.toLowerCase())) {
+      newSessionSpeakerInput = '';
+      return;
+    }
+    newSessionSpeakers = [...newSessionSpeakers, name];
+    newSessionSpeakerInput = '';
+  }
+
+  function removeNewSessionSpeaker(index: number) {
+    newSessionSpeakers = newSessionSpeakers.filter((_, i) => i !== index);
   }
 
   function copyCode(code: string) { navigator.clipboard.writeText(code); }
@@ -470,6 +497,38 @@
           <label class="block text-xs font-medium text-surface-500 uppercase tracking-wider mb-1.5">Session Title</label>
           <input type="text" bind:value={newSessionTitle} placeholder="e.g. Morning Keynote" class="input-field" />
         </div>
+        <div>
+          <label class="block text-xs font-medium text-surface-500 uppercase tracking-wider mb-1.5">Moderator Name <span class="normal-case text-surface-600">(optional)</span></label>
+          <input type="text" bind:value={newSessionModerator} placeholder="e.g. Priya Nair" class="input-field" />
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-surface-500 uppercase tracking-wider mb-1.5">Guest Speakers / Panelists</label>
+          <div class="flex gap-2">
+            <input
+              type="text"
+              bind:value={newSessionSpeakerInput}
+              placeholder="Add speaker name"
+              class="input-field"
+              onkeydown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  addNewSessionSpeaker();
+                }
+              }}
+            />
+            <button type="button" class="btn-secondary" onclick={addNewSessionSpeaker}>Add</button>
+          </div>
+        </div>
+        {#if newSessionSpeakers.length > 0}
+          <div class="flex flex-wrap gap-2">
+            {#each newSessionSpeakers as speaker, index (speaker + index)}
+              <span class="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-surface-200 text-xs">
+                {speaker}
+                <button type="button" class="text-surface-500 hover:text-danger" onclick={() => removeNewSessionSpeaker(index)}>x</button>
+              </span>
+            {/each}
+          </div>
+        {/if}
         <div class="flex flex-col-reverse sm:flex-row justify-end gap-2 pt-2">
           <button type="button" onclick={() => showCreateSession = false} class="btn-secondary text-sm">Cancel</button>
           <button type="submit" class="btn-primary text-sm" disabled={creatingSession || !newSessionTitle.trim() || !newSessionEventId}>

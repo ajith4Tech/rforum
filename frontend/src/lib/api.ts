@@ -114,10 +114,20 @@ export async function listSessions() {
   return fetchJson('/sessions', { method: 'GET' }, true);
 }
 
-export async function createSession(title: string, eventId: string) {
+export async function createSession(
+  title: string,
+  eventId: string,
+  moderatorName?: string | null,
+  speakerNames: string[] = []
+) {
   return fetchJson('/sessions', {
     method: 'POST',
-    body: JSON.stringify({ title, event_id: eventId })
+    body: JSON.stringify({
+      title,
+      event_id: eventId,
+      moderator_name: moderatorName ?? null,
+      speaker_names: speakerNames
+    })
   }, true);
 }
 

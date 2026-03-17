@@ -86,6 +86,8 @@ class Session(Base):
         String(9), unique=True, nullable=False
     )  # e.g. ABCD-1234
     title: Mapped[str] = mapped_column(String(255), nullable=False)
+    moderator_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    speaker_names: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     is_live: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

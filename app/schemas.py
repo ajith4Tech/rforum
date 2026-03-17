@@ -60,11 +60,65 @@ class Token(BaseModel):
 class SessionCreate(BaseModel):
     title: str
     event_id: uuid.UUID
+    moderator_name: str | None = None
+    speaker_names: list[str] = Field(default_factory=list)
+
+    @field_validator("speaker_names")
+    @classmethod
+    def clean_speaker_names(cls, value: list[str]) -> list[str]:
+        cleaned: list[str] = []
+        seen: set[str] = set()
+        for item in value:
+            name = item.strip()
+            if not name:
+                continue
+            key = name.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            cleaned.append(name)
+        return cleaned[:20]
+
+    @field_validator("moderator_name")
+    @classmethod
+    def clean_moderator_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        cleaned = value.strip()
+        return cleaned or None
 
 
 class SessionUpdate(BaseModel):
     title: str | None = None
     is_live: bool | None = None
+    moderator_name: str | None = None
+    speaker_names: list[str] | None = None
+
+    @field_validator("speaker_names")
+    @classmethod
+    def clean_speaker_names(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return value
+        cleaned: list[str] = []
+        seen: set[str] = set()
+        for item in value:
+            name = item.strip()
+            if not name:
+                continue
+            key = name.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            cleaned.append(name)
+        return cleaned[:20]
+
+    @field_validator("moderator_name")
+    @classmethod
+    def clean_moderator_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        cleaned = value.strip()
+        return cleaned or None
 
 
 class SessionOut(BaseModel):
@@ -73,6 +127,8 @@ class SessionOut(BaseModel):
     event_id: uuid.UUID | None = None
     unique_code: str
     title: str
+    moderator_name: str | None = None
+    speaker_names: list[str] = Field(default_factory=list)
     is_live: bool
     created_at: datetime
 
@@ -80,7 +136,7 @@ class SessionOut(BaseModel):
 
 
 class SessionWithSlides(SessionOut):
-    slides: list["SlideOut"] = []
+    slides: list["SlideOut"] = Field(default_factory=list)
 
 
 class SessionPublicOut(BaseModel):
@@ -119,7 +175,7 @@ class EventOut(BaseModel):
 
 
 class EventWithSessions(EventOut):
-    sessions: list[SessionOut] = []
+    sessions: list[SessionOut] = Field(default_factory=list)
 
 
 class EventPublicOut(BaseModel):
@@ -127,13 +183,13 @@ class EventPublicOut(BaseModel):
     title: str
     event_date: date
     description: str | None = None
-    sessions: list[SessionPublicOut] = []
+    sessions: list[SessionPublicOut] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
 
 
 class EventSessionsUpdate(BaseModel):
-    session_ids: list[uuid.UUID] = []
+    session_ids: list[uuid.UUID] = Field(default_factory=list)
 
 
 # ── Slide ─────────────────────────────────────────────
