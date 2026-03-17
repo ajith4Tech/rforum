@@ -2,12 +2,13 @@
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
   import { login, register } from '$lib/api';
-  import { Orbit, Mail, Lock, KeyRound } from 'lucide-svelte';
+  import { Orbit, Mail, Lock, KeyRound, Eye, EyeOff } from 'lucide-svelte';
 
   let isRegister = $state(false);
   let email = $state('');
   let password = $state('');
   let inviteCode = $state('');
+  let showPassword = $state(false);
   let error = $state('');
   let loading = $state(false);
 
@@ -87,13 +88,25 @@
         <div class="relative">
           <Lock class="absolute left-3.5 top-3.5 w-4 h-4 text-surface-400" />
           <input
-            type="password"
+            type={showPassword ? 'text' : 'password'}
             bind:value={password}
             placeholder="Password"
-            class="input-field pl-10"
+            class="input-field pl-10 pr-11"
             required
             minlength="6"
           />
+          <button
+            type="button"
+            class="absolute right-3 top-1/2 -translate-y-1/2 text-surface-400 hover:text-surface-200 transition"
+            onclick={() => showPassword = !showPassword}
+            aria-label={showPassword ? 'Hide password' : 'Show password'}
+          >
+            {#if showPassword}
+              <EyeOff class="w-4 h-4" />
+            {:else}
+              <Eye class="w-4 h-4" />
+            {/if}
+          </button>
         </div>
 
         {#if error}
