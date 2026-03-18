@@ -3,7 +3,7 @@
   import { theme, toggleTheme } from '$lib/theme';
   import { changePassword } from '$lib/api';
   import { isSuperAdmin, currentUser } from '$lib/stores';
-  import { Orbit, Moon, Sun, LogOut, ChevronDown, User, Lock, Info, Shield, Zap, Users, BarChart3, MessageSquare, LogIn, UserPlus, BookOpen, CalendarDays, Presentation, Radio, Layers, BarChart2, MessageCircleQuestion, Star, Cloud, Monitor } from 'lucide-svelte';
+  import { Orbit, Moon, Sun, LogOut, ChevronDown, User, Lock, Info, Shield, Zap, Users, BarChart3, MessageSquare, LogIn, UserPlus, BookOpen, CalendarDays, Presentation, Radio, Layers, BarChart2, MessageCircleQuestion, Star, Cloud, Monitor, Eye, EyeOff } from 'lucide-svelte';
 
   let {
     authenticated = false,
@@ -21,6 +21,8 @@
   let guideSection = $state(0);
 
   let showChangePwd = $state(false);
+  let showCurrentPwd = $state(false);
+  let showNewPwd = $state(false);
   let currentPwd = $state('');
   let newPwd = $state('');
   let pwdError = $state('');
@@ -65,6 +67,8 @@
     menuOpen = false;
     currentPwd = '';
     newPwd = '';
+    showCurrentPwd = false;
+    showNewPwd = false;
     pwdError = '';
     pwdSuccess = '';
     showChangePwd = true;
@@ -449,29 +453,53 @@
         <div>
           <label class="block text-xs font-medium text-surface-400 mb-1.5">Current password</label>
           <div class="relative">
-            <Lock class="absolute left-3.5 top-3 w-4 h-4 text-surface-400" />
+            <Lock class="absolute left-3.5 top-3 w-4 h-4 text-surface-400 pointer-events-none" />
             <input
-              type="password"
+              type={showCurrentPwd ? 'text' : 'password'}
               bind:value={currentPwd}
               placeholder="Enter current password"
-              class="input-field pl-10"
+              class="input-field pl-10 pr-10"
               required
               minlength="1"
             />
+            <button
+              type="button"
+              onclick={() => showCurrentPwd = !showCurrentPwd}
+              class="absolute right-3.5 top-3 text-surface-400 hover:text-surface-300 transition-colors"
+              title={showCurrentPwd ? 'Hide password' : 'Show password'}
+            >
+              {#if showCurrentPwd}
+                <EyeOff class="w-4 h-4" />
+              {:else}
+                <Eye class="w-4 h-4" />
+              {/if}
+            </button>
           </div>
         </div>
         <div>
           <label class="block text-xs font-medium text-surface-400 mb-1.5">New password</label>
           <div class="relative">
-            <Lock class="absolute left-3.5 top-3 w-4 h-4 text-surface-400" />
+            <Lock class="absolute left-3.5 top-3 w-4 h-4 text-surface-400 pointer-events-none" />
             <input
-              type="password"
+              type={showNewPwd ? 'text' : 'password'}
               bind:value={newPwd}
               placeholder="Min 6 characters"
-              class="input-field pl-10"
+              class="input-field pl-10 pr-10"
               required
               minlength="6"
             />
+            <button
+              type="button"
+              onclick={() => showNewPwd = !showNewPwd}
+              class="absolute right-3.5 top-3 text-surface-400 hover:text-surface-300 transition-colors"
+              title={showNewPwd ? 'Hide password' : 'Show password'}
+            >
+              {#if showNewPwd}
+                <EyeOff class="w-4 h-4" />
+              {:else}
+                <Eye class="w-4 h-4" />
+              {/if}
+            </button>
           </div>
         </div>
 
