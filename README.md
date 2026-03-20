@@ -346,38 +346,6 @@ rforum/
 └── README.md
 ```
 
-## Development Tips
-
-**Backend**: Use `uvicorn app.main:app --reload` for hot reload | Check logs for WebSocket issues  
-
-**Frontend**: Dev server runs on `http://localhost:5173` with HMR enabled | Tailwind CSS compiles automatically  
-
-**Database**: Create migration: `alembic revision --autogenerate -m "description"` | Apply: `alembic upgrade head` | Test: `pytest`
-
-## Security & Performance
-
-**Security Best Practices**:
-- Never commit `.env` files to version control
-- Generate strong SECRET_KEY: `python -c "import secrets; print(secrets.token_urlsafe(32))"`
-- Enable HTTPS in production with valid SSL certificates
-- Restrict network access to PostgreSQL and Redis
-- Keep dependencies updated for security patches
-
-**Performance Optimizations**:
-- Database indexes on frequently queried fields (session codes, user IDs)
-- Redis pub/sub routes messages only to relevant subscribers
-- Svelte compiles to minimal JavaScript bundles
-- asyncpg connection pooling for efficient database access
-
-## Contributing & Support
-
-**Contributing**: Follow these guidelines:
-- Check existing issues to avoid duplicates
-- Create detailed issue descriptions with reproduction steps
-- Submit pull requests with clear commit messages
-- Follow the existing code style and conventions
-- Include tests for new features
-
 **Contact**: ajithbm01@gmail.com  
 **Report Issues**: [GitHub Issues](https://github.com/ajith4Tech/rforum/issues)
 
