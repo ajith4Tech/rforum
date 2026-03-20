@@ -30,6 +30,14 @@ Rforum is a modern, feature-rich audience engagement platform that enables live,
 ![Moderator Session](./images/mod-session-1.png)
 *Session control panel with session code, moderator details, speakers list, and session management options to go live, edit, or delete*
 
+#### Moderator - Session Management View
+![Moderator Session Manage](./images/mod-viewsessionmanage.png)
+*Comprehensive session management interface with detailed view options, session controls, and management capabilities*
+
+#### Moderator - Main Screen
+![Moderator Main Screen](./images/modview-mainscreen.png)
+*Main screen dashboard showing upcoming sessions, events, assets, and live session controls for moderators*
+
 #### Guest Audience View
 ![Guest View](./images/guest-view.png)
 *Simple interface for audience members to join with a session code and participate in polls, Q&A, feedback, and word cloud activities*
