@@ -219,19 +219,17 @@
 
   async function handleTextSubmit() {
     if (!inputValue.trim()) return;
-    if ((activeSlide.type === 'QNA' || activeSlide.type === 'FEEDBACK' || activeSlide.type === 'WORD_CLOUD') && !guestName.trim()) {
-      alert('Please enter your name.');
-      return;
-    }
     if (activeSlide.type === 'POLL') {
       submitted = true;
     }
     try {
+      // Trim name and default to "Guest" if empty
+      const trimmedName = guestName.trim() || "Guest";
       await submitResponse(
         activeSlide.id,
         inputValue.trim(),
         guestId,
-        guestName || undefined,
+        trimmedName !== "Guest" ? trimmedName : undefined,
         activeSlide.type === 'FEEDBACK' ? feedbackRating : undefined
       );
       // No need to manually broadcast - backend handles publishing via Redis
@@ -243,7 +241,7 @@
         submitted = false;
       }
       if (activeSlide.type === 'QNA' || activeSlide.type === 'WORD_CLOUD') {
-        guestName = guestName.trim();
+        guestName = trimmedName;
         thankYou = true;
         setTimeout(() => { thankYou = false; }, 2000);
       }
@@ -269,13 +267,13 @@
 </svelte:head>
 
 <div class="min-h-screen flex flex-col bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white">
-  <!-- Header -->
-  <header class="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-800">
-    <div class="flex items-center gap-2">
+  <!-- Top Navbar with Logo, Rforum, Theme Toggle, and Code -->
+  <header class="flex items-center justify-between px-4 py-1.5 border-b border-slate-200 dark:border-slate-800">
+    <div class="flex items-center gap-2 flex-shrink-0">
       <Orbit class="w-5 h-5 text-purple-500" />
       <span class="font-heading font-bold text-sm tracking-wide">Rforum</span>
     </div>
-    <div class="flex items-center gap-2">
+    <div class="flex items-center gap-2 flex-shrink-0">
       <button
         onclick={toggleTheme}
         class="border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 p-2 rounded-lg transition active:scale-95"
@@ -291,28 +289,38 @@
     </div>
   </header>
 
-  <!-- Centered Logo Section -->
-  <div class="flex justify-center pt-4 sm:pt-6 md:pt-8 pb-4 sm:pb-6">
-    <img src="/logo-mascot.png" alt="Tech Good Community" class="w-16 h-auto sm:w-20 md:w-24 lg:w-28 opacity-90 hover:opacity-100 transition-opacity" />
+  <!-- Centered Header Section: Logo, Session Title, Moderator -->
+  <div class="w-full px-4 py-3 border-b border-slate-200 dark:border-slate-800">
+    <div class="flex flex-col items-center gap-2">
+      <!-- Logo -->
+      <img src="/logo-mascot.webp" alt="Tech Good Community" class="w-12 h-auto sm:w-14 md:w-16 opacity-90 hover:opacity-100 transition-opacity" />
+      
+      <!-- Session Title -->
+      {#if session?.title}
+        <h1 class="text-xl sm:text-2xl font-heading font-bold text-center text-slate-900 dark:text-white max-w-full">{session.title}</h1>
+      {/if}
+      
+      <!-- Moderator -->
+      {#if session?.moderator_name}
+        <p class="text-sm text-slate-600 dark:text-slate-400 text-center">
+          <span class="text-xs uppercase tracking-widest text-slate-500 dark:text-slate-500">Moderator</span> 
+          <span class="block sm:inline">· {session.moderator_name}</span>
+        </p>
+      {/if}
+      
+      <!-- Speakers (if any) -->
+      {#if session?.speaker_names && session.speaker_names.length > 0}
+        <div class="flex flex-wrap gap-1.5 justify-center mt-1">
+          <p class="w-full text-xs uppercase tracking-widest text-slate-500 dark:text-slate-500 text-center">Speakers</p>
+          {#each session.speaker_names as speaker, index (speaker + index)}
+            <span class="text-xs px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">{speaker}</span>
+          {/each}
+        </div>
+      {/if}
+    </div>
   </div>
 
-  <main class="flex-1 flex flex-col items-center justify-center px-4 py-6">
-    {#if session && (session.moderator_name || (session.speaker_names && session.speaker_names.length > 0))}
-      <div class="w-full max-w-lg mb-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-4 py-3">
-        {#if session.moderator_name}
-          <p class="text-xs uppercase tracking-widest text-slate-500">Moderator</p>
-          <p class="text-sm font-semibold text-slate-900 dark:text-white">{session.moderator_name}</p>
-        {/if}
-        {#if session.speaker_names && session.speaker_names.length > 0}
-          <p class="text-xs uppercase tracking-widest text-slate-500 mt-2">Speakers</p>
-          <div class="flex flex-wrap gap-2 mt-1">
-            {#each session.speaker_names as speaker, index (speaker + index)}
-              <span class="text-xs px-2.5 py-1 rounded-full bg-slate-100 dark:bg-slate-800">{speaker}</span>
-            {/each}
-          </div>
-        {/if}
-      </div>
-    {/if}
+  <main class="flex-1 flex flex-col items-center px-4 pt-4 sm:pt-6 md:pt-8 overflow-y-auto">
 
     {#if loading}
       <p class="text-slate-500">Connecting...</p>
@@ -322,13 +330,13 @@
         <a href="/" class="text-purple-600 hover:underline text-sm">Go home</a>
       </div>
     {:else if !activeSlide}
-      <div class="text-center text-slate-500 animate-fade-in max-w-sm w-full">
-        <Orbit class="w-16 h-16 mx-auto mb-4 text-purple-400 animate-pulse-live" />
+      <div class="text-center text-slate-500 animate-fade-in max-w-sm w-full mt-8">
+        <Orbit class="w-16 h-16 mx-auto mb-3 text-purple-400 animate-pulse-live" />
         {#if session?.event?.title}
           <h2 class="text-xl font-heading font-bold text-slate-900 dark:text-white mb-1">{session.event.title}</h2>
         {/if}
         <p class="text-base font-medium mb-1">Waiting for the presenter...</p>
-        <p class="text-sm mt-1 mb-6">The next slide will appear here automatically</p>
+        <p class="text-sm mt-1 mb-4">The next slide will appear here automatically</p>
 
         {#if countdown}
           <div class="mt-4">
@@ -345,11 +353,11 @@
         {/if}
       </div>
     {:else}
-      <div class="w-full max-w-lg animate-fade-in">
+      <div class="w-full max-w-lg animate-fade-in mt-6">
         <!-- Poll Slide -->
         {#if activeSlide.type === 'POLL'}
-          <div class="text-center mb-8">
-            <BarChart3 class="w-10 h-10 text-purple-600 mx-auto mb-3" />
+          <div class="text-center mb-4">
+            <BarChart3 class="w-10 h-10 text-purple-600 mx-auto mb-2" />
             <h1 class="text-2xl font-bold text-slate-900 dark:text-white">{activeSlide.content_json?.question}</h1>
           </div>
 
@@ -360,11 +368,11 @@
               <p class="text-sm text-slate-500 mt-1">You chose: {selectedOption}</p>
             </div>
           {:else}
-            <div class="space-y-3">
+            <div class="space-y-2">
               {#each activeSlide.content_json?.options || [] as option}
                 <button
                   onclick={() => handlePollVote(option)}
-                  class="w-full rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6
+                  class="w-full rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4
                          hover:border-purple-400 dark:hover:border-purple-500/50 hover:bg-purple-50 dark:hover:bg-purple-500/5
                          transition-all duration-200 text-left text-lg font-medium text-slate-900 dark:text-white
                          active:scale-[0.98] cursor-pointer"
@@ -378,26 +386,26 @@
 
         <!-- Q&A Slide -->
         {#if activeSlide.type === 'QNA'}
-          <div class="text-center mb-8">
-            <MessageSquare class="w-10 h-10 text-purple-600 mx-auto mb-3" />
+          <div class="text-center mb-4">
+            <MessageSquare class="w-10 h-10 text-purple-600 mx-auto mb-2" />
             <h1 class="text-2xl font-bold text-slate-900 dark:text-white">{activeSlide.content_json?.prompt}</h1>
           </div>
 
-          <form onsubmit={(event) => { event.preventDefault(); handleTextSubmit(); }} class="space-y-3 mb-6">
+          <form onsubmit={(event) => { event.preventDefault(); handleTextSubmit(); }} class="space-y-2 mb-4">
             <input
               type="text"
               bind:value={guestName}
-              placeholder="Your name"
-              class="w-full rounded-xl px-4 py-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition"
+              placeholder="Your name (optional)"
+              class="w-full rounded-xl px-4 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition"
             />
-            <div class="flex gap-3">
+            <div class="flex gap-2">
               <input
                 type="text"
                 bind:value={inputValue}
                 placeholder="Type your question..."
-                class="flex-1 rounded-xl px-4 py-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition"
+                class="flex-1 rounded-xl px-4 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition"
               />
-              <button type="submit" class="btn-primary p-3">
+              <button type="submit" class="btn-primary p-2">
                 <Send class="w-5 h-5" />
               </button>
             </div>
@@ -437,8 +445,8 @@
 
         <!-- Feedback Slide -->
         {#if activeSlide.type === 'FEEDBACK'}
-          <div class="text-center mb-8">
-            <AlignLeft class="w-10 h-10 text-purple-600 mx-auto mb-3" />
+          <div class="text-center mb-4">
+            <AlignLeft class="w-10 h-10 text-purple-600 mx-auto mb-2" />
             <h1 class="text-2xl font-bold text-slate-900 dark:text-white">{activeSlide.content_json?.prompt}</h1>
           </div>
 
@@ -452,16 +460,16 @@
               <input
                 type="text"
                 bind:value={guestName}
-                placeholder="Your name"
-                class="w-full rounded-xl px-4 py-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition mb-3"
+                placeholder="Your name (optional)"
+                class="w-full rounded-xl px-4 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition mb-2"
               />
               <textarea
                 bind:value={inputValue}
                 placeholder="Share your thoughts..."
                 rows="4"
-                class="w-full rounded-xl px-4 py-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition mb-4 resize-none"
+                class="w-full rounded-xl px-4 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition mb-2 resize-none"
               ></textarea>
-              <div class="flex items-center gap-3 mb-4">
+              <div class="flex items-center gap-2 mb-3">
                 <label for="feedback-rating" class="text-sm text-slate-500 dark:text-slate-400">Rating</label>
                 <input
                   id="feedback-rating"
@@ -469,7 +477,7 @@
                   min="1"
                   max="5"
                   bind:value={feedbackRating}
-                  class="w-24 rounded-xl px-4 py-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition"
+                  class="w-24 rounded-xl px-4 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition"
                 />
               </div>
               <button type="submit" class="btn-primary w-full flex items-center justify-center gap-2">
@@ -482,40 +490,40 @@
 
         <!-- Word Cloud Slide -->
         {#if activeSlide.type === 'WORD_CLOUD'}
-          <div class="text-center mb-8">
-            <Cloud class="w-10 h-10 text-purple-600 mx-auto mb-3" />
+          <div class="text-center mb-4">
+            <Cloud class="w-10 h-10 text-purple-600 mx-auto mb-2" />
             <h1 class="text-2xl font-bold text-slate-900 dark:text-white">{activeSlide.content_json?.prompt}</h1>
           </div>
 
-          <form onsubmit={(event) => { event.preventDefault(); handleTextSubmit(); }} class="space-y-3 mb-6">
+          <form onsubmit={(event) => { event.preventDefault(); handleTextSubmit(); }} class="space-y-2 mb-4">
             <input
               type="text"
               bind:value={guestName}
-              placeholder="Your name"
-              class="w-full rounded-xl px-4 py-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition"
+              placeholder="Your name (optional)"
+              class="w-full rounded-xl px-4 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition"
             />
-            <div class="flex gap-3">
+            <div class="flex gap-2">
               <input
                 type="text"
                 bind:value={inputValue}
                 placeholder="Type your answer..."
-                class="flex-1 rounded-xl px-4 py-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition"
+                class="flex-1 rounded-xl px-4 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition"
               />
-              <button type="submit" class="btn-primary p-3">
+              <button type="submit" class="btn-primary p-2">
                 <Send class="w-5 h-5" />
               </button>
             </div>
           </form>
 
           {#if thankYou}
-            <div class="flex items-center justify-center gap-2 mb-4 text-sm text-emerald-500 animate-fade-in">
+            <div class="flex items-center justify-center gap-2 text-sm text-emerald-500 animate-fade-in">
               <CheckCircle2 class="w-4 h-4" />
               Thanks for your answer!
             </div>
           {/if}
 
           {#if actionError}
-            <p class="text-red-500 text-sm mb-4 text-center">{actionError}</p>
+            <p class="text-red-500 text-sm text-center">{actionError}</p>
           {/if}
         {/if}
 

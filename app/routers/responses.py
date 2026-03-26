@@ -45,7 +45,14 @@ async def submit_response(
     if count > 10:
         raise HTTPException(status_code=429, detail="Too many responses. Please slow down.")
 
-    response = Response(slide_id=slide_uuid, **payload.model_dump())
+    # Default name to "Guest" if empty or None
+    response_data = payload.model_dump()
+    if not response_data.get("name") or not response_data.get("name").strip():
+        response_data["name"] = "Guest"
+    else:
+        response_data["name"] = response_data["name"].strip()
+
+    response = Response(slide_id=slide_uuid, **response_data)
     db.add(response)
     await db.flush()
     await db.commit()

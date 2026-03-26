@@ -15,7 +15,8 @@
     onAddSlide,
     onActivateSlide,
     onStartEditing,
-    onRemoveSlide
+    onRemoveSlide,
+    onReorder
   }: {
     session: any;
     slides: any[];
@@ -28,10 +29,59 @@
     onActivateSlide: (id: string) => void;
     onStartEditing: (id: string) => void;
     onRemoveSlide: (id: string) => void;
+    onReorder?: (slideId: string, newIndex: number) => void;
   } = $props();
+
+  let draggedSlideId: string | null = $state(null);
+  let dragOverIndex: number | null = $state(null);
 
   function getSlideTypeKey(slide: any) {
     return slide?.type?.toUpperCase?.() || '';
+  }
+
+  function getSlideLabel(slide: any): string {
+    if (!slide) return 'Slide';
+    
+    const type = getSlideTypeKey(slide);
+    const content = slide.content_json || {};
+    
+    switch (type) {
+      case 'POLL':
+        return content.question?.substring(0, 40) || slideLabels['POLL'] || 'Poll';
+      case 'QNA':
+        return content.prompt?.substring(0, 40) || slideLabels['QNA'] || 'Q&A';
+      case 'FEEDBACK':
+        return content.prompt?.substring(0, 40) || slideLabels['FEEDBACK'] || 'Feedback';
+      case 'WORD_CLOUD':
+        return content.prompt?.substring(0, 40) || slideLabels['WORD_CLOUD'] || 'Word Cloud';
+      case 'CONTENT':
+        return content.title?.substring(0, 40) || slideLabels['CONTENT'] || 'Content';
+      default:
+        return slideLabels[type] || type || 'Slide';
+    }
+  }
+
+  function handleDragStart(slideId: string) {
+    draggedSlideId = slideId;
+  }
+
+  function handleDragOver(e: DragEvent, index: number) {
+    e.preventDefault();
+    dragOverIndex = index;
+  }
+
+  function handleDragLeave() {
+    dragOverIndex = null;
+  }
+
+  function handleDrop(e: DragEvent, targetIndex: number) {
+    e.preventDefault();
+    dragOverIndex = null;
+    
+    if (!draggedSlideId || !onReorder) return;
+
+    onReorder(draggedSlideId, targetIndex);
+    draggedSlideId = null;
   }
 </script>
 
@@ -87,16 +137,25 @@
       </div>
     {:else}
       <div class="space-y-1.5">
-        {#each slides as slide (slide.id)}
-          <SlideCard
-            {slide}
-            active={slide.id === activeSlideId}
-            icon={slideIcons[getSlideTypeKey(slide)]}
-            label={slideLabels[getSlideTypeKey(slide)] || getSlideTypeKey(slide) || 'Slide'}
-            onActivate={onActivateSlide}
-            onEdit={onStartEditing}
-            onRemove={onRemoveSlide}
-          />
+        {#each slides as slide, index (slide.id)}
+          <div
+            ondragstart={() => handleDragStart(slide.id)}
+            ondragover={(e) => handleDragOver(e, index)}
+            ondragleave={handleDragLeave}
+            ondrop={(e) => handleDrop(e, index)}
+            class="transition-all {dragOverIndex === index ? 'opacity-50 border-b-2 border-purple-400' : ''}"
+          >
+            <SlideCard
+              {slide}
+              active={slide.id === activeSlideId}
+              icon={slideIcons[getSlideTypeKey(slide)]}
+              label={getSlideLabel(slide)}
+              onActivate={onActivateSlide}
+              onEdit={onStartEditing}
+              onRemove={onRemoveSlide}
+              onReorder={onReorder}
+            />
+          </div>
         {/each}
       </div>
     {/if}

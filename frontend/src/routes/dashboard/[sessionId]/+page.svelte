@@ -266,6 +266,39 @@
     }
   }
 
+  async function reorderSlides(draggedSlideId: string, newIndex: number) {
+    const draggedSlide = slides.find((s) => s.id === draggedSlideId);
+    if (!draggedSlide) return;
+
+    const currentIndex = slides.indexOf(draggedSlide);
+    if (currentIndex === newIndex) return;
+
+    // Optimistic reordering
+    const newSlides = slides.filter((s) => s.id !== draggedSlideId);
+    newSlides.splice(newIndex, 0, draggedSlide);
+    slides = newSlides;
+
+    // Update order values
+    const updates = newSlides.map((slide, idx) => ({
+      ...slide,
+      order: idx
+    }));
+
+    // Send updates to backend
+    try {
+      for (let i = 0; i < updates.length; i++) {
+        await updateSlide(sessionId, updates[i].id, { order: i });
+      }
+      slides = updates;
+    } catch {
+      // Revert on failure
+      const originalIndex = currentIndex < newIndex ? newIndex : newIndex;
+      const reverted = slides.filter((s) => s.id !== draggedSlideId);
+      reverted.splice(originalIndex, 0, draggedSlide);
+      slides = reverted;
+    }
+  }
+
   function getActiveSlide() {
     return slides.find((s) => s.id === activeSlideId);
   }
@@ -495,6 +528,7 @@
           onActivateSlide={activateSlide}
           onStartEditing={startEditing}
           onRemoveSlide={removeSlide}
+          onReorder={reorderSlides}
         />
 
         <section class="col-span-12 lg:col-span-9">

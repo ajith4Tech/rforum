@@ -65,7 +65,7 @@
     <div class="mx-auto w-full max-w-full sm:max-w-2xl md:max-w-4xl">
       <!-- Logo -->
       <div class="flex justify-center mb-6 sm:mb-8">
-        <img src="/logo-mascot.png" alt="Tech Good Community" class="w-20 h-auto sm:w-28 md:w-32 lg:w-40 opacity-80 hover:opacity-100 transition-opacity duration-300" />
+        <img src="/logo-mascot.webp" alt="Tech Good Community" class="w-20 h-auto sm:w-28 md:w-32 lg:w-40 opacity-80 hover:opacity-100 transition-opacity duration-300" />
       </div>
 
       <!-- Compact page header -->
