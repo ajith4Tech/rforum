@@ -24,6 +24,32 @@
   let actionError = $state('');
   let thankYou = $state(false);
 
+  // Message queue to prevent race conditions
+  let messageQueue: any[] = [];
+  let isProcessingMessage = false;
+
+  async function processMessageQueue() {
+    if (isProcessingMessage || messageQueue.length === 0) return;
+    
+    isProcessingMessage = true;
+    const msg = messageQueue.shift();
+    
+    try {
+      await handleWsMessage(msg);
+    } finally {
+      isProcessingMessage = false;
+      // Process next message if any
+      if (messageQueue.length > 0) {
+        await processMessageQueue();
+      }
+    }
+  }
+
+  function queueMessage(msg: any) {
+    messageQueue.push(msg);
+    processMessageQueue();
+  }
+
   // Countdown
   let countdown = $state<{ days: number; hours: number; minutes: number; seconds: number } | null>(null);
   let countdownInterval: ReturnType<typeof setInterval> | null = null;
@@ -92,7 +118,7 @@
       // Connect WebSocket
       ws = new RforumWebSocket(code);
       ws.connect();
-      ws.onMessage(handleWsMessage);
+      ws.onMessage(queueMessage);
 
       // Start countdown if event has a future date
       updateCountdown();
@@ -120,7 +146,13 @@
         submitted = false;
         selectedOption = '';
         inputValue = '';
-        if (msg.data.activation) responses = [];
+        // Always reload responses for the new slide to prevent stale data
+        try {
+          responses = await listResponses(msg.data.slide.id);
+        } catch (err) {
+          console.error('Failed to load responses for new slide:', err);
+          responses = [];
+        }
       } else {
         try {
           // Fallback: re-fetch session (messages missing slide data)
@@ -130,14 +162,27 @@
           submitted = false;
           selectedOption = '';
           inputValue = '';
-          if (active) responses = await listResponses(active.id);
-        } catch {
-          // Session may have ended; wait for session_update event
+          if (active) {
+            responses = await listResponses(active.id);
+          } else {
+            responses = [];
+          }
+        } catch (err) {
+          console.error('Failed to load session after slide change:', err);
+          responses = [];
         }
       }
     } else if (msg.event === 'new_response') {
-      responses = [...responses, msg.data];
+      // Only add response if it's for the current slide
+      if (msg.data && activeSlide && msg.data.slide_id === activeSlide.id) {
+        // Check if response already exists to prevent duplicates
+        const exists = responses.some((r) => r.id === msg.data.id);
+        if (!exists) {
+          responses = [...responses, msg.data];
+        }
+      }
     } else if (msg.event === 'upvote') {
+      // Update the response with new upvote count
       responses = responses.map((r) =>
         r.id === msg.data.id ? { ...r, upvotes: msg.data.upvotes } : r
       );
@@ -164,8 +209,8 @@
     selectedOption = option;
     submitted = true;
     try {
-      const response = await submitResponse(activeSlide.id, option, guestId);
-      ws?.send('new_response', response);
+      await submitResponse(activeSlide.id, option, guestId);
+      // No need to manually broadcast - backend handles publishing via Redis
     } catch (err: any) {
       actionError = err?.message || 'Could not submit vote';
       submitted = false;
@@ -182,14 +227,14 @@
       submitted = true;
     }
     try {
-      const response = await submitResponse(
+      await submitResponse(
         activeSlide.id,
         inputValue.trim(),
         guestId,
         guestName || undefined,
         activeSlide.type === 'FEEDBACK' ? feedbackRating : undefined
       );
-      ws?.send('new_response', response);
+      // No need to manually broadcast - backend handles publishing via Redis
       inputValue = '';
       actionError = '';
       if (activeSlide.type === 'FEEDBACK') {
@@ -210,11 +255,8 @@
 
   async function handleUpvote(responseId: string) {
     try {
-      const updated = await upvoteResponse(activeSlide.id, responseId);
-      ws?.send('upvote', updated);
-      responses = responses.map((r) =>
-        r.id === responseId ? { ...r, upvotes: updated.upvotes } : r
-      );
+      await upvoteResponse(activeSlide.id, responseId);
+      // No need to manually broadcast - backend handles publishing via Redis
       actionError = '';
     } catch (err: any) {
       actionError = err?.message || 'Could not upvote';
@@ -248,6 +290,11 @@
       <span class="font-mono text-xs text-slate-500 bg-slate-100 dark:bg-slate-900 px-3 py-1 rounded-lg">{code}</span>
     </div>
   </header>
+
+  <!-- Centered Logo Section -->
+  <div class="flex justify-center pt-4 sm:pt-6 md:pt-8 pb-4 sm:pb-6">
+    <img src="/logo-mascot.png" alt="Tech Good Community" class="w-16 h-auto sm:w-20 md:w-24 lg:w-28 opacity-90 hover:opacity-100 transition-opacity" />
+  </div>
 
   <main class="flex-1 flex flex-col items-center justify-center px-4 py-6">
     {#if session && (session.moderator_name || (session.speaker_names && session.speaker_names.length > 0))}

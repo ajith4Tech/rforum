@@ -215,7 +215,7 @@ class SlideOut(BaseModel):
     content_json: dict
     is_active: bool
 
-    model_config = {"from_attributes": True}
+    model_config = {"from_attributes": True, "use_enum_values": True}
 
 
 # ── Response ──────────────────────────────────────────

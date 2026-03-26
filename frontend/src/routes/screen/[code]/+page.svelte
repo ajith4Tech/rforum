@@ -13,25 +13,62 @@
   let error = $state('');
   let guestUrl = $state('');
 
+  // Use a queue to prevent race conditions when handling WebSocket messages
+  let messageQueue: any[] = [];
+  let isProcessingMessage = false;
+
+  async function processMessageQueue() {
+    if (isProcessingMessage || messageQueue.length === 0) return;
+    
+    isProcessingMessage = true;
+    const msg = messageQueue.shift();
+    
+    try {
+      await handleWsMessage(msg);
+    } finally {
+      isProcessingMessage = false;
+      // Process next message if any
+      if (messageQueue.length > 0) {
+        await processMessageQueue();
+      }
+    }
+  }
+
+  function queueMessage(msg: any) {
+    messageQueue.push(msg);
+    processMessageQueue();
+  }
+
   onMount(async () => {
     code = typeof window !== 'undefined'
       ? window.location.pathname.split('/').pop() || ''
       : '';
     guestUrl = typeof window !== 'undefined' ? `${window.location.origin}/session/${code}` : '';
+    
+    console.log('[screen] Mounting with code:', code);
 
     // Always connect WS so the screen auto-recovers when the session starts
     ws = new RforumWebSocket(code);
     ws.connect();
-    ws.onMessage(handleWsMessage);
+    ws.onMessage(queueMessage);
 
     try {
+      console.log('[screen] Loading session:', code);
       session = await joinSession(code);
+      console.log('[screen] Session loaded, slides:', session.slides?.length);
+      
       const active = session.slides?.find((s: any) => s.is_active);
       if (active) {
+        console.log('[screen] Found active slide:', active.id);
         activeSlide = { ...active, type: active.type?.toUpperCase() };
+        console.log('[screen] Loading responses for slide:', active.id);
         responses = await listResponses(active.id);
+        console.log('[screen] Loaded initial responses:', responses.length);
+      } else {
+        console.log('[screen] No active slide found yet');
       }
     } catch (e: any) {
+      console.error('[screen] Error in onMount:', e);
       error = e.message || 'Session not found';
     } finally {
       loading = false;
@@ -43,27 +80,70 @@
   });
 
   async function handleWsMessage(msg: any) {
+    console.log('[screen] WebSocket message received:', msg.event);
+    
     if (msg.event === 'slide_change') {
+      console.log('[screen] Slide change event - has slide data:', !!msg.data?.slide);
       if (msg.data?.slide) {
         // Use the slide data embedded in the message — no HTTP round-trip needed
         const cj = { ...(msg.data.slide.content_json || {}) };
         if ('file_url' in cj) { cj.has_file = true; delete cj.file_url; }
         delete cj.file_name;
         activeSlide = { ...msg.data.slide, type: msg.data.slide.type?.toUpperCase(), content_json: cj };
-        if (msg.data.activation) responses = [];
+        console.log('[screen] Active slide updated:', activeSlide.id);
+        
+        // Always reload responses for the new slide to prevent stale data
+        // Reload immediately with a small delay to ensure DB is updated
+        try {
+          console.log('[screen] Starting response fetch for slide:', msg.data.slide.id);
+          await new Promise(resolve => setTimeout(resolve, 100));
+          const fetchedResponses = await listResponses(msg.data.slide.id);
+          console.log('[screen] Responses fetched successfully:', fetchedResponses.length, 'responses');
+          responses = fetchedResponses;
+        } catch (err) {
+          console.error('[screen] Failed to load responses for new slide:', err);
+          // Retry once more after delay
+          await new Promise(resolve => setTimeout(resolve, 200));
+          try {
+            const retryResponses = await listResponses(msg.data.slide.id);
+            responses = retryResponses;
+            console.log('[screen] Retry successful:', retryResponses.length, 'responses');
+          } catch (retryErr) {
+            console.error('[screen] Retry also failed:', retryErr);
+            responses = [];
+          }
+        }
       } else {
+        console.log('[screen] No slide data in message, re-fetching session');
         try {
           session = await joinSession(code);
           const active = session.slides?.find((s: any) => s.is_active);
           activeSlide = active ? { ...active, type: active.type?.toUpperCase() } : null;
-          if (active) responses = await listResponses(active.id);
-        } catch {
-          // Session may have ended; wait for session_update event
+          if (active) {
+            await new Promise(resolve => setTimeout(resolve, 100));
+            const fetchedResponses = await listResponses(active.id);
+            responses = fetchedResponses;
+            console.log('[screen] Re-fetched session, loaded', fetchedResponses.length, 'responses');
+          } else {
+            responses = [];
+          }
+        } catch (err) {
+          console.error('[screen] Failed to load session after slide change:', err);
+          responses = [];
         }
       }
     } else if (msg.event === 'new_response') {
-      responses = [...responses, msg.data];
+      // Only add response if it's for the current slide
+      if (msg.data && activeSlide && msg.data.slide_id === activeSlide.id) {
+        // Check if response already exists to prevent duplicates
+        const exists = responses.some((r) => r.id === msg.data.id);
+        if (!exists) {
+          console.log('[screen] Adding new response');
+          responses = [...responses, msg.data];
+        }
+      }
     } else if (msg.event === 'upvote') {
+      // Update the response with new upvote count
       responses = responses.map((r) =>
         r.id === msg.data.id ? { ...r, upvotes: msg.data.upvotes } : r
       );
@@ -91,9 +171,11 @@
           const active = session.slides?.find((s: any) => s.is_active);
           if (active) {
             activeSlide = { ...active, type: active.type?.toUpperCase() };
-            responses = await listResponses(active.id);
+            const fetchedResponses = await listResponses(active.id);
+            responses = fetchedResponses;
           }
         } catch (e: any) {
+          console.error('[screen] Failed to load session:', e);
           error = e.message || 'Failed to load session';
         }
       }
@@ -136,46 +218,51 @@
 </svelte:head>
 
 <div class="min-h-screen flex flex-col bg-gray-950 text-white font-sans select-none overflow-hidden">
-
   <!-- Header -->
-  <header class="flex items-center justify-between px-8 py-4 border-b border-white/10 flex-shrink-0">
+  <header class="flex flex-col md:flex-row items-center justify-between px-4 md:px-8 py-3 md:py-4 border-b border-white/10 flex-shrink-0 gap-3 md:gap-0">
+    <!-- Logo -->
     <div class="flex items-center gap-2.5">
-      <Orbit class="w-6 h-6 text-brand-400" />
-      <span class="font-heading font-bold text-lg tracking-wide text-white/80">Rforum</span>
+      <Orbit class="w-5 md:w-6 h-5 md:h-6 text-brand-400" />
+      <span class="font-heading font-bold text-base md:text-lg tracking-wide text-white/80">Rforum</span>
     </div>
 
-    <!-- Session code — large and central -->
-    <div class="flex flex-col items-center gap-0.5">
-      <span class="text-xs text-white/40 uppercase tracking-widest">Join code</span>
-      <span class="font-mono font-bold text-3xl tracking-[0.25em] text-white">{code}</span>
+    <!-- Session code — center on mobile, between sections on desktop -->
+    <div class="flex flex-col items-center gap-0.5 order-3 md:order-2">
+      <span class="text-[10px] md:text-xs text-white/40 uppercase tracking-widest">Join code</span>
+      <span class="font-mono font-bold text-2xl md:text-3xl tracking-[0.15em] md:tracking-[0.25em] text-white">{code}</span>
     </div>
 
     <!-- QR code -->
-    <div class="flex items-center gap-3">
+    <div class="flex flex-col items-center gap-2 order-2 md:order-3">
       {#if guestUrl}
-        <span class="text-xs text-white/40 tracking-wide">Scan to join</span>
+        <span class="text-[10px] md:text-xs text-white/40 tracking-wide hidden md:inline">Scan to join</span>
         <img
           src={`https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(guestUrl)}&bgcolor=0f172a&color=ffffff&qzone=1`}
           alt="Join QR"
-          class="rounded-xl border border-white/10 w-20 h-20"
+          class="rounded-xl border border-white/10 w-16 md:w-20 h-16 md:h-20"
         />
       {/if}
     </div>
   </header>
 
+  <!-- Centered Logo Section -->
+  <div class="flex justify-center pt-4 sm:pt-6 md:pt-8 pb-4 sm:pb-6">
+    <img src="/logo-mascot.png" alt="Tech Good Community" class="w-16 h-auto sm:w-20 md:w-24 lg:w-28 opacity-90 hover:opacity-100 transition-opacity" />
+  </div>
+
   <!-- Main -->
-  <main class="relative flex-1 flex items-center justify-center px-8 py-6 overflow-hidden">
+  <main class="relative flex-1 flex items-center justify-center px-4 md:px-8 py-4 md:py-6 overflow-hidden">
     {#if session && (session.moderator_name || (session.speaker_names && session.speaker_names.length > 0))}
-      <div class="absolute left-8 top-28 z-10 max-w-md rounded-2xl border border-white/10 bg-white/5 backdrop-blur-sm px-4 py-3">
+      <div class="absolute left-4 md:left-8 top-20 md:top-28 z-10 max-w-xs md:max-w-md rounded-2xl border border-white/10 bg-white/5 backdrop-blur-sm px-3 md:px-4 py-2 md:py-3">
         {#if session.moderator_name}
-          <p class="text-[11px] uppercase tracking-widest text-white/50">Moderator</p>
-          <p class="text-sm font-semibold text-white">{session.moderator_name}</p>
+          <p class="text-[10px] md:text-[11px] uppercase tracking-widest text-white/50">Moderator</p>
+          <p class="text-xs md:text-sm font-semibold text-white">{session.moderator_name}</p>
         {/if}
         {#if session.speaker_names && session.speaker_names.length > 0}
-          <p class="text-[11px] uppercase tracking-widest text-white/50 mt-2">Speakers</p>
-          <div class="flex flex-wrap gap-1.5 mt-1">
+          <p class="text-[10px] md:text-[11px] uppercase tracking-widest text-white/50 mt-2">Speakers</p>
+          <div class="flex flex-wrap gap-1 md:gap-1.5 mt-1">
             {#each session.speaker_names as speaker, index (speaker + index)}
-              <span class="text-[11px] px-2 py-1 rounded-full bg-white/10">{speaker}</span>
+              <span class="text-[10px] md:text-[11px] px-2 py-0.5 md:py-1 rounded-full bg-white/10">{speaker}</span>
             {/each}
           </div>
         {/if}

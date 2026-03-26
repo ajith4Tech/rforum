@@ -133,7 +133,11 @@
 
   function handleWsMessage(msg: any) {
     if (msg.event === 'new_response') {
-      slideResponses = [...slideResponses, msg.data];
+      // Check if response already exists to prevent duplicates
+      const exists = slideResponses.some((r) => r.id === msg.data.id);
+      if (!exists) {
+        slideResponses = [...slideResponses, msg.data];
+      }
     } else if (msg.event === 'upvote') {
       slideResponses = slideResponses.map((r) =>
         r.id === msg.data.id ? { ...r, upvotes: msg.data.upvotes } : r

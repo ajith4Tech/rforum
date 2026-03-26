@@ -1,3 +1,4 @@
+import json
 import os
 import subprocess
 import uuid
@@ -5,10 +6,12 @@ from io import BytesIO
 from pathlib import Path
 
 import fitz  # PyMuPDF
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, status
 from fastapi.responses import StreamingResponse
+from redis.asyncio import Redis
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.auth import get_current_user
 from app.config import get_settings
@@ -73,6 +76,7 @@ async def update_slide(
     session_id: str,
     slide_id: str,
     payload: SlideUpdate,
+    request: Request,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -105,6 +109,34 @@ async def update_slide(
         setattr(slide, field, value)
 
     await db.commit()
+    
+    # Broadcast slide change to all WebSocket clients
+    if update_data.get("is_active"):
+        # Reload slide with session info for broadcast
+        result = await db.execute(
+            select(Slide)
+            .where(Slide.id == slide_uuid)
+            .options(selectinload(Slide.session))
+        )
+        slide_with_session = result.scalar_one()
+        
+        redis: Redis = request.app.state.redis
+        session_code = slide_with_session.session.unique_code
+        out = SlideOut.model_validate(slide_with_session)
+        payload_data = {
+            "event": "slide_change",
+            "data": {
+                "slide": out.model_dump(mode="json"),
+                "activation": True
+            }
+        }
+        print(f"[DEBUG] Broadcasting slide_change for session {session_code}, slide {slide_uuid}")
+        await redis.publish(
+            f"session:{session_code}",
+            json.dumps(payload_data)
+        )
+        print(f"[DEBUG] Broadcast sent successfully")
+    
     return slide
 
 

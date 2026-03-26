@@ -61,13 +61,17 @@
 <div class="min-h-screen flex flex-col">
   <Nav />
 
-  <main class="flex-1 flex flex-col px-8 pt-24 pb-16">
-    <div class="mx-auto w-full max-w-4xl">
+  <main class="flex-1 flex flex-col px-4 sm:px-6 md:px-8 pt-16 sm:pt-24 pb-12 sm:pb-16">
+    <div class="mx-auto w-full max-w-full sm:max-w-2xl md:max-w-4xl">
+      <!-- Logo -->
+      <div class="flex justify-center mb-6 sm:mb-8">
+        <img src="/logo-mascot.png" alt="Tech Good Community" class="w-20 h-auto sm:w-28 md:w-32 lg:w-40 opacity-80 hover:opacity-100 transition-opacity duration-300" />
+      </div>
 
       <!-- Compact page header -->
-      <div class="mb-8">
-        <h1 class="text-3xl font-heading font-bold tracking-wide">Upcoming Events</h1>
-        <p class="text-surface-500 mt-1">Join a live session or see what's coming up</p>
+      <div class="mb-6 sm:mb-8">
+        <h1 class="text-2xl sm:text-3xl font-heading font-bold tracking-wide">Upcoming Events</h1>
+        <p class="text-surface-500 mt-1 text-sm sm:text-base">Join a live session or see what's coming up</p>
       </div>
 
       <!-- Events list -->
@@ -141,20 +145,20 @@
               {#if event.sessions?.length}
                 <div class="mt-5 pt-5 border-t border-surface-200 dark:border-surface-800">
                   <h4 class="text-xs font-semibold uppercase tracking-widest text-surface-500 mb-3">Sessions</h4>
-                  <div class="grid gap-2 sm:grid-cols-2">
+                  <div class="grid gap-2 grid-cols-1 sm:grid-cols-2">
                     {#each event.sessions as session (session.id)}
-                      <div class="flex items-center justify-between gap-3 px-4 py-3 rounded-xl border border-surface-200 dark:border-surface-800 hover:border-surface-300 dark:hover:border-surface-700 transition">
+                      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3 px-3 sm:px-4 py-2 sm:py-3 rounded-xl border border-surface-200 dark:border-surface-800 hover:border-surface-300 dark:hover:border-surface-700 transition">
                         <div class="flex-1 min-w-0">
                           <div class="font-medium text-sm truncate">{session.title}</div>
                           <div class="font-mono text-xs text-surface-500 mt-0.5">{session.unique_code}</div>
                         </div>
                         {#if session.is_live}
-                          <a href="/session/{session.unique_code}" class="btn-primary text-xs px-4 py-2 flex items-center gap-1.5 flex-shrink-0">
+                          <a href="/session/{session.unique_code}" class="btn-primary text-xs px-4 py-2 flex items-center gap-1.5 flex-shrink-0 self-start sm:self-auto mt-1 sm:mt-0">
                             <ExternalLink class="w-3.5 h-3.5" />
                             Join
                           </a>
                         {:else}
-                          <span class="text-xs text-surface-500 flex-shrink-0">Coming soon</span>
+                          <span class="text-xs text-surface-500 flex-shrink-0 text-left sm:text-right mt-1 sm:mt-0">Coming soon</span>
                         {/if}
                       </div>
                     {/each}
@@ -169,9 +173,9 @@
   </main>
 
   <footer class="border-t mt-auto">
-    <div class="flex items-center justify-between px-8 py-5 text-surface-500 text-sm">
-      <p class="text-xs">Rforum &copy; {new Date().getFullYear()}</p>
-      <p class="text-xs">Built with <span class="text-red-500">❤</span> by Ajith</p>
+    <div class="flex flex-col sm:flex-row items-center justify-between gap-3 px-4 sm:px-6 md:px-8 py-4 sm:py-5 text-surface-500 text-xs">
+      <p>Rforum &copy; {new Date().getFullYear()}</p>
+      <p>Built with <span class="text-red-500">❤</span> by Ajith</p>
     </div>
   </footer>
 </div>
