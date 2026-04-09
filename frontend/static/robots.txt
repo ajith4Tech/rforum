@@ -1,0 +1,14 @@
+User-agent: *
+Allow: /
+Disallow: /login
+Disallow: /dashboard
+Disallow: /api
+
+Sitemap: https://rforum.t4gc.in/sitemap.xml
+
+# Allow specific search engines
+User-agent: Googlebot
+Allow: /
+
+User-agent: Bingbot
+Allow: /

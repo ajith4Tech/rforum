@@ -174,8 +174,9 @@
 
   <footer class="border-t mt-auto">
     <div class="flex flex-col sm:flex-row items-center justify-between gap-3 px-4 sm:px-6 md:px-8 py-4 sm:py-5 text-surface-500 text-xs">
-      <p>Rforum &copy; {new Date().getFullYear()}</p>
+      <p>Powered by <span class="font-semibold text-surface-600 dark:text-surface-300">Tech4Good Community</span></p>
       <p>Built with <span class="text-red-500">❤</span> by Ajith</p>
+      <p>Rforum@2026</p>
     </div>
   </footer>
 </div>

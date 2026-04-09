@@ -129,4 +129,14 @@
       </div>
     </div>
   </div>
+
+  <footer class="fixed bottom-0 left-0 right-0 border-t bg-white dark:bg-surface-950">
+    <div class="flex flex-col sm:flex-row items-center justify-center gap-3 px-4 md:px-8 py-3 text-surface-500 text-xs max-w-full">
+      <span>Powered by <span class="font-semibold text-surface-600 dark:text-surface-300">Tech4Good Community</span></span>
+      <span class="hidden sm:inline">•</span>
+      <span>Built with <span class="text-red-500">❤</span> by Ajith</span>
+      <span class="hidden sm:inline">•</span>
+      <span>Rforum@2026</span>
+    </div>
+  </footer>
 </div>

@@ -232,7 +232,7 @@
       <span class="font-mono font-bold text-2xl md:text-3xl tracking-[0.15em] md:tracking-[0.25em] text-white">{code}</span>
     </div>
 
-    <!-- Right: Session, Moderator and QR -->
+    <!-- Right: Session, Moderator, GitHub and QR -->
     <div class="flex items-center gap-4 flex-shrink-0">
       <!-- Session and Moderator info -->
       <div class="flex flex-col gap-1 text-right">
@@ -455,5 +455,16 @@
       </div>
     {/if}
   </main>
+
+  <!-- Footer -->
+  <footer class="flex items-center justify-center px-4 md:px-8 py-3 border-t border-white/10 flex-shrink-0 text-white/40 text-xs">
+    <div class="flex flex-col sm:flex-row items-center justify-center gap-3">
+      <span>Powered by <span class="font-semibold text-white/60">Tech4Good Community</span></span>
+      <span class="hidden sm:inline text-white/20">•</span>
+      <span>Built with <span class="text-red-400">❤</span> by Ajith</span>
+      <span class="hidden sm:inline text-white/20">•</span>
+      <span>Rforum@2026</span>
+    </div>
+  </footer>
 </div>
 
