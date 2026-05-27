@@ -146,6 +146,10 @@ export async function updateSession(sessionId: string, payload: Record<string, u
   }, true);
 }
 
+export async function startSession(sessionId: string) {
+  return updateSession(sessionId, { is_live: true });
+}
+
 // ── Events ───────────────────────────────────────────
 export async function listEvents() {
   return fetchJson('/events', { method: 'GET' }, true);
@@ -258,6 +262,12 @@ export async function upvoteResponse(slideId: string, responseId: string) {
   return fetchJson(`/slides/${slideId}/responses/${responseId}/upvote`, {
     method: 'POST'
   });
+}
+
+export async function clearResponses(slideId: string) {
+  return fetchJson(`/slides/${slideId}/responses/`, {
+    method: 'DELETE'
+  }, true);
 }
 
 // ── Analytics ─────────────────────────────────────────

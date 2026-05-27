@@ -1,14 +1,15 @@
 import json
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from redis.asyncio import Redis
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.auth import get_current_user
 from app.database import get_db
-from app.models import Response, Slide
+from app.models import Response, Slide, User
 from app.schemas import ResponseCreate, ResponseOut
 
 router = APIRouter(prefix="/api/slides/{slide_id}/responses", tags=["responses"])
@@ -129,3 +130,44 @@ async def upvote_response(
     )
 
     return response
+
+
+@router.delete("/", status_code=status.HTTP_204_NO_CONTENT)
+async def clear_responses(
+    slide_id: str,
+    user: User = Depends(get_current_user),
+    request: Request = ...,
+    db: AsyncSession = Depends(get_db),
+):
+    """Clear all responses for a slide (moderator only)."""
+    try:
+        slide_uuid = uuid.UUID(slide_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid slide ID format")
+
+    # Get the slide and verify ownership
+    result = await db.execute(
+        select(Slide)
+        .where(Slide.id == slide_uuid)
+        .options(selectinload(Slide.session))
+    )
+    slide = result.scalar_one_or_none()
+    if not slide:
+        raise HTTPException(status_code=404, detail="Slide not found")
+    
+    # Verify user is the session owner
+    if slide.session.owner_id != user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to clear responses")
+
+    # Delete all responses for this slide
+    await db.execute(delete(Response).where(Response.slide_id == slide_uuid))
+    await db.commit()
+
+    # Broadcast clear event to all WS clients
+    redis: Redis = request.app.state.redis
+    session_code = slide.session.unique_code
+    await redis.publish(
+        f"session:{session_code}",
+        json.dumps({"event": "clear_responses", "data": {"slide_id": str(slide_uuid)}}),
+    )
+
