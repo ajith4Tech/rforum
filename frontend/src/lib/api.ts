@@ -275,6 +275,22 @@ export async function getAnalytics() {
   return fetchJson('/analytics', { method: 'GET' }, true);
 }
 
+export async function exportEventAnalytics(eventId: string, format = 'csv') {
+  const token = getToken();
+  const url = buildUrl(`/analytics/event/${eventId}/download?format=${encodeURIComponent(format)}`);
+  const res = await withTimeout(fetch(url, { method: 'GET', headers: token ? { Authorization: `Bearer ${token}` } : {} }));
+  if (!res.ok) throw new Error(await extractError(res));
+  return res;
+}
+
+export async function exportSessionAnalytics(sessionId: string, format = 'csv') {
+  const token = getToken();
+  const url = buildUrl(`/analytics/session/${sessionId}/download?format=${encodeURIComponent(format)}`);
+  const res = await withTimeout(fetch(url, { method: 'GET', headers: token ? { Authorization: `Bearer ${token}` } : {} }));
+  if (!res.ok) throw new Error(await extractError(res));
+  return res;
+}
+
 // ── Current user ───────────────────────────────────────
 export async function getMe() {
   return fetchJson('/auth/me', { method: 'GET' }, true);

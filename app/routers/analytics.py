@@ -2,12 +2,15 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends
+from fastapi.responses import StreamingResponse, JSONResponse
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user
 from app.database import get_db
 from app.models import Event, Response, Session, SessionAsset, Slide, SlideType, User, UserRole
+import io
+import csv
 
 router = APIRouter(prefix="/api/analytics", tags=["analytics"])
 
@@ -68,27 +71,9 @@ async def get_analytics(
         for row in slide_type_result.all()
     }
 
-    # Engagement over time: responses per day for the last 30 days
-    now = datetime.now(timezone.utc)
-    thirty_days_ago = now - timedelta(days=30)
-    engagement_q = (
-        select(
-            func.date(Response.created_at).label("day"),
-            func.count(Response.id).label("count"),
-        )
-        .select_from(Response)
-        .join(Slide, Slide.id == Response.slide_id)
-        .join(Session, Session.id == Slide.session_id)
-        .where(Response.created_at >= thirty_days_ago)
-    )
-    if not is_admin:
-        engagement_q = engagement_q.where(Session.owner_id == user_id)
-    engagement_q = engagement_q.group_by(func.date(Response.created_at)).order_by(func.date(Response.created_at))
-    engagement_result = await db.execute(engagement_q)
-    engagement_over_time = [
-        {"date": str(row.day), "responses": row.count}
-        for row in engagement_result.all()
-    ]
+    # Engagement over time: (Removed timeline analytics as requested)
+    engagement_over_time = []
+
 
     # ── Advanced Analytics ────────────────────────────
 
@@ -222,3 +207,243 @@ async def get_analytics(
         "session_engagement": session_engagement,
         "storage_used_bytes": storage_used_bytes,
     }
+
+
+
+@router.get('/event/{event_id}/download')
+async def download_event_analytics(
+    event_id: str,
+    format: str = 'csv',
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    # Only owner or super-admin can download
+    is_admin = user.role == UserRole.SUPER_ADMIN
+    # verify event exists and permission
+    ev_q = select(Event).where(Event.id == event_id)
+    ev_res = await db.execute(ev_q)
+    ev = ev_res.scalar_one_or_none()
+    if not ev:
+        return JSONResponse({'detail': 'Event not found'}, status_code=404)
+    if not is_admin and ev.owner_id != user.id:
+        return JSONResponse({'detail': 'Forbidden'}, status_code=403)
+
+    # Build basic analytics for the event
+    # Sessions for event
+    sessions_q = select(Session.id, Session.title).where(Session.event_id == event_id)
+    sessions_res = await db.execute(sessions_q)
+    sessions = sessions_res.all()
+
+    # Per-session engagement
+    session_eng_q = (
+        select(
+            Session.id,
+            Session.title,
+            func.count(Response.id).label('total_responses'),
+            func.count(func.distinct(Response.guest_identifier)).label('unique_participants'),
+            func.avg(
+                case(
+                    (Slide.type == SlideType.FEEDBACK, Response.rating),
+                    else_=None,
+                )
+            ).label('avg_rating'),
+        )
+        .select_from(Session)
+        .outerjoin(Slide, Slide.session_id == Session.id)
+        .outerjoin(Response, Response.slide_id == Slide.id)
+        .where(Session.event_id == event_id)
+        .group_by(Session.id, Session.title)
+        .order_by(func.count(Response.id).desc())
+    )
+    res = await db.execute(session_eng_q)
+    session_rows = res.all()
+
+    # Engagement over time for event (Removed timeline analytics)
+    engagement_rows = []
+
+    data = {
+        'event': {'id': str(ev.id), 'title': ev.title, 'description': ev.description},
+        'sessions': [
+            {
+                'session_id': str(r[0]),
+                'title': r[1],
+            }
+            for r in sessions
+        ],
+        'session_engagement': [
+            {
+                'session_id': str(row.id),
+                'title': row.title,
+                'total_responses': int(row.total_responses or 0),
+                'unique_participants': int(row.unique_participants or 0),
+                'avg_rating': float(row.avg_rating) if row.avg_rating is not None else None,
+            }
+            for row in session_rows
+        ],
+        'engagement_over_time': [],
+    }
+
+    # Include all responses for the event (grouped by session -> slide)
+    resp_q = (
+        select(
+            Response.id,
+            Response.slide_id,
+            Response.value,
+            Response.guest_identifier,
+            Response.name,
+            Response.rating,
+            Response.created_at,
+            Slide.session_id,
+            Slide.order,
+            Slide.type,
+        )
+        .select_from(Response)
+        .join(Slide, Slide.id == Response.slide_id)
+        .join(Session, Session.id == Slide.session_id)
+        .where(Session.event_id == event_id)
+        .order_by(Slide.session_id, Slide.order, Response.created_at)
+    )
+    resp_res = await db.execute(resp_q)
+    resp_rows = resp_res.all()
+
+    # group responses by session -> slide
+    sessions_map: dict = {}
+    for r in resp_rows:
+        sid = str(r.session_id)
+        slide_id = str(r[1])
+        if sid not in sessions_map:
+            sessions_map[sid] = {'slides': {}, 'responses': []}
+        # store slide info
+        if slide_id not in sessions_map[sid]['slides']:
+            sessions_map[sid]['slides'][slide_id] = {'type': r.type.value if hasattr(r.type, 'value') else str(r.type), 'order': r.order}
+        sessions_map[sid]['responses'].append({
+            'response_id': str(r[0]),
+            'slide_id': slide_id,
+            'value': r.value,
+            'guest_identifier': r.guest_identifier,
+            'name': r.name,
+            'rating': r.rating,
+            'created_at': str(r.created_at),
+        })
+
+    data['responses_by_session'] = []
+    for s_id, payload in sessions_map.items():
+        data['responses_by_session'].append({'session_id': s_id, 'slides': payload['slides'], 'responses': payload['responses']})
+
+    if format.lower() == 'json':
+        return JSONResponse(data)
+
+    # Build CSV
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(['Event', ev.title])
+    writer.writerow([])
+    writer.writerow(['Sessions'])
+    writer.writerow(['session_id', 'title'])
+    for s in data['sessions']:
+        writer.writerow([s['session_id'], s['title']])
+    writer.writerow([])
+    writer.writerow(['Session Engagement'])
+    writer.writerow(['session_id', 'title', 'total_responses', 'unique_participants', 'avg_rating'])
+    for s in data['session_engagement']:
+        writer.writerow([s['session_id'], s['title'], s['total_responses'], s['unique_participants'], s['avg_rating'] or ''])
+    # (Removed timeline section from CSV export)
+
+    # Responses by session (detailed)
+    writer.writerow([])
+    writer.writerow(['Responses By Session'])
+    for sess in data.get('responses_by_session', []):
+        writer.writerow([])
+        writer.writerow(['Session', sess.get('session_id')])
+        # slides
+        writer.writerow(['Slides'])
+        writer.writerow(['slide_id', 'type', 'order'])
+        for sid, sinfo in (sess.get('slides') or {}).items():
+            writer.writerow([sid, sinfo.get('type'), sinfo.get('order')])
+        writer.writerow([])
+        # responses
+        writer.writerow(['Responses'])
+        writer.writerow(['response_id', 'slide_id', 'value', 'guest_identifier', 'name', 'rating', 'created_at'])
+        for r in (sess.get('responses') or []):
+            writer.writerow([r.get('response_id'), r.get('slide_id'), r.get('value'), r.get('guest_identifier'), r.get('name') or '', r.get('rating') or '', r.get('created_at')])
+
+    buf.seek(0)
+    headers = {
+        'Content-Disposition': f'attachment; filename="analytics_event_{event_id}.csv"'
+    }
+    return StreamingResponse(buf, media_type='text/csv', headers=headers)
+
+
+@router.get('/session/{session_id}/download')
+async def download_session_analytics(
+    session_id: str,
+    format: str = 'csv',
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    is_admin = user.role == UserRole.SUPER_ADMIN
+    # verify session and permission
+    s_q = select(Session).where(Session.id == session_id)
+    s_res = await db.execute(s_q)
+    session_obj = s_res.scalar_one_or_none()
+    if not session_obj:
+        return JSONResponse({'detail': 'Session not found'}, status_code=404)
+    if not is_admin and session_obj.owner_id != user.id:
+        return JSONResponse({'detail': 'Forbidden'}, status_code=403)
+
+    # gather responses grouped by slide
+    slides_q = select(Slide.id, Slide.type, Slide.order).where(Slide.session_id == session_id).order_by(Slide.order)
+    slides_res = await db.execute(slides_q)
+    slides = slides_res.all()
+
+    responses = []
+    slide_ids = [s[0] for s in slides]
+    if slide_ids:
+        resp_q = (
+            select(Response.id, Response.slide_id, Response.value, Response.guest_identifier, Response.name, Response.rating, Response.created_at)
+            .where(Response.slide_id.in_(slide_ids))
+            .order_by(Response.created_at)
+        )
+        resp_res = await db.execute(resp_q)
+        responses = resp_res.all()
+
+    data = {
+        'session': {'id': str(session_obj.id), 'title': session_obj.title},
+        'slides': [
+            {'slide_id': str(s[0]), 'type': s[1].value if hasattr(s[1], 'value') else str(s[1]), 'order': s[2]}
+            for s in slides
+        ],
+        'responses': [
+            {
+                'response_id': str(r[0]),
+                'slide_id': str(r[1]),
+                'value': r[2],
+                'guest_identifier': r[3],
+                'name': r[4],
+                'rating': r[5],
+                'created_at': str(r[6]),
+            }
+            for r in responses
+        ],
+    }
+
+    if format.lower() == 'json':
+        return JSONResponse(data)
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(['Session', session_obj.title])
+    writer.writerow([])
+    writer.writerow(['Slides'])
+    writer.writerow(['slide_id', 'type', 'order'])
+    for sl in data['slides']:
+        writer.writerow([sl['slide_id'], sl['type'], sl['order']])
+    writer.writerow([])
+    writer.writerow(['Responses'])
+    writer.writerow(['response_id', 'slide_id', 'value', 'guest_identifier', 'name', 'rating', 'created_at'])
+    for r in data['responses']:
+        writer.writerow([r['response_id'], r['slide_id'], r['value'], r['guest_identifier'], r['name'] or '', r['rating'] or '', r['created_at']])
+
+    buf.seek(0)
+    headers = {'Content-Disposition': f'attachment; filename="analytics_session_{session_id}.csv"'}
+    return StreamingResponse(buf, media_type='text/csv', headers=headers)

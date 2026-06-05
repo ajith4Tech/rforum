@@ -1,50 +1,65 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
-  import { getAnalytics, formatBytes, isAuthenticated } from '$lib/api';
-  import { CalendarDays, Users, Radio, BarChart3, Star, TrendingUp, Layers, MessageSquare, Zap, HardDrive } from 'lucide-svelte';
+  import { getAnalytics, listEvents, isAuthenticated, formatBytes } from '$lib/api';
+  import {
+    CalendarDays, ChevronRight, ArrowRight, Users, MessageSquare,
+    Layers, BarChart2, HardDrive, Radio, TrendingUp, AlertCircle,
+    Activity, Zap, Star
+  } from 'lucide-svelte';
   import { onMount } from 'svelte';
 
-  let loading = $state(true);
-  let error = $state('');
-  let totalEvents = $state(0);
-  let totalSessions = $state(0);
-  let totalSlides = $state(0);
-  let totalResponses = $state(0);
+  // ── Types ─────────────────────────────────────────────
+  interface EventItem {
+    id: string;
+    title: string;
+    event_date: string;
+    description?: string | null;
+    is_published: boolean;
+    sessions: { id: string; title: string; is_live: boolean }[];
+  }
+
+  // ── State ─────────────────────────────────────────────
+  let loading       = $state(true);
+  let error         = $state('');
+  let events: EventItem[] = $state([]);
+
+  // Overview stats
+  let totalEvents       = $state(0);
+  let totalSessions     = $state(0);
+  let totalSlides       = $state(0);
   let totalParticipants = $state(0);
-  let activeSessions = $state(0);
+  let totalResponses    = $state(0);
+  let activeSessions    = $state(0);
+  let storageUsedBytes  = $state(0);
+  let avgRating: number | null = $state(null);
   let slideTypeDistribution: Record<string, number> = $state({});
   let responseCountsByType: Record<string, number> = $state({});
-  let engagementOverTime: { date: string; responses: number }[] = $state([]);
-  let avgRating: number | null = $state(null);
-  let ratingDistribution: Record<string, number> = $state({});
   let sessionEngagement: { session_id: string; title: string; total_responses: number; unique_participants: number; avg_rating: number | null }[] = $state([]);
-  let storageUsedBytes = $state(0);
 
+  // ── Load ──────────────────────────────────────────────
   onMount(async () => {
-    if (!isAuthenticated()) {
-      goto('/login');
-      return;
-    }
+    if (!isAuthenticated()) { goto('/login'); return; }
     try {
-      const data: any = await getAnalytics();
-      totalEvents = data.total_events ?? 0;
-      totalSessions = data.total_sessions ?? 0;
-      totalSlides = data.total_slides ?? 0;
-      totalResponses = data.total_responses ?? 0;
-      totalParticipants = data.total_participants ?? 0;
-      activeSessions = data.active_sessions ?? 0;
-      slideTypeDistribution = data.slide_type_distribution ?? {};
-      responseCountsByType = data.response_counts_by_type ?? {};
-      engagementOverTime = data.engagement_over_time ?? [];
-      avgRating = data.avg_rating ?? null;
-      ratingDistribution = data.rating_distribution ?? {};
-      sessionEngagement = data.session_engagement ?? [];
-      storageUsedBytes = data.storage_used_bytes ?? 0;
+      const [analyticsData, eventsData]: [any, any] = await Promise.all([
+        getAnalytics(),
+        listEvents(),
+      ]);
+      totalEvents            = analyticsData.total_events            ?? 0;
+      totalSessions          = analyticsData.total_sessions          ?? 0;
+      totalSlides            = analyticsData.total_slides            ?? 0;
+      totalParticipants      = analyticsData.total_participants      ?? 0;
+      totalResponses         = analyticsData.total_responses         ?? 0;
+      activeSessions         = analyticsData.active_sessions         ?? 0;
+      storageUsedBytes       = analyticsData.storage_used_bytes      ?? 0;
+      avgRating              = analyticsData.avg_rating              ?? null;
+      slideTypeDistribution  = analyticsData.slide_type_distribution ?? {};
+      responseCountsByType   = analyticsData.response_counts_by_type ?? {};
+      sessionEngagement      = analyticsData.session_engagement      ?? [];
+      events = eventsData as EventItem[];
     } catch (e: any) {
       const msg = e?.message || '';
       if (msg.includes('Unauthorized') || msg.includes('Not authenticated')) {
-        goto('/login');
-        return;
+        goto('/login'); return;
       }
       error = msg || 'Failed to load analytics';
     } finally {
@@ -52,210 +67,216 @@
     }
   });
 
-  // Slide / response type colours and labels
-  const typeColors: Record<string, string> = {
-    POLL: '#7C3AED',
-    QNA: '#06B6D4',
-    FEEDBACK: '#F59E0B',
-    CONTENT: '#10B981',
-    WORD_CLOUD: '#EC4899'
-  };
-  const typeLabels: Record<string, string> = {
-    POLL: 'Polls',
-    QNA: 'Q&A',
-    FEEDBACK: 'Feedback',
-    CONTENT: 'Content',
-    WORD_CLOUD: 'Word Cloud'
-  };
+  // ── Helpers ───────────────────────────────────────────
+  function formatDate(dateStr: string) {
+    if (!dateStr) return '—';
+    try {
+      return new Date(dateStr + 'T00:00:00').toLocaleDateString(undefined, {
+        year: 'numeric', month: 'short', day: 'numeric'
+      });
+    } catch { return dateStr; }
+  }
 
-  // Donut chart helpers (slide type distribution)
-  function getDonutSegments() {
-    const entries = Object.entries(slideTypeDistribution);
+  function isToday(dateStr: string) {
+    return dateStr === new Date().toISOString().slice(0, 10);
+  }
+
+  const sortedEvents = $derived(
+    [...events].sort((a, b) => b.event_date.localeCompare(a.event_date))
+  );
+
+  const overallEngagement = $derived(
+    totalSessions > 0
+      ? Math.round((totalParticipants / totalSessions) * 10) / 10
+      : 0
+  );
+
+  const avgResponsesPerParticipant = $derived(
+    totalParticipants > 0 ? (totalResponses / totalParticipants).toFixed(1) : '0'
+  );
+
+  // Most active session
+  const topSession = $derived(
+    sessionEngagement.length > 0
+      ? sessionEngagement.reduce((max, s) => s.total_responses > max.total_responses ? s : max, sessionEngagement[0])
+      : null
+  );
+
+  // Type labels and colours
+  const typeLabels: Record<string, string> = { POLL: 'Polls', QNA: 'Q&A', FEEDBACK: 'Feedback', CONTENT: 'Content', WORD_CLOUD: 'Word Cloud' };
+  const typeColors: Record<string, string> = { POLL: '#7C3AED', QNA: '#06B6D4', FEEDBACK: '#F59E0B', CONTENT: '#10B981', WORD_CLOUD: '#EC4899' };
+
+
+  // Donut helpers
+  function getDonutSegments(dist: Record<string, number>) {
+    const entries = Object.entries(dist);
     const total = entries.reduce((sum, [, v]) => sum + v, 0);
     if (total === 0) return [];
     let cumulative = 0;
     return entries.map(([key, value]) => {
       const pct = value / total;
-      const startAngle = cumulative * 360;
+      const start = cumulative;
       cumulative += pct;
-      const endAngle = cumulative * 360;
-      return { key, label: typeLabels[key] || key, color: typeColors[key] || '#94A3B8', value, pct: Math.round(pct * 100), startAngle, endAngle };
+      return { key, label: typeLabels[key] || key, color: typeColors[key] || '#94A3B8', value, pct: Math.round(pct * 100), startPct: start, endPct: cumulative };
     });
   }
 
-  function polarToCartesian(cx: number, cy: number, r: number, angleDeg: number) {
-    const rad = ((angleDeg - 90) * Math.PI) / 180;
-    return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
-  }
-
-  function describeArc(cx: number, cy: number, r: number, startAngle: number, endAngle: number) {
+  function describeArc(cx: number, cy: number, r: number, startPct: number, endPct: number) {
+    const startAngle = startPct * 360 - 90;
+    const endAngle = endPct * 360 - 90;
     const sweep = endAngle - startAngle;
+    const toRad = (deg: number) => (deg * Math.PI) / 180;
     if (sweep >= 359.99) {
-      const mid = polarToCartesian(cx, cy, r, startAngle + 180);
-      const end = polarToCartesian(cx, cy, r, startAngle + 359.99);
-      const start = polarToCartesian(cx, cy, r, startAngle);
-      return `M ${start.x} ${start.y} A ${r} ${r} 0 1 1 ${mid.x} ${mid.y} A ${r} ${r} 0 1 1 ${end.x} ${end.y}`;
+      const s = { x: cx + r * Math.cos(toRad(startAngle)), y: cy + r * Math.sin(toRad(startAngle)) };
+      const m = { x: cx + r * Math.cos(toRad(startAngle + 180)), y: cy + r * Math.sin(toRad(startAngle + 180)) };
+      return `M ${s.x} ${s.y} A ${r} ${r} 0 1 1 ${m.x} ${m.y} A ${r} ${r} 0 1 1 ${s.x} ${s.y}`;
     }
-    const start = polarToCartesian(cx, cy, r, startAngle);
-    const end = polarToCartesian(cx, cy, r, endAngle);
+    const s = { x: cx + r * Math.cos(toRad(startAngle)), y: cy + r * Math.sin(toRad(startAngle)) };
+    const e = { x: cx + r * Math.cos(toRad(endAngle)), y: cy + r * Math.sin(toRad(endAngle)) };
     const largeArc = sweep > 180 ? 1 : 0;
-    return `M ${start.x} ${start.y} A ${r} ${r} 0 ${largeArc} 1 ${end.x} ${end.y}`;
+    return `M ${s.x} ${s.y} A ${r} ${r} 0 ${largeArc} 1 ${e.x} ${e.y}`;
   }
-
-  // Line chart helpers
-  function getLineChartPoints() {
-    if (engagementOverTime.length === 0) return { points: '', fillPath: '', coords: [], maxY: 0, padding: 40, width: 600, height: 200, chartH: 120 };
-    const padding = 40;
-    const width = 600;
-    const height = 200;
-    const chartW = width - padding * 2;
-    const chartH = height - padding * 2;
-    const maxY = Math.max(...engagementOverTime.map((d) => d.responses), 1);
-    const stepX = engagementOverTime.length > 1 ? chartW / (engagementOverTime.length - 1) : 0;
-    const coords = engagementOverTime.map((d, i) => ({
-      x: padding + i * stepX,
-      y: padding + chartH - (d.responses / maxY) * chartH,
-      label: d.date,
-      value: d.responses
-    }));
-    const points = coords.map((c) => `${c.x},${c.y}`).join(' ');
-    const firstX = coords[0]?.x ?? padding;
-    const lastX = coords[coords.length - 1]?.x ?? padding;
-    const bottom = padding + chartH;
-    const fillPath = `M ${firstX},${bottom} L ${coords.map((c) => `${c.x},${c.y}`).join(' L ')} L ${lastX},${bottom} Z`;
-    return { points, fillPath, coords, maxY, padding, width, height, chartH };
-  }
-
-  // Derived stat cards
-  const statCards = $derived([
-    { label: 'Total Events', value: totalEvents, icon: CalendarDays, bgClass: 'bg-brand-500/10', textClass: 'text-brand-500' },
-    { label: 'Total Sessions', value: totalSessions, icon: Layers, bgClass: 'bg-accent-500/10', textClass: 'text-accent-500' },
-    { label: 'Total Participants', value: totalParticipants, icon: Users, bgClass: 'bg-emerald-500/10', textClass: 'text-emerald-500' },
-    { label: 'Avg Rating', value: avgRating !== null ? avgRating.toFixed(1) : '—', icon: Star, bgClass: 'bg-amber-500/10', textClass: 'text-amber-500' }
-  ]);
-
-  // Participation funnel
-  const funnelSteps = $derived([
-    { label: 'Events', value: totalEvents, color: '#7C3AED' },
-    { label: 'Sessions', value: totalSessions, color: '#06B6D4' },
-    { label: 'Slides', value: totalSlides, color: '#10B981' },
-    { label: 'Responses', value: totalResponses, color: '#F59E0B' },
-    { label: 'Participants', value: totalParticipants, color: '#EC4899' }
-  ]);
-
-  const funnelMax = $derived(Math.max(...funnelSteps.map((s) => s.value), 1));
-
-  // Response distribution by type
-  const responseTypeEntries = $derived(
-    Object.entries(responseCountsByType).sort(([, a], [, b]) => b - a)
-  );
-  const maxResponseCount = $derived(Math.max(...responseTypeEntries.map(([, v]) => v), 1));
-
-  // Rating helpers
-  const maxRatingCount = $derived(Math.max(...Object.values(ratingDistribution), 1));
-
-  function ratingStars(rating: number | null): string {
-    if (rating === null) return '—';
-    return '★'.repeat(Math.round(rating)) + '☆'.repeat(5 - Math.round(rating));
-  }
-
-  // Engagement score per session (composite: responses weighted + participants + rating)
-  function engagementScore(s: { total_responses: number; unique_participants: number; avg_rating: number | null }): number {
-    const ratingBonus = s.avg_rating ? s.avg_rating / 5 : 0.5;
-    return Math.round((s.total_responses * 0.5 + s.unique_participants * 0.5) * (0.6 + ratingBonus * 0.4));
-  }
-
-  const topSession = $derived(sessionEngagement.length > 0 ? sessionEngagement[0] : null);
 </script>
 
 <svelte:head>
   <title>Analytics – Rforum</title>
 </svelte:head>
 
-<main class="flex-1 max-w-6xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
-  <div class="mb-8">
-    <h1 class="text-3xl font-heading font-bold tracking-wide">Analytics</h1>
-    <p class="text-surface-500 mt-1.5">Platform engagement insights and audience data</p>
+<main class="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8">
+
+  <!-- Page Header -->
+  <div class="mb-8 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+    <div>
+      <h1 class="text-3xl font-heading font-bold tracking-tight text-surface-900 dark:text-surface-50">Analytics</h1>
+      <p class="text-surface-500 dark:text-surface-400 mt-1">Platform-wide engagement insights and event performance metrics.</p>
+    </div>
   </div>
 
   {#if loading}
-    <div class="text-center text-surface-400 py-20">Loading analytics...</div>
-  {:else if error}
-    <div class="text-center py-20">
-      <p class="text-danger mb-2">{error}</p>
-      <button onclick={() => window.location.reload()} class="text-sm text-brand-500 hover:underline">Retry</button>
+    <div class="flex flex-col items-center justify-center py-24 gap-3">
+      <div class="w-10 h-10 border-3 border-brand-500 border-t-transparent rounded-full animate-spin"></div>
+      <span class="text-sm text-surface-500 dark:text-surface-400 font-medium">Loading analytics…</span>
     </div>
+
+  {:else if error}
+    <div class="card text-center py-16 max-w-xl mx-auto shadow-sm">
+      <AlertCircle class="w-12 h-12 text-danger mx-auto mb-4" />
+      <h2 class="text-lg font-heading font-bold mb-2">Error Loading Analytics</h2>
+      <p class="text-sm text-surface-500 dark:text-surface-400 mb-6">{error}</p>
+      <button onclick={() => window.location.reload()} class="btn-secondary text-sm px-6 py-2.5">Retry Loading</button>
+    </div>
+
   {:else}
-    <!-- Stat Cards -->
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
-      {#each statCards as card}
+
+    <!-- ═══════════════════════════════════════════════════
+         OVERVIEW KPI CARDS
+         ═══════════════════════════════════════════════════ -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-5 mb-8">
+      {#each [
+        { label: 'Events',       value: totalEvents,       icon: CalendarDays,  bg: 'bg-brand-500/10 dark:bg-brand-500/15',   text: 'text-brand-500 dark:text-brand-400',   hover: 'hover:border-brand-500/30'   },
+        { label: 'Sessions',     value: totalSessions,     icon: Layers,         bg: 'bg-accent-500/10 dark:bg-accent-500/15',  text: 'text-accent-500 dark:text-accent-400',  hover: 'hover:border-accent-500/30'  },
+        { label: 'Participants', value: totalParticipants, icon: Users,          bg: 'bg-emerald-500/10 dark:bg-emerald-500/15', text: 'text-emerald-500 dark:text-emerald-400', hover: 'hover:border-emerald-500/30' },
+        { label: 'Responses',    value: totalResponses,    icon: MessageSquare,  bg: 'bg-violet-500/10 dark:bg-violet-500/15',  text: 'text-violet-500 dark:text-violet-400',  hover: 'hover:border-violet-500/30'  },
+        { label: 'Live Now',     value: activeSessions,    icon: Radio,          bg: 'bg-live/10 dark:bg-live/15',        text: 'text-live',        hover: 'hover:border-live/30'        },
+        { label: 'Avg Rating',   value: avgRating !== null ? avgRating.toFixed(1) : '—', icon: Star, bg: 'bg-amber-500/10 dark:bg-amber-500/15', text: 'text-amber-500 dark:text-amber-400', hover: 'hover:border-amber-500/30' },
+      ] as card}
         {@const Icon = card.icon}
-        <div class="card">
+        <div class="card p-6 bg-white dark:bg-surface-900 border border-surface-200 dark:border-surface-800 shadow-sm hover:shadow-md transition-all duration-300 relative overflow-hidden group {card.hover}">
           <div class="flex items-center justify-between mb-4">
-            <div class="w-11 h-11 flex items-center justify-center rounded-xl {card.bgClass}">
-              <Icon class="w-5 h-5 {card.textClass}" />
+            <div class="w-12 h-12 flex items-center justify-center rounded-2xl {card.bg} transition-transform duration-300 group-hover:scale-110 shadow-sm">
+              <Icon class="w-6 h-6 {card.text}" />
             </div>
+            {#if card.label === 'Live Now' && activeSessions > 0}
+              <span class="flex h-2 w-2 relative">
+                <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-live opacity-75"></span>
+                <span class="relative inline-flex rounded-full h-2 w-2 bg-live"></span>
+              </span>
+            {/if}
           </div>
-          <div class="text-3xl font-heading font-bold tracking-tight">{card.value}</div>
-          <div class="text-xs text-surface-500 mt-1.5 uppercase tracking-widest">{card.label}</div>
+          <div class="text-3xl font-heading font-extrabold tabular-nums tracking-tight leading-none text-surface-900 dark:text-surface-50">{card.value}</div>
+          <div class="text-xs text-surface-500 dark:text-surface-400 mt-2.5 uppercase tracking-wider font-semibold">{card.label}</div>
         </div>
       {/each}
     </div>
 
-    <!-- Storage Usage card -->
-    <div class="card mb-8">
-      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div class="flex items-center gap-4">
-          <div class="w-11 h-11 flex items-center justify-center rounded-xl bg-warning/10">
-            <HardDrive class="w-5 h-5 text-warning" />
-          </div>
-          <div>
-            <p class="text-xs text-surface-500 uppercase tracking-widest font-semibold">Storage Usage</p>
-            <p class="text-2xl font-heading font-bold mt-0.5">{formatBytes(storageUsedBytes)}</p>
-          </div>
+    <!-- ═══════════════════════════════════════════════════
+         SECONDARY INSIGHTS ROW
+         ═══════════════════════════════════════════════════ -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-5 mb-8">
+      <!-- Avg participants / session -->
+      <div class="card p-6 bg-white dark:bg-surface-900 border border-surface-200 dark:border-surface-800 shadow-sm flex items-center gap-5">
+        <div class="w-14 h-14 flex items-center justify-center rounded-2xl bg-amber-500/10 dark:bg-amber-500/15 flex-shrink-0">
+          <TrendingUp class="w-6 h-6 text-amber-500 dark:text-amber-400" />
         </div>
-        <a href="/dashboard/assets" class="btn-secondary text-xs px-3 py-1.5 text-center w-full sm:w-auto">Manage Assets →</a>
+        <div>
+          <div class="text-3xl font-heading font-extrabold tabular-nums text-surface-900 dark:text-surface-50">{overallEngagement}</div>
+          <div class="text-xs text-surface-500 dark:text-surface-400 mt-1 uppercase tracking-wider font-semibold">Avg participants / session</div>
+        </div>
       </div>
-      <div class="mt-4 w-full h-2 rounded-full bg-surface-100 dark:bg-surface-800 overflow-hidden">
-        <div
-          class="h-full rounded-full transition-all duration-500 {Math.min((storageUsedBytes / (500 * 1024 * 1024)) * 100, 100) > 80 ? 'bg-danger' : Math.min((storageUsedBytes / (500 * 1024 * 1024)) * 100, 100) > 50 ? 'bg-warning' : 'bg-brand-500'}"
-          style="width:{Math.min((storageUsedBytes / (500 * 1024 * 1024)) * 100, 100)}%"
-        ></div>
+
+      <!-- Avg responses / participant -->
+      <div class="card p-6 bg-white dark:bg-surface-900 border border-surface-200 dark:border-surface-800 shadow-sm flex items-center gap-5">
+        <div class="w-14 h-14 flex items-center justify-center rounded-2xl bg-violet-500/10 dark:bg-violet-500/15 flex-shrink-0">
+          <Activity class="w-6 h-6 text-violet-500 dark:text-violet-400" />
+        </div>
+        <div>
+          <div class="text-3xl font-heading font-extrabold tabular-nums text-surface-900 dark:text-surface-50">{avgResponsesPerParticipant}</div>
+          <div class="text-xs text-surface-500 dark:text-surface-400 mt-1 uppercase tracking-wider font-semibold">Avg responses / participant</div>
+        </div>
       </div>
-      <p class="text-xs text-surface-500 mt-2">Reference quota: 500 MB</p>
+
+      <!-- Storage -->
+      <div class="card p-6 bg-white dark:bg-surface-900 border border-surface-200 dark:border-surface-800 shadow-sm flex items-center gap-5">
+        <div class="w-14 h-14 flex items-center justify-center rounded-2xl bg-brand-500/10 dark:bg-brand-500/15 flex-shrink-0">
+          <HardDrive class="w-6 h-6 text-brand-500 dark:text-brand-400" />
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="text-3xl font-heading font-extrabold text-surface-900 dark:text-surface-50">{formatBytes(storageUsedBytes)}</div>
+          <div class="text-xs text-surface-500 dark:text-surface-400 mt-1 uppercase tracking-wider font-semibold">Storage used</div>
+        </div>
+        <a href="/dashboard/assets" class="btn-secondary text-xs px-3.5 py-2 flex-shrink-0 flex items-center gap-1.5 shadow-sm">
+          Manage <ArrowRight class="w-3.5 h-3.5" />
+        </a>
+      </div>
     </div>
 
-    <!-- Row 2: Content Distribution + Response Activity by Type -->
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
+    <!-- ═══════════════════════════════════════════════════
+         VISUALISATIONS ROW
+         ═══════════════════════════════════════════════════ -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
 
-      <!-- Donut: Slide Type Distribution (what content you have) -->
-      <div class="card">
-        <h2 class="text-sm font-heading font-semibold uppercase tracking-widest text-surface-500 mb-1">Content Distribution</h2>
-        <p class="text-xs text-surface-400 mb-5">How many slides of each type you've created</p>
+      <!-- Interactive Slide Types Donut -->
+      <div class="card p-6 bg-white dark:bg-surface-900 border border-surface-200 dark:border-surface-800 shadow-sm">
+        <div class="mb-6">
+          <h2 class="font-heading font-bold text-lg text-surface-900 dark:text-surface-100">Interactive Slide Types</h2>
+          <p class="text-xs text-surface-500 dark:text-surface-400 mt-0.5">Distribution of slide formats configured in active sessions.</p>
+        </div>
         {#if Object.keys(slideTypeDistribution).length === 0}
           <div class="flex flex-col items-center justify-center py-12 text-surface-400">
-            <Layers class="w-10 h-10 mb-3 text-surface-500" />
-            <p class="text-sm">No slides created yet</p>
+            <Layers class="w-10 h-10 mb-3 opacity-30 text-surface-500" />
+            <p class="text-sm font-medium">No slide configurations found</p>
           </div>
         {:else}
-          <div class="flex flex-col md:flex-row md:items-center gap-6 md:gap-8">
-            <svg viewBox="0 0 200 200" class="w-40 h-40 flex-shrink-0">
-              {#each getDonutSegments() as seg}
-                <path d={describeArc(100, 100, 70, seg.startAngle, seg.endAngle)} fill="none" stroke={seg.color} stroke-width="28" stroke-linecap="round" />
+          {@const segments = getDonutSegments(slideTypeDistribution)}
+          {@const total = Object.values(slideTypeDistribution).reduce((a, b) => a + b, 0)}
+          <div class="flex flex-col sm:flex-row sm:items-center gap-8 min-h-[200px]">
+            <svg viewBox="0 0 200 200" class="w-40 h-40 flex-shrink-0 mx-auto sm:mx-0">
+              {#each segments as seg}
+                <path d={describeArc(100, 100, 70, seg.startPct, seg.endPct)} fill="none" stroke={seg.color} stroke-width="20" stroke-linecap="round" />
               {/each}
-              <text x="100" y="95" text-anchor="middle" style="font-size:24px; font-weight:700; fill:currentColor;">{Object.values(slideTypeDistribution).reduce((a, b) => a + b, 0)}</text>
-              <text x="100" y="115" text-anchor="middle" style="font-size:11px; fill:#667091;">slides</text>
+              <text x="100" y="96" text-anchor="middle" class="fill-surface-900 dark:fill-surface-50" style="font-size:24px; font-weight:800; font-family:var(--font-heading);">{total}</text>
+              <text x="100" y="116" text-anchor="middle" class="fill-surface-500 dark:fill-surface-400" style="font-size:10px; font-weight:500; uppercase tracking-widest">slides</text>
             </svg>
-            <div class="space-y-2.5 flex-1">
-              {#each getDonutSegments() as seg}
-                <div class="flex items-center justify-between">
-                  <div class="flex items-center gap-2">
-                    <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" style="background:{seg.color}"></span>
-                    <span class="text-sm text-surface-400">{seg.label}</span>
+            <div class="space-y-3 flex-1 max-h-48 overflow-y-auto pr-1">
+              {#each segments as seg}
+                <div class="flex items-center justify-between text-sm py-0.5 border-b border-surface-100 dark:border-surface-800/40 last:border-0">
+                  <div class="flex items-center gap-2.5">
+                    <span class="w-3 h-3 rounded-full flex-shrink-0 shadow-sm" style="background:{seg.color}"></span>
+                    <span class="text-surface-600 dark:text-surface-300 font-medium">{seg.label}</span>
                   </div>
-                  <div class="flex items-center gap-2">
-                    <span class="text-sm font-semibold">{seg.value}</span>
-                    <span class="text-xs text-surface-500">({seg.pct}%)</span>
+                  <div class="flex items-center gap-2 font-mono">
+                    <span class="font-bold text-surface-900 dark:text-surface-100">{seg.value}</span>
+                    <span class="text-xs text-surface-400">({seg.pct}%)</span>
                   </div>
                 </div>
               {/each}
@@ -264,197 +285,169 @@
         {/if}
       </div>
 
-      <!-- Bar: Response Activity by Slide Type (where engagement actually comes from) -->
-      <div class="card">
-        <h2 class="text-sm font-heading font-semibold uppercase tracking-widest text-surface-500 mb-1">Engagement by Format</h2>
-        <p class="text-xs text-surface-400 mb-5">Total responses received per slide type</p>
-        {#if responseTypeEntries.length === 0}
+      <!-- Content Distribution Donut -->
+      <div class="card p-6 bg-white dark:bg-surface-900 border border-surface-200 dark:border-surface-800 shadow-sm">
+        <div class="mb-6">
+          <h2 class="font-heading font-bold text-lg text-surface-900 dark:text-surface-100">Content Distribution</h2>
+          <p class="text-xs text-surface-500 dark:text-surface-400 mt-0.5">Response engagement volumes categorized by slide type.</p>
+        </div>
+        {#if Object.keys(responseCountsByType).length === 0}
           <div class="flex flex-col items-center justify-center py-12 text-surface-400">
-            <MessageSquare class="w-10 h-10 mb-3 text-surface-500" />
-            <p class="text-sm">No responses recorded yet</p>
+            <Layers class="w-10 h-10 mb-3 opacity-30 text-surface-500" />
+            <p class="text-sm font-medium">No responses recorded yet</p>
           </div>
         {:else}
-          <div class="space-y-4">
-            {#each responseTypeEntries as [type, count]}
-              {@const pct = maxResponseCount > 0 ? (count / maxResponseCount) * 100 : 0}
-              {@const color = typeColors[type] || '#94A3B8'}
-              {@const label = typeLabels[type] || type}
-              <div class="flex items-center gap-3">
-                <span class="w-3 h-3 rounded-full flex-shrink-0" style="background:{color}"></span>
-                <span class="text-sm text-surface-400 w-22 flex-shrink-0">{label}</span>
-                <div class="flex-1 h-6 bg-surface-100 dark:bg-surface-800 rounded-full overflow-hidden">
-                  <div class="h-full rounded-full transition-all duration-500" style="width:{pct}%; background:{color}"></div>
+          {@const segments = getDonutSegments(responseCountsByType)}
+          {@const totalResp = Object.values(responseCountsByType).reduce((a, b) => a + b, 0)}
+          <div class="flex flex-col sm:flex-row sm:items-center gap-8 min-h-[200px]">
+            <svg viewBox="0 0 200 200" class="w-40 h-40 flex-shrink-0 mx-auto sm:mx-0">
+              {#each segments as seg}
+                <path d={describeArc(100, 100, 70, seg.startPct, seg.endPct)} fill="none" stroke={seg.color} stroke-width="20" stroke-linecap="round" />
+              {/each}
+              <text x="100" y="96" text-anchor="middle" class="fill-surface-900 dark:fill-surface-50" style="font-size:24px; font-weight:800; font-family:var(--font-heading);">{totalResp}</text>
+              <text x="100" y="116" text-anchor="middle" class="fill-surface-500 dark:fill-surface-400" style="font-size:10px; font-weight:500; uppercase tracking-widest">responses</text>
+            </svg>
+            <div class="space-y-3 flex-1 max-h-48 overflow-y-auto pr-1">
+              {#each segments as seg}
+                <div class="flex items-center justify-between text-sm py-0.5 border-b border-surface-100 dark:border-surface-800/40 last:border-0">
+                  <div class="flex items-center gap-2.5">
+                    <span class="w-3 h-3 rounded-full flex-shrink-0 shadow-sm" style="background:{seg.color}"></span>
+                    <span class="text-surface-600 dark:text-surface-300 font-medium">{seg.label}</span>
+                  </div>
+                  <div class="flex items-center gap-2 font-mono">
+                    <span class="font-bold text-surface-900 dark:text-surface-100">{seg.value}</span>
+                    <span class="text-xs text-surface-400">({seg.pct}%)</span>
+                  </div>
                 </div>
-                <span class="text-sm font-semibold w-10 text-right">{count}</span>
-              </div>
-            {/each}
-            <p class="text-xs text-surface-500 pt-2">{totalResponses} total responses across all sessions</p>
+              {/each}
+            </div>
           </div>
         {/if}
       </div>
     </div>
 
-    <!-- Row 3: Engagement Timeline + Rating Distribution -->
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
-
-      <!-- Line Chart: Engagement over time -->
-      <div class="card">
-        <h2 class="text-sm font-heading font-semibold uppercase tracking-widest text-surface-500 mb-1">Response Trend</h2>
-        <p class="text-xs text-surface-400 mb-5">Daily responses over the last 30 days</p>
-        {#if engagementOverTime.length === 0}
-          <div class="flex flex-col items-center justify-center py-12 text-surface-400">
-            <TrendingUp class="w-10 h-10 mb-3 text-surface-500" />
-            <p class="text-sm">No engagement data yet</p>
+    <!-- ═══════════════════════════════════════════════════
+         MOST ACTIVE SESSION HIGHLIGHT
+         ═══════════════════════════════════════════════════ -->
+    {#if topSession}
+      <div class="card p-6 mb-8 bg-gradient-to-r from-brand-500/5 to-accent-500/5 dark:from-brand-500/10 dark:to-accent-500/10 border border-brand-500/20 dark:border-brand-500/30 relative overflow-hidden shadow-sm hover:shadow-md transition-all duration-300">
+        <div class="absolute -right-10 -top-10 w-44 h-44 bg-gradient-to-br from-brand-500/10 to-accent-500/10 rounded-full blur-xl pointer-events-none"></div>
+        <div class="flex flex-col sm:flex-row sm:items-center gap-5 relative z-10">
+          <div class="w-14 h-14 flex items-center justify-center rounded-2xl bg-brand-500/10 dark:bg-brand-500/15 flex-shrink-0 shadow-sm">
+            <Zap class="w-7 h-7 text-brand-500 dark:text-brand-400" />
           </div>
-        {:else}
-          {@const chart = getLineChartPoints()}
-          <svg viewBox="0 0 {chart.width} {chart.height}" class="w-full" preserveAspectRatio="xMidYMid meet">
-            {#each [0, 0.25, 0.5, 0.75, 1] as tick}
-              {@const y = chart.padding + chart.chartH - tick * chart.chartH}
-              <line x1={chart.padding} y1={y} x2={chart.width - chart.padding} y2={y} stroke="currentColor" class="text-surface-800" stroke-width="0.5" />
-              <text x={chart.padding - 8} y={y + 4} text-anchor="end" style="font-size:9px; fill:#667091;">{Math.round(tick * chart.maxY)}</text>
-            {/each}
-            <path d={chart.fillPath} fill="url(#engGradient)" opacity="0.3" />
-            <polyline points={chart.points} fill="none" stroke="#7C3AED" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
-            {#each chart.coords as pt}
-              <circle cx={pt.x} cy={pt.y} r="4" fill="#7C3AED" stroke="currentColor" stroke-width="2" />
-            {/each}
-            {#each chart.coords as pt, i}
-              {#if chart.coords.length <= 7 || i % Math.ceil(chart.coords.length / 7) === 0}
-                <text x={pt.x} y={chart.height - 8} text-anchor="middle" style="font-size:8px; fill:#667091;">{pt.label.slice(5)}</text>
+          <div class="flex-1 min-w-0">
+            <div class="text-[10px] text-brand-500 dark:text-brand-400 uppercase tracking-widest font-bold mb-1">Featured Active Session</div>
+            <h3 class="font-heading font-extrabold text-xl text-surface-900 dark:text-surface-50 truncate">{topSession.title}</h3>
+            <div class="flex flex-wrap items-center gap-4 mt-2 text-sm text-surface-500 dark:text-surface-400">
+              <span class="flex items-center gap-1.5"><MessageSquare class="w-4 h-4 text-violet-400" />{topSession.total_responses} responses</span>
+              <span class="flex items-center gap-1.5"><Users class="w-4 h-4 text-emerald-400" />{topSession.unique_participants} participants</span>
+              {#if topSession.avg_rating !== null}
+                <span class="flex items-center gap-1.5 text-amber-400 font-semibold">
+                  <Star class="w-4 h-4 fill-current" /> {topSession.avg_rating.toFixed(1)} / 5.0
+                </span>
               {/if}
-            {/each}
-            <defs>
-              <linearGradient id="engGradient" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stop-color="#7C3AED" stop-opacity="0.4" />
-                <stop offset="100%" stop-color="#7C3AED" stop-opacity="0" />
-              </linearGradient>
-            </defs>
-          </svg>
-        {/if}
-      </div>
-
-      <!-- Rating Distribution -->
-      <div class="card">
-        <h2 class="text-sm font-heading font-semibold uppercase tracking-widest text-surface-500 mb-1">Feedback Ratings</h2>
-        <p class="text-xs text-surface-400 mb-5">Distribution of star ratings from feedback slides</p>
-        {#if Object.values(ratingDistribution).every((v) => v === 0)}
-          <div class="flex flex-col items-center justify-center py-12 text-surface-400">
-            <Star class="w-10 h-10 mb-3 text-surface-500" />
-            <p class="text-sm">No ratings yet</p>
-          </div>
-        {:else}
-          <div class="space-y-3">
-            {#each [5, 4, 3, 2, 1] as star}
-              {@const count = ratingDistribution[String(star)] ?? 0}
-              {@const pct = maxRatingCount > 0 ? (count / maxRatingCount) * 100 : 0}
-              <div class="flex items-center gap-3">
-                <span class="text-sm font-medium text-surface-400 w-4 text-right">{star}</span>
-                <Star class="w-4 h-4 text-amber-400 flex-shrink-0" />
-                <div class="flex-1 h-5 bg-surface-100 dark:bg-surface-800 rounded-full overflow-hidden">
-                  <div class="h-full rounded-full transition-all {star >= 4 ? 'bg-emerald-500' : star === 3 ? 'bg-amber-400' : 'bg-red-400'}" style="width:{pct}%"></div>
-                </div>
-                <span class="text-sm text-surface-500 w-8 text-right">{count}</span>
-              </div>
-            {/each}
-          </div>
-          {#if avgRating !== null}
-            <div class="mt-5 pt-4 border-t border-surface-200 dark:border-surface-800 flex items-center justify-between">
-              <span class="text-sm text-surface-500">Overall average</span>
-              <div class="flex items-center gap-2">
-                <span class="text-amber-400 text-sm tracking-wider">{ratingStars(avgRating)}</span>
-                <span class="text-lg font-bold">{avgRating.toFixed(1)}</span>
-              </div>
             </div>
-          {/if}
-        {/if}
-      </div>
-    </div>
-
-    <!-- Row 4: Participation Funnel + Session Leaderboard -->
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-8">
-
-      <!-- Participation Funnel -->
-      <div class="card lg:col-span-1">
-        <h2 class="text-sm font-heading font-semibold uppercase tracking-widest text-surface-500 mb-1">Participation Funnel</h2>
-        <p class="text-xs text-surface-400 mb-6">How engagement flows through your platform</p>
-        <div class="space-y-3">
-          {#each funnelSteps as step, i}
-            {@const widthPct = funnelMax > 0 ? Math.max((step.value / funnelMax) * 100, 8) : 8}
-            <div class="flex items-center gap-3">
-              <div class="flex-1 flex flex-col gap-1">
-                <div class="h-9 rounded-lg flex items-center px-3 transition-all duration-500" style="width:{widthPct}%; background:{step.color}22; border: 1px solid {step.color}44;">
-                  <span class="text-sm font-heading font-bold" style="color:{step.color}">{step.value}</span>
-                </div>
-              </div>
-              <span class="text-xs text-surface-500 w-20 flex-shrink-0">{step.label}</span>
-            </div>
-            {#if i < funnelSteps.length - 1}
-              <div class="flex items-center gap-3">
-                <div class="flex-1 flex justify-start pl-4">
-                  <div class="w-px h-3 bg-surface-700"></div>
-                </div>
-                <span class="w-20"></span>
-              </div>
-            {/if}
-          {/each}
+          </div>
+          <button onclick={() => {
+            const ev = events.find(e => e.sessions?.some(s => s.id === topSession.session_id));
+            if (ev) goto(`/dashboard/analytics/${ev.id}/${topSession.session_id}`);
+          }} class="btn-primary text-sm px-6 py-2.5 flex-shrink-0 shadow-md">
+            View Details
+          </button>
         </div>
       </div>
+    {/if}
 
-      <!-- Session Leaderboard -->
-      <div class="card lg:col-span-2">
-        <h2 class="text-sm font-heading font-semibold uppercase tracking-widest text-surface-500 mb-1">Session Leaderboard</h2>
-        <p class="text-xs text-surface-400 mb-5">Ranked by combined responses and participation</p>
-        {#if sessionEngagement.length === 0}
-          <div class="flex flex-col items-center justify-center py-12 text-surface-400">
-            <BarChart3 class="w-10 h-10 mb-3 text-surface-500" />
-            <p class="text-sm">No sessions yet</p>
-          </div>
-        {:else}
-          <div class="overflow-x-auto">
-            <table class="w-full min-w-[640px] text-sm">
-              <thead>
-                <tr class="border-b border-surface-200 dark:border-surface-800 text-left">
-                  <th class="pb-3 font-medium text-surface-500 text-xs uppercase tracking-widest w-8">#</th>
-                  <th class="pb-3 font-medium text-surface-500 text-xs uppercase tracking-widest">Session</th>
-                  <th class="pb-3 font-medium text-surface-500 text-xs uppercase tracking-widest text-right">Responses</th>
-                  <th class="pb-3 font-medium text-surface-500 text-xs uppercase tracking-widest text-right">People</th>
-                  <th class="pb-3 font-medium text-surface-500 text-xs uppercase tracking-widest text-right">Rating</th>
-                  <th class="pb-3 font-medium text-surface-500 text-xs uppercase tracking-widest text-right">Score</th>
-                </tr>
-              </thead>
-              <tbody>
-                {#each sessionEngagement as session, i}
-                  {@const score = engagementScore(session)}
-                  <tr class="border-b border-surface-200/60 dark:border-surface-800/60 last:border-0">
-                    <td class="py-3 text-surface-400 font-mono text-xs">{i + 1}</td>
-                    <td class="py-3 font-medium max-w-[180px] truncate" title={session.title}>
-                      <div class="flex items-center gap-2">
-                        {#if i === 0}
-                          <Zap class="w-3.5 h-3.5 text-amber-400 flex-shrink-0" />
-                        {/if}
-                        {session.title}
-                      </div>
-                    </td>
-                    <td class="py-3 text-right tabular-nums">{session.total_responses}</td>
-                    <td class="py-3 text-right text-surface-400 tabular-nums">{session.unique_participants}</td>
-                    <td class="py-3 text-right">
-                      {#if session.avg_rating !== null}
-                        <span class="text-amber-400 text-xs">{ratingStars(session.avg_rating)}</span>
-                      {:else}
-                        <span class="text-surface-500">—</span>
-                      {/if}
-                    </td>
-                    <td class="py-3 text-right">
-                      <span class="inline-block px-2 py-0.5 rounded-full text-xs font-semibold {i === 0 ? 'bg-brand-500/15 text-brand-400' : i === 1 ? 'bg-accent-500/15 text-accent-400' : 'bg-surface-100 dark:bg-surface-800 text-surface-500'}">{score}</span>
-                    </td>
-                  </tr>
-                {/each}
-              </tbody>
-            </table>
-          </div>
-        {/if}
+    <!-- ═══════════════════════════════════════════════════
+         EVENTS LIST — ANALYTICS SUMMARY CARDS
+         ═══════════════════════════════════════════════════ -->
+    <div class="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-surface-200 dark:border-surface-800/80 pb-4">
+      <div>
+        <h2 class="font-heading font-bold text-xl text-surface-900 dark:text-surface-100">Events Analytics</h2>
+        <p class="text-xs text-surface-500 dark:text-surface-400 mt-0.5">Select an event below to inspect deeper session summaries.</p>
       </div>
+      <span class="text-xs font-semibold px-3 py-1 bg-surface-100 dark:bg-surface-800 text-surface-600 dark:text-surface-400 rounded-full">{events.length} total events</span>
     </div>
+
+    {#if events.length === 0}
+      <div class="card text-center py-16 bg-white dark:bg-surface-900 border border-surface-200 dark:border-surface-800 max-w-xl mx-auto shadow-sm">
+        <CalendarDays class="w-12 h-12 text-surface-400 dark:text-surface-600 mx-auto mb-4 opacity-40" />
+        <h3 class="font-heading font-bold text-xl mb-1">No Events Found</h3>
+        <p class="text-surface-500 dark:text-surface-400 text-sm mb-6 max-w-md mx-auto">Create and publish interactive events in the dashboard to start collecting responses.</p>
+        <a href="/dashboard/events" class="btn-primary text-sm px-6 py-2.5 shadow-md">Go to Events</a>
+      </div>
+    {:else}
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {#each sortedEvents as ev (ev.id)}
+          {@const today = isToday(ev.event_date)}
+          {@const sessionCount = ev.sessions?.length ?? 0}
+          {@const liveSess = ev.sessions?.filter(s => s.is_live).length ?? 0}
+          <button
+            onclick={() => goto(`/dashboard/analytics/${ev.id}`)}
+            class="card text-left bg-white dark:bg-surface-900 border border-surface-200 dark:border-surface-800 hover:border-brand-500/40 dark:hover:border-brand-500/40 shadow-sm hover:shadow-md transition-all duration-300 group w-full flex flex-col justify-between"
+          >
+            <div>
+              <!-- Top Header: Date/Status -->
+              <div class="flex items-start justify-between gap-3 mb-4">
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-2 flex-wrap mb-2">
+                    {#if today}
+                      <span class="text-live text-[10px] font-bold uppercase tracking-widest bg-live/10 px-2 py-0.5 rounded-md">Today</span>
+                    {/if}
+                    {#if ev.is_published}
+                      <span class="text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-500 dark:text-emerald-400">Published</span>
+                    {:else}
+                      <span class="text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-surface-100 dark:bg-surface-800 text-surface-500 dark:text-surface-400">Draft</span>
+                    {/if}
+                    {#if liveSess > 0}
+                      <span class="text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-rose-500/15 text-live flex items-center gap-1.5 border border-live/10">
+                        <span class="w-1.5 h-1.5 rounded-full bg-live animate-pulse"></span>{liveSess} Live
+                      </span>
+                    {/if}
+                  </div>
+                  <h3 class="font-heading font-extrabold text-lg leading-snug text-surface-900 dark:text-surface-100 group-hover:text-brand-500 dark:group-hover:text-brand-400 transition-colors truncate">{ev.title}</h3>
+                  <p class="text-xs text-surface-500 dark:text-surface-400 mt-1 font-medium">{formatDate(ev.event_date)}</p>
+                </div>
+                <div class="w-9 h-9 flex items-center justify-center rounded-xl bg-surface-50 dark:bg-surface-800 group-hover:bg-brand-500/10 group-hover:text-brand-500 transition-all duration-300">
+                  <ChevronRight class="w-5 h-5 text-surface-400 dark:text-surface-500 group-hover:text-brand-500 dark:group-hover:text-brand-400" />
+                </div>
+              </div>
+
+              {#if ev.description}
+                <p class="text-xs text-surface-500 dark:text-surface-400 mb-5 line-clamp-2 leading-relaxed">{ev.description}</p>
+              {/if}
+            </div>
+
+            <!-- Stats grid -->
+            <div class="grid grid-cols-3 gap-4 pt-4 border-t border-surface-100 dark:border-surface-800/80 mt-auto">
+              <div>
+                <div class="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-surface-400 dark:text-surface-500 mb-1">
+                  <Layers class="w-3.5 h-3.5" />Sessions
+                </div>
+                <div class="text-lg font-heading font-bold text-surface-900 dark:text-surface-50 tabular-nums">{sessionCount}</div>
+              </div>
+              <div>
+                <div class="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-surface-400 dark:text-surface-500 mb-1">
+                  <Users class="w-3.5 h-3.5" />Participants
+                </div>
+                <div class="text-lg font-heading font-bold text-surface-900 dark:text-surface-50 tabular-nums">
+                  {sessionEngagement.filter(s => ev.sessions?.some(es => es.id === s.session_id)).reduce((sum, s) => sum + s.unique_participants, 0)}
+                </div>
+              </div>
+              <div>
+                <div class="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-surface-400 dark:text-surface-500 mb-1">
+                  <MessageSquare class="w-3.5 h-3.5" />Responses
+                </div>
+                <div class="text-lg font-heading font-bold text-surface-900 dark:text-surface-50 tabular-nums">
+                  {sessionEngagement.filter(s => ev.sessions?.some(es => es.id === s.session_id)).reduce((sum, s) => sum + s.total_responses, 0)}
+                </div>
+              </div>
+            </div>
+          </button>
+        {/each}
+      </div>
+    {/if}
+
   {/if}
 </main>
