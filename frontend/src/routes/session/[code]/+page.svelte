@@ -1,6 +1,7 @@
 <script lang="ts">
   import { joinSession, submitResponse, upvoteResponse, listResponses, getPageImageUrl } from '$lib/api';
   import { RforumWebSocket } from '$lib/ws';
+  import { branding } from '$lib/branding';
   import { theme, toggleTheme } from '$lib/theme';
   import { onMount, onDestroy } from 'svelte';
   import {
@@ -293,7 +294,7 @@
   <div class="w-full px-4 py-3 border-b border-slate-200 dark:border-slate-800">
     <div class="flex flex-col items-center gap-2">
       <!-- Logo -->
-      <img src="/logo-mascot.webp" alt="Tech Good Community" class="w-12 h-auto sm:w-14 md:w-16 opacity-90 hover:opacity-100 transition-opacity" />
+      <img src={$branding.logo_url} alt={$branding.org_name} class="w-12 h-auto sm:w-14 md:w-16 opacity-90 hover:opacity-100 transition-opacity" />
       
       <!-- Session Title -->
       {#if session?.title}

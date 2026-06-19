@@ -1,6 +1,7 @@
 <script lang="ts">
   import { joinSession, listResponses, getPageImageUrl, startSession, clearResponses } from '$lib/api';
   import { RforumWebSocket } from '$lib/ws';
+  import { branding } from '$lib/branding';
   import { onMount, onDestroy } from 'svelte';
   import { BarChart3, MessageSquare, AlignLeft, FileText, Orbit, Cloud, Maximize2, Trash2 } from 'lucide-svelte';
   import JoinScreen from '$lib/components/JoinScreen.svelte';
@@ -329,7 +330,7 @@
 
     <!-- Centered Logo Section -->
     <div class="flex justify-center pt-4 sm:pt-5 md:pt-6 pb-6 sm:pb-8 md:pb-10">
-      <img src="/logo-mascot.webp" alt="Tech Good Community" class="w-16 h-auto sm:w-20 md:w-24 lg:w-28 opacity-90 hover:opacity-100 transition-opacity" />
+      <img src={$branding.logo_url} alt={$branding.org_name} class="w-16 h-auto sm:w-20 md:w-24 lg:w-28 opacity-90 hover:opacity-100 transition-opacity" />
     </div>
 
     <!-- Main -->

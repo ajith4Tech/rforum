@@ -6,15 +6,19 @@ Capabilities:
 - Change user roles
 - List / delete any session (moderation)
 - List / delete any event (moderation)
+- Invalidate all active sessions for a user
 """
 import uuid
+from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_super_admin
+from app.audit import AuditAction, AuditEntity, log_audit
+from app.auth import get_current_super_admin, invalidate_user_sessions
+from app.config import get_settings
 from app.database import get_db
 from app.models import Event, Session, SessionAsset, User, UserRole
 from app.schemas import UserAdminOut, UserOut, UserRoleUpdate
@@ -25,6 +29,7 @@ class UserActiveUpdate(BaseModel):
 
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
+_settings = get_settings()
 
 
 # ── Users ────────────────────────────────────────────────────────────────────
@@ -38,7 +43,6 @@ async def list_users(
     result = await db.execute(select(User).order_by(User.created_at.desc()))
     users = result.scalars().all()
 
-    # Fetch counts per user in bulk
     sessions_count_rows = await db.execute(
         select(Session.owner_id, func.count(Session.id).label("cnt"))
         .group_by(Session.owner_id)
@@ -168,6 +172,37 @@ async def delete_user(
     await db.commit()
 
 
+@router.post("/users/{user_id}/sessions/invalidate", status_code=200)
+async def invalidate_sessions(
+    user_id: str,
+    request: Request,
+    admin: User = Depends(get_current_super_admin),
+):
+    """
+    Force-expire all active JWT tokens for a user.
+    Tokens issued before this moment will be rejected on the next request.
+    """
+    try:
+        uid = uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid user ID")
+
+    redis = request.app.state.redis
+    ttl = _settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60 + 300
+    await invalidate_user_sessions(uid, redis, ttl)
+
+    log_audit(
+        AuditAction.SESSION_INVALIDATED,
+        AuditEntity.USER,
+        user_id=admin.id,
+        entity_id=str(uid),
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("User-Agent", ""),
+        trace_id=getattr(request.state, "trace_id", None),
+    )
+    return {"message": "All active sessions for the user have been invalidated"}
+
+
 # ── Sessions (moderation) ─────────────────────────────────────────────────────
 
 @router.get("/sessions", response_model=list[dict])
@@ -175,7 +210,6 @@ async def list_all_sessions(
     admin: User = Depends(get_current_super_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """List every session across all users."""
     result = await db.execute(select(Session).order_by(Session.created_at.desc()))
     sessions = result.scalars().all()
     return [
@@ -198,7 +232,6 @@ async def delete_any_session(
     admin: User = Depends(get_current_super_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """Force-delete any session (moderation)."""
     try:
         sid = uuid.UUID(session_id)
     except ValueError:
@@ -217,7 +250,6 @@ async def list_all_events(
     admin: User = Depends(get_current_super_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """List every event across all users."""
     result = await db.execute(select(Event).order_by(Event.created_at.desc()))
     events = result.scalars().all()
     return [
@@ -240,7 +272,6 @@ async def delete_any_event(
     admin: User = Depends(get_current_super_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """Force-delete any event (moderation)."""
     try:
         eid = uuid.UUID(event_id)
     except ValueError:
@@ -252,7 +283,7 @@ async def delete_any_event(
     await db.commit()
 
 
-# ── Storage (moderation) ────────────────────────────────────────────────
+# ── Storage (moderation) ──────────────────────────────────────────────────────
 
 @router.get("/storage")
 async def admin_get_storage(

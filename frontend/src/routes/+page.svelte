@@ -1,5 +1,6 @@
 <script lang="ts">
   import { listUpcomingPublicEvents } from '$lib/api';
+  import { branding } from '$lib/branding';
   import { Calendar, ExternalLink } from 'lucide-svelte';
   import { onMount, onDestroy } from 'svelte';
   import Nav from '$lib/components/Nav.svelte';
@@ -65,7 +66,7 @@
     <div class="mx-auto w-full max-w-full sm:max-w-2xl md:max-w-4xl">
       <!-- Logo -->
       <div class="flex justify-center mb-6 sm:mb-8">
-        <img src="/logo-mascot.webp" alt="Tech Good Community" class="w-20 h-auto sm:w-28 md:w-32 lg:w-40 opacity-80 hover:opacity-100 transition-opacity duration-300" />
+        <img src={$branding.logo_url} alt={$branding.org_name} class="w-20 h-auto sm:w-28 md:w-32 lg:w-40 opacity-80 hover:opacity-100 transition-opacity duration-300" />
       </div>
 
       <!-- Compact page header -->

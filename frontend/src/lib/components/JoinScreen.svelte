@@ -1,6 +1,7 @@
 <script lang="ts">
   import { Orbit } from 'lucide-svelte';
   import QRCode from './QRCode.svelte';
+  import { branding } from '$lib/branding';
 
   interface Props {
     sessionCode?: string;
@@ -26,7 +27,7 @@
   <!-- Main Content -->
   <main class="flex-1 flex flex-col items-center justify-center px-4 md:px-8 py-8 md:py-12 gap-8 md:gap-12">
     <!-- Centered Logo -->
-    <img src="/logo-mascot.webp" alt="Tech Good Community" class="w-20 h-auto md:w-28 opacity-90" />
+    <img src={$branding.logo_url} alt={$branding.org_name} class="w-20 h-auto md:w-28 opacity-90" />
 
     <!-- Content Container -->
     <div class="flex flex-col items-center gap-6 md:gap-8 max-w-2xl w-full">

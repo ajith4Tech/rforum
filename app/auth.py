@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -14,68 +14,93 @@ from app.models import User, UserRole
 
 settings = get_settings()
 
-# Configure passlib to use bcrypt
-# Note: The "(trapped) error reading bcrypt version" warning is harmless
-# and can be ignored - passlib will still work correctly
+# Configure passlib to use bcrypt.
+# Note: the "(trapped) error reading bcrypt version" warning is harmless.
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 
 
+# ── Password helpers ──────────────────────────────────────────────────────────
+
 def hash_password(password: str) -> str:
-    """Hash a password using bcrypt, ensuring it's within the 72-byte limit."""
-    password_str = str(password)
-    password_bytes = password_str.encode('utf-8')
-    
-    # Bcrypt has a 72-byte limit - truncate if necessary
-    if len(password_bytes) > 72:
-        password_str = password_bytes[:72].decode('utf-8', errors='ignore')
-    
+    """Hash a password using bcrypt (72-byte limit enforced)."""
+    pw = str(password)
+    pw_bytes = pw.encode("utf-8")
+    if len(pw_bytes) > 72:
+        pw = pw_bytes[:72].decode("utf-8", errors="ignore")
     try:
-        return pwd_context.hash(password_str)
-    except ValueError as e:
-        # If passlib fails due to bcrypt issues, use bcrypt directly
-        if "password cannot be longer than 72 bytes" in str(e):
+        return pwd_context.hash(pw)
+    except ValueError as exc:
+        if "password cannot be longer than 72 bytes" in str(exc):
             import bcrypt
-            # Ensure we're using bytes
-            pwd_bytes = password_str.encode('utf-8')[:72]
-            salt = bcrypt.gensalt(rounds=12)
-            return bcrypt.hashpw(pwd_bytes, salt).decode('utf-8')
+            raw = pw.encode("utf-8")[:72]
+            return bcrypt.hashpw(raw, bcrypt.gensalt(rounds=12)).decode("utf-8")
         raise
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    """Verify a password against a hash."""
-    plain_str = str(plain)
-    plain_bytes = plain_str.encode('utf-8')
-    
-    # Truncate if longer than 72 bytes
-    if len(plain_bytes) > 72:
-        plain_str = plain_bytes[:72].decode('utf-8', errors='ignore')
-    
+    """Verify a plaintext password against a bcrypt hash."""
+    pw = str(plain)
+    pw_bytes = pw.encode("utf-8")
+    if len(pw_bytes) > 72:
+        pw = pw_bytes[:72].decode("utf-8", errors="ignore")
     try:
-        return pwd_context.verify(plain_str, hashed)
+        return pwd_context.verify(pw, hashed)
     except (ValueError, AttributeError):
-        # Fallback to direct bcrypt if passlib fails
         import bcrypt
         try:
-            pwd_bytes = plain_str.encode('utf-8')[:72]
-            return bcrypt.checkpw(pwd_bytes, hashed.encode('utf-8'))
+            return bcrypt.checkpw(pw.encode("utf-8")[:72], hashed.encode("utf-8"))
         except Exception:
             return False
 
 
+# ── JWT helpers ───────────────────────────────────────────────────────────────
+
 def create_access_token(user_id: uuid.UUID) -> str:
-    expire = datetime.now(timezone.utc) + timedelta(
-        minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES
-    )
-    payload = {"sub": str(user_id), "exp": expire}
+    """
+    Issue a signed JWT.
+
+    Payload fields:
+      sub — user UUID (string)
+      exp — expiry timestamp
+      iat — issued-at timestamp (used for session invalidation)
+      jti — unique token ID (enables per-token traceability)
+    """
+    now = datetime.now(timezone.utc)
+    expire = now + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    payload = {
+        "sub": str(user_id),
+        "exp": expire,
+        "iat": now,
+        "jti": str(uuid.uuid4()),
+    }
     return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
+
+# ── Session invalidation ──────────────────────────────────────────────────────
+
+_SESSION_INVALIDATION_KEY = "user_sessions_invalidated_before:{user_id}"
+
+
+async def invalidate_user_sessions(user_id: uuid.UUID, redis, ttl_seconds: int) -> None:
+    """
+    Mark all currently-issued tokens for user_id as invalid.
+
+    Tokens whose `iat` is before the stored timestamp will be rejected on
+    the next authenticated request.  The Redis key expires automatically
+    after `ttl_seconds` (set this to ≥ ACCESS_TOKEN_EXPIRE_MINUTES * 60).
+    """
+    key = _SESSION_INVALIDATION_KEY.format(user_id=user_id)
+    await redis.setex(key, ttl_seconds, str(datetime.now(timezone.utc).timestamp()))
+
+
+# ── Current-user dependency ───────────────────────────────────────────────────
 
 async def get_current_user(
     token: str = Depends(oauth2_scheme),
     db: AsyncSession = Depends(get_db),
+    request: Request = None,  # FastAPI injects this; None only in non-HTTP contexts
 ) -> User:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -90,6 +115,22 @@ async def get_current_user(
     except JWTError:
         raise credentials_exception
 
+    # ── Session-invalidation check (Redis) ────────────────────────────────────
+    if request is not None:
+        redis = getattr(request.app.state, "redis", None)
+        if redis is not None:
+            try:
+                iat = payload.get("iat")
+                if iat is not None:
+                    inv_key = _SESSION_INVALIDATION_KEY.format(user_id=user_id)
+                    invalidated_before = await redis.get(inv_key)
+                    if invalidated_before and float(invalidated_before) > float(iat):
+                        raise credentials_exception
+            except HTTPException:
+                raise
+            except Exception:
+                pass  # Fail open: don't block auth if Redis is temporarily unavailable
+
     result = await db.execute(select(User).where(User.id == uuid.UUID(user_id)))
     user = result.scalar_one_or_none()
     if user is None:
@@ -97,9 +138,7 @@ async def get_current_user(
     return user
 
 
-async def get_current_super_admin(
-    user: User = Depends(get_current_user),
-) -> User:
+async def get_current_super_admin(user: User = Depends(get_current_user)) -> User:
     if user.role != UserRole.SUPER_ADMIN:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
