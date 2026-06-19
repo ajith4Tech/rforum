@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "rforum.fullname" . }}-postgres
+  labels:
+    {{- include "rforum.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
+spec:
+  serviceName: {{ include "rforum.fullname" . }}-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "rforum.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: postgres
+  template:
+    metadata:
+      labels:
+        {{- include "rforum.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: {{ .Values.postgres.image }}
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: rforum
+            - name: POSTGRES_DB
+              value: rforum
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "rforum.fullname" . }}-secrets
+                  key: postgres-password
+          resources:
+            {{- toYaml .Values.postgres.resources | nindent 12 }}
+          volumeMounts:
+            - name: pgdata
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "rforum"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 10
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "rforum"]
+            initialDelaySeconds: 30
+            periodSeconds: 10
+      volumes:
+        - name: pgdata
+          persistentVolumeClaim:
+            claimName: {{ include "rforum.fullname" . }}-pgdata

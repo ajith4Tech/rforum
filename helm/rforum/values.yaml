@@ -1,0 +1,100 @@
+# ── Images ───────────────────────────────────────────────────────────────────
+# Build and push these before installing the chart:
+#   docker build -f app/Dockerfile -t rforum-api:1.0.0 .
+#   docker build -t rforum-frontend:1.0.0 ./frontend
+#
+# For minikube: eval $(minikube docker-env) then build
+# For kind:     kind load docker-image rforum-api:1.0.0
+
+image:
+  api:
+    repository: rforum-api
+    tag: "1.0.0"
+    pullPolicy: IfNotPresent
+  frontend:
+    repository: rforum-frontend
+    tag: "1.0.0"
+    pullPolicy: IfNotPresent
+
+# ── Application secrets ───────────────────────────────────────────────────────
+# REQUIRED: change SECRET_KEY before deploying.
+# Generate: python -c "import secrets; print(secrets.token_hex(32))"
+secrets:
+  secretKey: "change-me-in-production-use-a-real-secret"
+  postgresPassword: "rforum"
+
+# ── Application config ────────────────────────────────────────────────────────
+config:
+  # Comma-separated allowed origins for CORS.
+  # Set to your actual domain, e.g. http://rforum.example.com
+  corsOrigins: '["http://localhost", "http://localhost:80"]'
+  accessTokenExpireMinutes: 1440
+
+# ── PostgreSQL ────────────────────────────────────────────────────────────────
+postgres:
+  image: postgres:16-alpine
+  storage: 5Gi
+  storageClass: ""       # "" = cluster default (standard on minikube/kind)
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# ── Redis ─────────────────────────────────────────────────────────────────────
+redis:
+  image: redis:7-alpine
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+# ── API (FastAPI backend) ─────────────────────────────────────────────────────
+api:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  uploadStorage: 2Gi
+  uploadStorageClass: ""
+
+# ── Frontend (nginx) ──────────────────────────────────────────────────────────
+frontend:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 32Mi
+    limits:
+      cpu: 200m
+      memory: 64Mi
+
+# ── Service types ─────────────────────────────────────────────────────────────
+service:
+  frontend:
+    type: ClusterIP    # Change to NodePort or LoadBalancer to expose without ingress
+    port: 80
+    nodePort: ""       # Only used when type=NodePort, e.g. 30080
+  api:
+    type: ClusterIP
+    port: 8000
+
+# ── Ingress ───────────────────────────────────────────────────────────────────
+ingress:
+  enabled: true
+  className: nginx     # nginx-ingress controller; use "" for other controllers
+  host: rforum.local   # Add to /etc/hosts: <node-ip> rforum.local
+  tls: false
+  tlsSecretName: ""
+
+# ── Namespace ─────────────────────────────────────────────────────────────────
+# Override with: helm install rforum ./helm/rforum -n rforum --create-namespace

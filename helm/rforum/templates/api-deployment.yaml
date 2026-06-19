@@ -1,0 +1,96 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "rforum.fullname" . }}-api
+  labels:
+    {{- include "rforum.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  replicas: {{ .Values.api.replicas }}
+  selector:
+    matchLabels:
+      {{- include "rforum.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: api
+  template:
+    metadata:
+      labels:
+        {{- include "rforum.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: api
+    spec:
+      initContainers:
+        # Guard: don't start until Postgres is reachable.
+        - name: wait-for-db
+          image: {{ .Values.postgres.image }}
+          command:
+            - sh
+            - -c
+            - |
+              until pg_isready -h {{ include "rforum.fullname" . }}-postgres -U rforum; do
+                echo "Waiting for PostgreSQL..."; sleep 3
+              done
+        # Guard: don't start until Redis is reachable.
+        - name: wait-for-redis
+          image: {{ .Values.redis.image }}
+          command:
+            - sh
+            - -c
+            - |
+              until redis-cli -h {{ include "rforum.fullname" . }}-redis ping | grep -q PONG; do
+                echo "Waiting for Redis..."; sleep 3
+              done
+      containers:
+        - name: api
+          image: {{ .Values.image.api.repository }}:{{ .Values.image.api.tag }}
+          imagePullPolicy: {{ .Values.image.api.pullPolicy }}
+          ports:
+            - containerPort: 8000
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "rforum.fullname" . }}-secrets
+                  key: postgres-password
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "rforum.fullname" . }}-secrets
+                  key: secret-key
+            - name: DATABASE_URL
+              value: "postgresql+asyncpg://rforum:$(POSTGRES_PASSWORD)@{{ include "rforum.fullname" . }}-postgres:5432/rforum"
+            - name: REDIS_URL
+              value: "redis://{{ include "rforum.fullname" . }}-redis:6379/0"
+            - name: CORS_ORIGINS
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "rforum.fullname" . }}-config
+                  key: CORS_ORIGINS
+            - name: ACCESS_TOKEN_EXPIRE_MINUTES
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "rforum.fullname" . }}-config
+                  key: ACCESS_TOKEN_EXPIRE_MINUTES
+            - name: ALGORITHM
+              value: HS256
+          volumeMounts:
+            - name: uploads
+              mountPath: /workspace/uploads
+          resources:
+            {{- toYaml .Values.api.resources | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 3
+      volumes:
+        - name: uploads
+          persistentVolumeClaim:
+            claimName: {{ include "rforum.fullname" . }}-uploads
