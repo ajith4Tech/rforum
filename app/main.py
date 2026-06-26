@@ -1,3 +1,4 @@
+import logging
 from contextlib import asynccontextmanager
 import sys
 from pathlib import Path
@@ -15,12 +16,37 @@ from app.routers import admin, session_assets
 # Ensure the 'rforum' directory is in PYTHONPATH
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s — %(message)s",
+)
+logger = logging.getLogger(__name__)
+
 settings = get_settings()
+
+
+def _log_startup_capabilities() -> None:
+    """Log conversion and rendering capability at startup."""
+    from app.services.file_processing import libreoffice_status
+    import fitz
+
+    lo = libreoffice_status()
+    if lo["available"]:
+        logger.info("[startup] LibreOffice: AVAILABLE at '%s'. PPT/PPTX→PDF conversion enabled.", lo["path"])
+    else:
+        logger.warning(
+            "[startup] LibreOffice: NOT FOUND. "
+            "PPT/PPTX files will render via PyMuPDF fallback (page counts may vary). "
+            "To enable full conversion: apt-get install -y libreoffice-headless"
+        )
+
+    logger.info("[startup] PyMuPDF (fitz) version: %s — PDF/PPTX/DOCX rendering available.", fitz.version[0])
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # ── Startup ───────────────────────────────────────
+    _log_startup_capabilities()
     app.state.redis = Redis.from_url(settings.REDIS_URL, decode_responses=True)
     yield
     # ── Shutdown ──────────────────────────────────────
@@ -63,4 +89,14 @@ app.include_router(session_assets.router)
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "service": "rforum"}
+    from app.services.file_processing import libreoffice_status
+    lo = libreoffice_status()
+    return {
+        "status": "ok",
+        "service": "rforum",
+        "capabilities": {
+            "pdf_rendering": True,
+            "pptx_conversion": lo["available"],
+            "conversion_note": lo["message"],
+        },
+    }

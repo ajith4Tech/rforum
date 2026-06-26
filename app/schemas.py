@@ -218,6 +218,19 @@ class SlideOut(BaseModel):
     model_config = {"from_attributes": True, "use_enum_values": True}
 
 
+class UploadMeta(BaseModel):
+    """Metadata about the upload processing pipeline, returned only by upload endpoints."""
+    conversion_attempted: bool
+    conversion_success: bool
+    converted_file_type: str | None
+    warnings: list[str]
+
+
+class SlideUploadOut(SlideOut):
+    """SlideOut extended with upload pipeline metadata."""
+    upload_meta: UploadMeta
+
+
 # ── Response ──────────────────────────────────────────
 class ResponseCreate(BaseModel):
     value: str = Field(..., min_length=1, max_length=2000)
