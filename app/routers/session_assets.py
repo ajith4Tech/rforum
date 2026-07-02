@@ -1,9 +1,9 @@
 """Session Assets router – CRUD for uploaded files with storage tracking."""
+import logging
 import os
 import uuid
 from pathlib import Path
 
-import fitz  # PyMuPDF
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,6 +13,13 @@ from app.config import get_settings
 from app.database import get_db
 from app.models import Event, Session, SessionAsset, Slide, User
 from app.schemas import SessionAssetOut
+from app.services.file_processing import (
+    convert_to_pdf_if_needed,
+    extract_total_pages,
+    validate_upload,
+)
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/assets", tags=["session_assets"])
 
@@ -109,24 +116,27 @@ async def replace_asset_file(
     asset = await _get_owned_asset(asset_id, user, db)
 
     settings = get_settings()
-    # Strip any directory components from the filename to prevent path traversal
     original_name = Path(file.filename or "upload.bin").name or "upload.bin"
     ext = Path(original_name).suffix.lower()
-
-    if ext not in settings.UPLOAD_ALLOWED_EXTENSIONS:
-        allowed = ", ".join(settings.UPLOAD_ALLOWED_EXTENSIONS)
-        raise HTTPException(
-            status_code=400,
-            detail=f"File type '{ext}' not allowed. Allowed types: {allowed}",
-        )
-
     content = await file.read()
     max_bytes = settings.UPLOAD_MAX_MB * 1024 * 1024
-    if len(content) > max_bytes:
-        raise HTTPException(
-            status_code=413,
-            detail=f"File size exceeds the {settings.UPLOAD_MAX_MB} MB limit",
+
+    # ── Validate (extension, size, MIME) ─────────────────
+    try:
+        validation = validate_upload(
+            content=content,
+            original_name=original_name,
+            allowed_extensions=settings.UPLOAD_ALLOWED_EXTENSIONS,
+            max_bytes=max_bytes,
         )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    actual_mime = validation.actual_mime
+    logger.info(
+        "Asset replace started. user=%s asset=%s filename='%s' size=%d detected_mime='%s'",
+        user.id, asset_id, original_name, len(content), actual_mime,
+    )
 
     # Remove old file from disk
     _remove_file(asset.file_url)
@@ -137,36 +147,37 @@ async def replace_asset_file(
     with open(file_path, "wb") as fh:
         fh.write(content)
 
-    content_type = file.content_type or "application/octet-stream"
+    content_type = actual_mime
     file_url = f"/uploads/{filename}"
     file_name = original_name
 
-    # PPT → PDF conversion
-    if ext in {".ppt", ".pptx"}:
-        try:
-            import subprocess
-            subprocess.run(
-                ["libreoffice", "--headless", "--convert-to", "pdf", "--outdir", "uploads", file_path],
-                check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            )
-            pdf_name = f"{Path(file_path).stem}.pdf"
-            pdf_path = os.path.join("uploads", pdf_name)
-            if os.path.exists(pdf_path):
-                file_url = f"/uploads/{pdf_name}"
-                file_name = pdf_name
-                content_type = "application/pdf"
-        except Exception:
-            pass
+    # ── Convert PPT/PPTX → PDF ────────────────────────────
+    conversion = convert_to_pdf_if_needed(file_path, ext)
+    if conversion.warnings:
+        logger.warning(
+            "Asset replace conversion warnings. asset=%s: %s",
+            asset_id, "; ".join(conversion.warnings),
+        )
 
-    total_pages = 1
+    if conversion.success and conversion.output_path:
+        pdf_basename = os.path.basename(conversion.output_path)
+        file_url = f"/uploads/{pdf_basename}"
+        file_name = pdf_basename
+        content_type = conversion.converted_type or "application/pdf"
+
+    # ── Extract page count (works for ALL fitz-supported types) ──
     final_path = file_url.lstrip("/")
-    if content_type == "application/pdf" and os.path.exists(final_path):
-        try:
-            doc = fitz.open(final_path)
-            total_pages = len(doc)
-            doc.close()
-        except Exception:
-            pass
+    total_pages, page_warnings = extract_total_pages(final_path)
+    if page_warnings:
+        logger.warning(
+            "Asset replace page count warnings. asset=%s: %s",
+            asset_id, "; ".join(page_warnings),
+        )
+
+    logger.info(
+        "Asset replace complete. asset=%s file='%s' type='%s' pages=%d",
+        asset_id, file_name, content_type, total_pages,
+    )
 
     # Update linked slide content_json if any
     if asset.slide_id:

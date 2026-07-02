@@ -1,6 +1,6 @@
 import json
+import logging
 import os
-import subprocess
 import uuid
 from io import BytesIO
 from pathlib import Path
@@ -17,7 +17,14 @@ from app.auth import get_current_user
 from app.config import get_settings
 from app.database import get_db
 from app.models import Session, SessionAsset, Slide, User, UserRole
-from app.schemas import SlideCreate, SlideOut, SlideUpdate
+from app.schemas import SlideCreate, SlideOut, SlideUpdate, SlideUploadOut, UploadMeta
+from app.services.file_processing import (
+    convert_to_pdf_if_needed,
+    extract_total_pages,
+    validate_upload,
+)
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/sessions/{session_id}/slides", tags=["slides"])
 
@@ -163,7 +170,7 @@ async def delete_slide(
     await db.commit()
 
 
-@router.post("/{slide_id}/upload", response_model=SlideOut)
+@router.post("/{slide_id}/upload", response_model=SlideUploadOut)
 async def upload_content_file(
     session_id: str,
     slide_id: str,
@@ -179,83 +186,79 @@ async def upload_content_file(
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid ID format")
 
-    result = await db.execute(
+    db_result = await db.execute(
         select(Slide).where(Slide.id == slide_uuid, Slide.session_id == session_uuid)
     )
-    slide = result.scalar_one_or_none()
+    slide = db_result.scalar_one_or_none()
     if not slide:
         raise HTTPException(status_code=404, detail="Slide not found")
 
     settings = get_settings()
-    # Strip any directory components from the filename to prevent path traversal
     original_name = Path(file.filename or "upload.bin").name or "upload.bin"
     ext = Path(original_name).suffix.lower()
-
-    # Validate file extension
-    if ext not in settings.UPLOAD_ALLOWED_EXTENSIONS:
-        allowed = ", ".join(settings.UPLOAD_ALLOWED_EXTENSIONS)
-        raise HTTPException(
-            status_code=400,
-            detail=f"File type '{ext}' not allowed. Allowed types: {allowed}",
-        )
-
     content = await file.read()
-
-    # Validate file size
     max_bytes = settings.UPLOAD_MAX_MB * 1024 * 1024
-    if len(content) > max_bytes:
-        raise HTTPException(
-            status_code=413,
-            detail=f"File size exceeds the {settings.UPLOAD_MAX_MB} MB limit",
-        )
 
+    # ── Validate (extension, size, MIME) ─────────────────
+    try:
+        validation = validate_upload(
+            content=content,
+            original_name=original_name,
+            allowed_extensions=settings.UPLOAD_ALLOWED_EXTENSIONS,
+            max_bytes=max_bytes,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    all_warnings: list[str] = list(validation.warnings)
+    actual_mime = validation.actual_mime
+
+    logger.info(
+        "Upload started. user=%s slide=%s filename='%s' size=%d detected_mime='%s'",
+        user.id, slide_id, original_name, len(content), actual_mime,
+    )
+
+    # ── Persist raw file ──────────────────────────────────
     os.makedirs("uploads", exist_ok=True)
     filename = f"{slide_id}_{original_name}"
     file_path = os.path.join("uploads", filename)
     with open(file_path, "wb") as handle:
         handle.write(content)
 
-    content_type = file.content_type or "application/octet-stream"
     file_url = f"/uploads/{filename}"
     file_name = original_name
+    # Use server-detected MIME, not the browser-reported content_type
+    content_type = actual_mime
 
-    # Convert PPT/PPTX to PDF if possible
-    if ext in {".ppt", ".pptx"}:
-        try:
-            result = subprocess.run(
-                [
-                    "libreoffice",
-                    "--headless",
-                    "--convert-to",
-                    "pdf",
-                    "--outdir",
-                    "uploads",
-                    file_path,
-                ],
-                check=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-            )
-            pdf_name = f"{Path(file_path).stem}.pdf"
-            pdf_path = os.path.join("uploads", pdf_name)
-            if os.path.exists(pdf_path):
-                file_url = f"/uploads/{pdf_name}"
-                file_name = pdf_name
-                content_type = "application/pdf"
-        except Exception:
-            pass
+    # ── Convert PPT/PPTX → PDF ────────────────────────────
+    conversion = convert_to_pdf_if_needed(file_path, ext)
+    all_warnings.extend(conversion.warnings)
 
-    # Count total pages for PDF files
-    total_pages = 1
+    if conversion.success and conversion.output_path:
+        pdf_basename = os.path.basename(conversion.output_path)
+        file_url = f"/uploads/{pdf_basename}"
+        file_name = pdf_basename
+        content_type = conversion.converted_type or "application/pdf"
+
+    # ── Extract page count (works for ALL fitz-supported types) ──
     final_path = file_url.lstrip("/")
-    if content_type == "application/pdf" and os.path.exists(final_path):
-        try:
-            doc = fitz.open(final_path)
-            total_pages = len(doc)
-            doc.close()
-        except Exception:
-            pass
+    total_pages, page_warnings = extract_total_pages(final_path)
+    all_warnings.extend(page_warnings)
 
+    if total_pages == 1 and page_warnings:
+        logger.warning(
+            "Page count defaulted to 1 for slide=%s file='%s' warnings=%s",
+            slide_id, final_path, page_warnings,
+        )
+
+    logger.info(
+        "Upload complete. slide=%s file='%s' type='%s' pages=%d "
+        "conversion_attempted=%s conversion_success=%s warnings=%d",
+        slide_id, file_name, content_type, total_pages,
+        conversion.attempted, conversion.success, len(all_warnings),
+    )
+
+    # ── Update slide content_json ─────────────────────────
     content_json = dict(slide.content_json or {})
     content_json["file_name"] = file_name
     content_json["file_url"] = file_url
@@ -270,7 +273,6 @@ async def upload_content_file(
     )
     existing_asset = existing_asset_result.scalar_one_or_none()
 
-    # Fetch the session to get event_id
     session_row = await db.execute(select(Session).where(Session.id == session_uuid))
     session_obj = session_row.scalar_one_or_none()
 
@@ -293,7 +295,16 @@ async def upload_content_file(
         db.add(new_asset)
 
     await db.commit()
-    return slide
+
+    # Build response: validate slide via SlideOut first, then extend with upload metadata
+    upload_meta = UploadMeta(
+        conversion_attempted=conversion.attempted,
+        conversion_success=conversion.success,
+        converted_file_type=conversion.converted_type,
+        warnings=all_warnings,
+    )
+    slide_data = SlideOut.model_validate(slide).model_dump()
+    return SlideUploadOut(upload_meta=upload_meta, **slide_data)
 
 
 @router.get("/{slide_id}/page/{page_num}")
@@ -333,8 +344,24 @@ async def get_page_image(
 
     try:
         doc = fitz.open(file_path)
-    except Exception:
-        raise HTTPException(status_code=500, detail="Could not open PDF")
+    except fitz.EmptyFileError:
+        logger.error("Page render failed — empty file: slide=%s file='%s'", slide_id, file_path)
+        raise HTTPException(status_code=422, detail="File is empty and cannot be rendered.")
+    except fitz.FileDataError as exc:
+        logger.error(
+            "Page render failed — file corrupt or encrypted: slide=%s file='%s' error=%s",
+            slide_id, file_path, exc,
+        )
+        raise HTTPException(
+            status_code=422,
+            detail="File cannot be rendered. It may be corrupted or password-protected.",
+        )
+    except Exception as exc:
+        logger.error(
+            "Page render failed — unexpected error: slide=%s file='%s'",
+            slide_id, file_path, exc_info=True,
+        )
+        raise HTTPException(status_code=500, detail="Could not open file for rendering.")
 
     total = len(doc)
 
