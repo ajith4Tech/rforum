@@ -103,7 +103,8 @@ async def _repair(args: argparse.Namespace) -> None:
             slide_id = str(row["id"])
             cj: dict = json.loads(row["content_json"]) if isinstance(row["content_json"], str) else dict(row["content_json"])
 
-            file_url: str = cj.get("file_url", "")
+            original_file_url: str = cj.get("file_url", "")
+            file_url: str = original_file_url
             stored_pages: int = cj.get("total_pages", 1)
             file_name: str = cj.get("file_name", "")
 
@@ -143,7 +144,7 @@ async def _repair(args: argparse.Namespace) -> None:
             for w in page_warnings:
                 logger.warning("      slide=%s page warning: %s", slide_id, w)
 
-            if actual_pages == stored_pages and cj.get("file_url") == file_url:
+            if actual_pages == stored_pages and file_url == original_file_url:
                 if args.verbose:
                     logger.info("OK    slide=%s — pages=%d, no change needed", slide_id, actual_pages)
                 skipped += 1
