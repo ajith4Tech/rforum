@@ -67,6 +67,7 @@
               type="text"
               bind:value={inviteCode}
               placeholder="Invite code"
+              aria-label="Invite code"
               class="input-field pl-10 uppercase tracking-widest"
               maxlength="20"
               autocomplete="off"
@@ -80,6 +81,7 @@
             type="email"
             bind:value={email}
             placeholder="Email"
+            aria-label="Email"
             class="input-field pl-10"
             required
           />
@@ -91,6 +93,7 @@
             type={showPassword ? 'text' : 'password'}
             bind:value={password}
             placeholder="Password"
+            aria-label="Password"
             class="input-field pl-10 pr-11"
             required
             minlength="6"
@@ -110,7 +113,7 @@
         </div>
 
         {#if error}
-          <p class="text-danger text-sm">{error}</p>
+          <p class="text-danger text-sm" role="alert" aria-live="polite">{error}</p>
         {/if}
 
         <button type="submit" class="btn-primary w-full" disabled={loading}>

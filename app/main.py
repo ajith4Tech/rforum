@@ -11,7 +11,7 @@ from redis.asyncio import Redis
 from app.config import get_settings
 from app.database import engine
 from app.routers import auth, responses, sessions, slides, ws, events, analytics
-from app.routers import admin, session_assets
+from app.routers import admin, session_assets, presentations
 
 # Ensure the 'rforum' directory is in PYTHONPATH
 sys.path.append(str(Path(__file__).resolve().parent.parent))
@@ -85,6 +85,7 @@ app.include_router(analytics.router)
 app.include_router(ws.router)
 app.include_router(admin.router)
 app.include_router(session_assets.router)
+app.include_router(presentations.router)
 
 
 @app.get("/api/health")

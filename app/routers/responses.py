@@ -37,13 +37,22 @@ async def submit_response(
     if not slide.is_active:
         raise HTTPException(status_code=400, detail="Slide is not currently active")
 
-    # Rate limit: max 10 submissions per guest per slide per minute
+    # Rate limit: max 10 submissions per guest per slide per minute. guest_identifier
+    # is client-supplied, so also cap per-IP-per-slide — otherwise rotating the
+    # identifier trivially bypasses the per-guest limit (ballot-stuffing on polls).
     redis: Redis = request.app.state.redis
     rate_key = f"rate:response:{payload.guest_identifier}:{slide_id}"
     count = await redis.incr(rate_key)
     if count == 1:
         await redis.expire(rate_key, 60)
     if count > 10:
+        raise HTTPException(status_code=429, detail="Too many responses. Please slow down.")
+
+    ip_rate_key = f"rate:response_ip:{request.client.host}:{slide_id}"
+    ip_count = await redis.incr(ip_rate_key)
+    if ip_count == 1:
+        await redis.expire(ip_rate_key, 60)
+    if ip_count > 20:
         raise HTTPException(status_code=429, detail="Too many responses. Please slow down.")
 
     # Default name to "Guest" if empty or None

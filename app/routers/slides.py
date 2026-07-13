@@ -19,6 +19,7 @@ from app.database import get_db
 from app.models import Session, SessionAsset, Slide, User, UserRole
 from app.schemas import SlideCreate, SlideOut, SlideUpdate, SlideUploadOut, UploadMeta
 from app.services.file_processing import (
+    check_content_length,
     convert_to_pdf_if_needed,
     extract_total_pages,
     validate_upload,
@@ -47,6 +48,20 @@ async def _verify_ownership(
     return session
 
 
+def _ensure_not_presentation_session(session: Session) -> None:
+    """
+    Legacy slide CRUD has no presentation-timeline awareness — operating on a
+    presentation-linked session's slides here would desync the timeline
+    (e.g. orphaning a PresentationTimelineItem.slide_id). Presentation sessions
+    must go through app/routers/presentations.py instead.
+    """
+    if session.presentation_id is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="This session uses the Presentation Timeline — manage its content via the presentation endpoints, not the legacy slide API.",
+        )
+
+
 @router.post("/", response_model=SlideOut, status_code=status.HTTP_201_CREATED)
 async def create_slide(
     session_id: str,
@@ -54,7 +69,8 @@ async def create_slide(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await _verify_ownership(session_id, user, db)
+    session = await _verify_ownership(session_id, user, db)
+    _ensure_not_presentation_session(session)
 
     slide = Slide(session_id=uuid.UUID(session_id), **payload.model_dump())
     db.add(slide)
@@ -69,7 +85,8 @@ async def list_slides(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await _verify_ownership(session_id, user, db)
+    session = await _verify_ownership(session_id, user, db)
+    _ensure_not_presentation_session(session)
 
     session_uuid = uuid.UUID(session_id)
     result = await db.execute(
@@ -87,14 +104,15 @@ async def update_slide(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await _verify_ownership(session_id, user, db)
+    session = await _verify_ownership(session_id, user, db)
+    _ensure_not_presentation_session(session)
 
     try:
         session_uuid = uuid.UUID(session_id)
         slide_uuid = uuid.UUID(slide_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid ID format")
-    
+
     result = await db.execute(
         select(Slide).where(Slide.id == slide_uuid, Slide.session_id == session_uuid)
     )
@@ -137,12 +155,10 @@ async def update_slide(
                 "activation": True
             }
         }
-        print(f"[DEBUG] Broadcasting slide_change for session {session_code}, slide {slide_uuid}")
         await redis.publish(
             f"session:{session_code}",
             json.dumps(payload_data)
         )
-        print(f"[DEBUG] Broadcast sent successfully")
     
     return slide
 
@@ -154,14 +170,15 @@ async def delete_slide(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await _verify_ownership(session_id, user, db)
+    session = await _verify_ownership(session_id, user, db)
+    _ensure_not_presentation_session(session)
 
     try:
         session_uuid = uuid.UUID(session_id)
         slide_uuid = uuid.UUID(slide_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid ID format")
-    
+
     result = await db.execute(
         delete(Slide).where(Slide.id == slide_uuid, Slide.session_id == session_uuid)
     )
@@ -175,10 +192,12 @@ async def upload_content_file(
     session_id: str,
     slide_id: str,
     file: UploadFile,
+    request: Request,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await _verify_ownership(session_id, user, db)
+    session = await _verify_ownership(session_id, user, db)
+    _ensure_not_presentation_session(session)
 
     try:
         session_uuid = uuid.UUID(session_id)
@@ -194,10 +213,15 @@ async def upload_content_file(
         raise HTTPException(status_code=404, detail="Slide not found")
 
     settings = get_settings()
+    max_bytes = settings.UPLOAD_MAX_MB * 1024 * 1024
+    try:
+        check_content_length(request.headers.get("content-length"), max_bytes)
+    except ValueError as exc:
+        raise HTTPException(status_code=413, detail=str(exc))
+
     original_name = Path(file.filename or "upload.bin").name or "upload.bin"
     ext = Path(original_name).suffix.lower()
     content = await file.read()
-    max_bytes = settings.UPLOAD_MAX_MB * 1024 * 1024
 
     # ── Validate (extension, size, MIME) ─────────────────
     try:

@@ -25,7 +25,7 @@
   let { children } = $props();
 </script>
 
-<div class="min-h-screen flex flex-col overflow-x-hidden">
+<div class="min-h-screen flex flex-col overflow-x-clip">
   <Nav authenticated onLogout={handleLogout} />
   <div class="pt-16 flex-1">
     {@render children()}

@@ -5,11 +5,24 @@
   import { BarChart3, MessageSquare, AlignLeft, FileText, Orbit, Cloud, Maximize2, Trash2 } from 'lucide-svelte';
   import JoinScreen from '$lib/components/JoinScreen.svelte';
   import QRModal from '$lib/components/QRModal.svelte';
+  import PageImageViewer from '$lib/components/PageImageViewer.svelte';
+  import PresentationLiveView from '$lib/components/timeline/PresentationLiveView.svelte';
+  import { upsertTimelineItemFromWs } from '$lib/timelineTypes';
 
   let code = $state('');
   let session: any = $state(null);
   let activeSlide: any = $state(null);
   let responses: any[] = $state([]);
+  // Presentation Timeline (additive — only populated when session.presentation_id is set)
+  let presentationTimeline: any = $state(null);
+  let timelineResponses: any[] = $state([]);
+  const activeTimelineItem = $derived(
+    presentationTimeline
+      ? [...(presentationTimeline.items || [])].sort((a: any, b: any) => a.order - b.order)
+          .find((i: any) => i.id === presentationTimeline.active_timeline_item_id) || null
+      : null
+  );
+  const hasActiveContent = $derived(session?.presentation_id ? !!activeTimelineItem : !!activeSlide);
   let ws: RforumWebSocket | null = $state(null);
   let loading = $state(true);
   let error = $state('');
@@ -66,7 +79,6 @@
     try {
       await clearResponses(activeSlide.id);
       // The clear_responses websocket message will handle clearing the responses
-      console.log('[screen] Responses cleared for slide:', activeSlide.id);
     } catch (e: any) {
       console.error('[screen] Error clearing responses:', e);
       alert('Failed to clear responses: ' + (e.message || 'Unknown error'));
@@ -80,8 +92,6 @@
       ? window.location.pathname.split('/').pop() || ''
       : '';
     guestUrl = typeof window !== 'undefined' ? `${window.location.origin}/session/${code}` : '';
-    
-    console.log('[screen] Mounting with code:', code);
 
     // Always connect WS so the screen auto-recovers when the session starts
     ws = new RforumWebSocket(code);
@@ -89,19 +99,21 @@
     ws.onMessage(queueMessage);
 
     try {
-      console.log('[screen] Loading session:', code);
       session = await joinSession(code);
-      console.log('[screen] Session loaded, is_live:', session.is_live, 'slides:', session.slides?.length);
-      
+
       const active = session.slides?.find((s: any) => s.is_active);
       if (active) {
-        console.log('[screen] Found active slide:', active.id);
         activeSlide = { ...active, type: active.type?.toUpperCase() };
-        console.log('[screen] Loading responses for slide:', active.id);
         responses = await listResponses(active.id);
-        console.log('[screen] Loaded initial responses:', responses.length);
-      } else {
-        console.log('[screen] No active slide found yet');
+      }
+
+      if (session.presentation_id && session.timeline) {
+        presentationTimeline = session.timeline;
+        const items = [...(presentationTimeline.items || [])].sort((a: any, b: any) => a.order - b.order);
+        const activeItem = items.find((i: any) => i.id === presentationTimeline.active_timeline_item_id);
+        if (activeItem?.slide) {
+          timelineResponses = await listResponses(activeItem.slide.id);
+        }
       }
     } catch (e: any) {
       console.error('[screen] Error in onMount:', e);
@@ -116,25 +128,42 @@
   });
 
   async function handleWsMessage(msg: any) {
-    console.log('[screen] WebSocket message received:', msg.event);
-    
+    // Presentation-timeline activation — distinct payload shape from the legacy
+    // slide_change (timeline_item_id instead of slide_id), same event name per design.
+    if (msg.event === 'slide_change' && msg.data?.timeline_item_id !== undefined) {
+      if (presentationTimeline) {
+        presentationTimeline = {
+          ...presentationTimeline,
+          active_timeline_item_id: msg.data.timeline_item_id,
+          items: upsertTimelineItemFromWs(presentationTimeline.items || [], msg.data)
+        };
+      }
+      if (msg.data.slide) {
+        try {
+          timelineResponses = await listResponses(msg.data.slide.id);
+        } catch (err) {
+          console.error('[screen] Failed to load responses for new timeline item:', err);
+          timelineResponses = [];
+        }
+      } else {
+        timelineResponses = [];
+      }
+      return;
+    }
+
     if (msg.event === 'slide_change') {
-      console.log('[screen] Slide change event - has slide data:', !!msg.data?.slide);
       if (msg.data?.slide) {
         // Use the slide data embedded in the message — no HTTP round-trip needed
         const cj = { ...(msg.data.slide.content_json || {}) };
         if ('file_url' in cj) { cj.has_file = true; delete cj.file_url; }
         delete cj.file_name;
         activeSlide = { ...msg.data.slide, type: msg.data.slide.type?.toUpperCase(), content_json: cj };
-        console.log('[screen] Active slide updated:', activeSlide.id);
-        
+
         // Always reload responses for the new slide to prevent stale data
         // Reload immediately with a small delay to ensure DB is updated
         try {
-          console.log('[screen] Starting response fetch for slide:', msg.data.slide.id);
           await new Promise(resolve => setTimeout(resolve, 100));
           const fetchedResponses = await listResponses(msg.data.slide.id);
-          console.log('[screen] Responses fetched successfully:', fetchedResponses.length, 'responses');
           responses = fetchedResponses;
         } catch (err) {
           console.error('[screen] Failed to load responses for new slide:', err);
@@ -143,14 +172,12 @@
           try {
             const retryResponses = await listResponses(msg.data.slide.id);
             responses = retryResponses;
-            console.log('[screen] Retry successful:', retryResponses.length, 'responses');
           } catch (retryErr) {
             console.error('[screen] Retry also failed:', retryErr);
             responses = [];
           }
         }
       } else {
-        console.log('[screen] No slide data in message, re-fetching session');
         try {
           session = await joinSession(code);
           const active = session.slides?.find((s: any) => s.is_active);
@@ -159,7 +186,6 @@
             await new Promise(resolve => setTimeout(resolve, 100));
             const fetchedResponses = await listResponses(active.id);
             responses = fetchedResponses;
-            console.log('[screen] Re-fetched session, loaded', fetchedResponses.length, 'responses');
           } else {
             responses = [];
           }
@@ -174,13 +200,21 @@
         // Check if response already exists to prevent duplicates
         const exists = responses.some((r) => r.id === msg.data.id);
         if (!exists) {
-          console.log('[screen] Adding new response');
           responses = [...responses, msg.data];
+        }
+      }
+      if (msg.data && activeTimelineItem?.slide && msg.data.slide_id === activeTimelineItem.slide.id) {
+        const timelineExists = timelineResponses.some((r) => r.id === msg.data.id);
+        if (!timelineExists) {
+          timelineResponses = [...timelineResponses, msg.data];
         }
       }
     } else if (msg.event === 'upvote') {
       // Update the response with new upvote count
       responses = responses.map((r) =>
+        r.id === msg.data.id ? { ...r, upvotes: msg.data.upvotes } : r
+      );
+      timelineResponses = timelineResponses.map((r) =>
         r.id === msg.data.id ? { ...r, upvotes: msg.data.upvotes } : r
       );
     } else if (msg.event === 'page_change') {
@@ -210,11 +244,26 @@
             responses = fetchedResponses;
           }
         }
+        if (session.presentation_id && !presentationTimeline) {
+          try {
+            const fresh = await joinSession(code);
+            session = fresh;
+            if (fresh.timeline) {
+              presentationTimeline = fresh.timeline;
+              const items = [...(fresh.timeline.items || [])].sort((a: any, b: any) => a.order - b.order);
+              const activeItem = items.find((i: any) => i.id === fresh.timeline.active_timeline_item_id);
+              if (activeItem?.slide) {
+                timelineResponses = await listResponses(activeItem.slide.id);
+              }
+            }
+          } catch (err) {
+            console.error('[screen] Failed to load presentation timeline after going live:', err);
+          }
+        }
       }
     } else if (msg.event === 'clear_responses') {
       // Clear responses if it's for the current slide
       if (msg.data?.slide_id === activeSlide?.id) {
-        console.log('[screen] Clearing responses for slide:', msg.data.slide_id);
         responses = [];
       }
     }
@@ -303,7 +352,7 @@
         <!-- Show QR Button -->
         {#if guestUrl}
           <button
-            on:click={() => { showQRModal = true; }}
+            onclick={() => { showQRModal = true; }}
             class="p-2 md:p-2.5 hover:bg-white/10 rounded-lg transition-colors flex items-center justify-center"
             title="Show QR code for joining"
             aria-label="Show QR code"
@@ -315,7 +364,7 @@
         <!-- Clear Responses Button (Moderator only) -->
         {#if activeSlide && responses.length > 0}
           <button
-            on:click={handleClearResponses}
+            onclick={handleClearResponses}
             disabled={isClearingResponses}
             class="p-2 md:p-2.5 hover:bg-red-500/10 disabled:opacity-50 rounded-lg transition-colors flex items-center justify-center"
             title="Clear all responses for this slide"
@@ -351,7 +400,7 @@
           </div>
         </div>
 
-      {:else if !activeSlide}
+      {:else if !hasActiveContent}
         <div class="text-center animate-fade-in space-y-6 py-12 mt-6">
           <Orbit class="w-20 h-20 mx-auto text-brand-400 animate-pulse" />
           <p class="text-3xl font-heading font-bold text-white/80">Waiting for presenter…</p>
@@ -360,6 +409,16 @@
             <span class="text-white/30 text-sm tracking-widest uppercase">Join with code</span>
             <span class="font-mono text-5xl font-bold tracking-[0.3em] text-brand-400">{code}</span>
           </div>
+        </div>
+
+      {:else if session?.presentation_id}
+        <div class="w-full max-w-5xl flex flex-col gap-4 mt-6">
+          <PresentationLiveView
+            activeItem={activeTimelineItem}
+            presentationId={session.presentation_id}
+            responses={timelineResponses}
+            variant="screen"
+          />
         </div>
 
       {:else}
@@ -497,14 +556,12 @@
                   {#if activeSlide.content_json?.title}
                     <h1 class="text-3xl font-heading font-bold text-white text-center">{activeSlide.content_json.title}</h1>
                   {/if}
-                  {#key activeSlide.content_json?.file_page}
-                    <img
-                      alt={`Slide page ${activeSlide.content_json?.file_page || 1}`}
-                      src={getPageImageUrl(session.id, activeSlide.id, activeSlide.content_json?.file_page || 1)}
-                      class="max-w-full max-h-[65vh] w-auto rounded-2xl border border-white/10 object-contain shadow-2xl"
-                      draggable="false"
-                    />
-                  {/key}
+                  <PageImageViewer
+                    src={getPageImageUrl(session.id, activeSlide.id, activeSlide.content_json?.file_page || 1)}
+                    page={activeSlide.content_json?.file_page || 1}
+                    alt={`Slide page ${activeSlide.content_json?.file_page || 1}`}
+                    imgClass="max-w-full max-h-[65vh] w-auto rounded-2xl border border-white/10 object-contain shadow-2xl"
+                  />
                   {#if activeSlide.content_json?.total_pages}
                     <p class="text-white/30 text-sm font-mono">
                       Page {activeSlide.content_json.file_page || 1} / {activeSlide.content_json.total_pages}

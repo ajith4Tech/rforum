@@ -33,7 +33,7 @@
   >
     <!-- Close Button -->
     <button
-      on:click={closeModal}
+      onclick={closeModal}
       class="absolute top-4 right-4 md:top-8 md:right-8 p-2 hover:bg-white/10 rounded-lg transition-colors"
       aria-label="Close modal"
     >

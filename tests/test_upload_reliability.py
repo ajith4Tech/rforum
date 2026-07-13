@@ -384,6 +384,7 @@ class TestUploadEndpoint:
         s.event_id = None
         s.owner_id = UUID("00000000-0000-0000-0000-000000000001")
         s.role = None
+        s.presentation_id = None  # legacy session — not linked to a Presentation Timeline
         return s
 
     def test_pdf_upload_succeeds_and_returns_upload_meta(self, pdf_3_pages):

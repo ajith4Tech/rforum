@@ -26,6 +26,7 @@
     session_id: string | null;
     event_id: string | null;
     slide_id: string | null;
+    presentation_id: string | null;
     file_name: string;
     file_url: string;
     file_type: string;
@@ -98,6 +99,10 @@
   }
 
   async function handleReplace(asset: Asset) {
+    if (asset.presentation_id) {
+      actionError = 'This file is a Presentation original — use "Replace" inside the Presentation Builder instead.';
+      return;
+    }
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = '.pdf,.ppt,.pptx,.doc,.docx,.txt,.odp,.odt';
@@ -121,7 +126,7 @@
   }
 
   async function confirmDelete() {
-    if (!deleteTarget) return;
+    if (!deleteTarget || deleteTarget.presentation_id) return;
     deletingId = deleteTarget.id;
     actionError = '';
     try {
@@ -270,6 +275,9 @@
                   <div class="flex items-center gap-2">
                     <File class="w-4 h-4 text-surface-400 flex-shrink-0" />
                     <span class="font-medium truncate max-w-56 dark:text-surface-100" title={asset.file_name}>{asset.file_name}</span>
+                    {#if asset.presentation_id}
+                      <span class="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-500 font-bold flex-shrink-0" title="Presentation original — read-only here">Presentation</span>
+                    {/if}
                   </div>
                 </td>
 
@@ -308,9 +316,9 @@
                     {/if}
                     <button
                       onclick={() => handleReplace(asset)}
-                      disabled={uploadingId === asset.id}
-                      class="p-1.5 rounded-lg text-surface-400 hover:text-accent-400 hover:bg-accent-500/10 transition disabled:opacity-40"
-                      title="Replace file"
+                      disabled={uploadingId === asset.id || !!asset.presentation_id}
+                      class="p-1.5 rounded-lg text-surface-400 hover:text-accent-400 hover:bg-accent-500/10 transition disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-surface-400"
+                      title={asset.presentation_id ? 'Use the Presentation Builder to replace this file' : 'Replace file'}
                     >
                       {#if uploadingId === asset.id}
                         <RefreshCw class="w-3.5 h-3.5 animate-spin" />
@@ -319,9 +327,10 @@
                       {/if}
                     </button>
                     <button
-                      onclick={() => { deleteTarget = asset; actionError = ''; }}
-                      class="p-1.5 rounded-lg text-surface-400 hover:text-danger hover:bg-danger/10 transition"
-                      title="Delete"
+                      onclick={() => { if (!asset.presentation_id) { deleteTarget = asset; actionError = ''; } }}
+                      disabled={!!asset.presentation_id}
+                      class="p-1.5 rounded-lg text-surface-400 hover:text-danger hover:bg-danger/10 transition disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-surface-400"
+                      title={asset.presentation_id ? 'Presentation originals cannot be deleted from here' : 'Delete'}
                     >
                       <Trash2 class="w-3.5 h-3.5" />
                     </button>

@@ -1,6 +1,9 @@
 <script lang="ts">
   import {
-    getSession, updateSession, createSlide, updateSlide, deleteSlide, listResponses, getPageImageUrl
+    getSession, updateSession, createSlide, updateSlide, deleteSlide, listResponses, getPageImageUrl,
+    getSessionPresentation, uploadPresentation, replacePresentation, regeneratePresentation,
+    insertTimelineItem, updateTimelineItem, deleteTimelineItem, reorderTimelineItems, activateTimelineItem,
+    attachPresentation, detachPresentation, deletePresentation
   } from '$lib/api';
   import { RforumWebSocket } from '$lib/ws';
   import type { ConnectionStatus as WsStatus } from '$lib/ws';
@@ -16,6 +19,10 @@
     Users
   } from 'lucide-svelte';
   import Sidebar from '$lib/components/Sidebar.svelte';
+  import PageImageViewer from '$lib/components/PageImageViewer.svelte';
+  import PresentationWorkspace from '$lib/components/timeline/PresentationWorkspace.svelte';
+  import PresentationEmptyState from '$lib/components/timeline/PresentationEmptyState.svelte';
+  import { upsertTimelineItemFromWs } from '$lib/timelineTypes';
 
   let sessionId = $state('');
 
@@ -45,6 +52,27 @@
   let notesSaveTimer: ReturnType<typeof setTimeout> | null = null;
   const activeSlide = $derived(getActiveSlide());
   const activeType = $derived(activeSlide?.type?.toUpperCase());
+
+  // ── Presentation Timeline (additive — only used when session.presentation_id is set) ──
+  let presentation: any = $state(null);
+  let timeline: any = $state(null);
+  let timelineResponses: any[] = $state([]);
+  let saveState: 'idle' | 'saving' | 'saved' = $state('idle');
+  let saveStateTimeout: ReturnType<typeof setTimeout> | null = null;
+
+  async function withSaveState<T>(fn: () => Promise<T>): Promise<T> {
+    saveState = 'saving';
+    if (saveStateTimeout) clearTimeout(saveStateTimeout);
+    try {
+      const result = await fn();
+      saveState = 'saved';
+      saveStateTimeout = setTimeout(() => { saveState = 'idle'; }, 2000);
+      return result;
+    } catch (err) {
+      saveState = 'idle';
+      throw err;
+    }
+  }
 
   const slideIcons: Record<string, any> = {
     POLL: BarChart3,
@@ -100,6 +128,10 @@
         await loadResponses(active.id);
       }
 
+      if (session.presentation_id) {
+        await loadPresentationData();
+      }
+
       // Load moderator notes for this session
       const savedNotes = localStorage.getItem(`rforum_notes_${sessionId}`);
       if (savedNotes !== null) moderatorNotes = savedNotes;
@@ -132,14 +164,38 @@
   }
 
   function handleWsMessage(msg: any) {
+    // Presentation-timeline activation — distinct payload shape from the legacy
+    // slide_change (timeline_item_id instead of slide_id), same event name per design.
+    if (msg.event === 'slide_change' && msg.data?.timeline_item_id !== undefined) {
+      if (timeline) {
+        timeline = {
+          ...timeline,
+          active_timeline_item_id: msg.data.timeline_item_id,
+          items: upsertTimelineItemFromWs(timeline.items || [], msg.data)
+        };
+      }
+      if (msg.data.slide) {
+        loadTimelineResponses(msg.data.slide.id);
+      } else {
+        timelineResponses = [];
+      }
+      return;
+    }
     if (msg.event === 'new_response') {
       // Check if response already exists to prevent duplicates
       const exists = slideResponses.some((r) => r.id === msg.data.id);
       if (!exists) {
         slideResponses = [...slideResponses, msg.data];
       }
+      const timelineExists = timelineResponses.some((r) => r.id === msg.data.id);
+      if (!timelineExists) {
+        timelineResponses = [...timelineResponses, msg.data];
+      }
     } else if (msg.event === 'upvote') {
       slideResponses = slideResponses.map((r) =>
+        r.id === msg.data.id ? { ...r, upvotes: msg.data.upvotes } : r
+      );
+      timelineResponses = timelineResponses.map((r) =>
         r.id === msg.data.id ? { ...r, upvotes: msg.data.upvotes } : r
       );
     } else if (msg.event === 'page_change') {
@@ -491,6 +547,137 @@
     }));
   }
 
+  // ── Presentation Timeline handlers ────────────────────
+  async function loadPresentationData() {
+    const data = await getSessionPresentation(sessionId);
+    presentation = data.presentation;
+    timeline = data.timeline;
+    const activeItem = (timeline?.items || []).find((i: any) => i.id === timeline?.active_timeline_item_id);
+    if (activeItem?.slide) {
+      await loadTimelineResponses(activeItem.slide.id);
+    } else {
+      timelineResponses = [];
+    }
+  }
+
+  async function loadTimelineResponses(slideId: string) {
+    timelineResponses = await listResponses(slideId);
+  }
+
+  async function handleUploadPresentation(file: File) {
+    const result = await uploadPresentation(sessionId, file);
+    presentation = result.presentation;
+    timeline = result.timeline;
+    return result;
+  }
+
+  function handleUploadDone(result: any) {
+    // Only now (after the UploadProgress "Ready" beat) do we flip to the full
+    // workspace — session.presentation_id is what the template branches on.
+    session = { ...session, presentation_id: result.presentation.id };
+  }
+
+  async function handleAttachExistingPresentation(presentationId: string) {
+    const result = await attachPresentation(sessionId, presentationId);
+    presentation = result.presentation;
+    timeline = result.timeline;
+    session = { ...session, presentation_id: presentation.id };
+  }
+
+  async function handleDetachPresentation() {
+    // API call only — deliberately does not touch session/presentation/timeline
+    // state, so the Details Panel can stay open and re-fetch in place.
+    await detachPresentation(sessionId);
+  }
+
+  async function handleDeletePresentation(presentationId: string) {
+    await deletePresentation(presentationId);
+  }
+
+  function handlePresentationDetailsClosedAfterChange() {
+    // A detach or delete happened while the Details Panel was open — now that
+    // it's closed, fall back to the empty state (Upload / Choose Existing).
+    session = { ...session, presentation_id: null };
+    presentation = null;
+    timeline = null;
+    timelineResponses = [];
+  }
+
+  async function handleReplacePresentation(file: File) {
+    const result = await replacePresentation(sessionId, file);
+    presentation = result.presentation;
+    timeline = result.timeline;
+    timelineResponses = [];
+  }
+
+  async function handleRegeneratePresentation() {
+    presentation = await regeneratePresentation(sessionId);
+  }
+
+  async function activatePresentationItem(itemId: string) {
+    const item = await activateTimelineItem(sessionId, itemId);
+    timeline = {
+      ...timeline,
+      active_timeline_item_id: itemId,
+      items: timeline.items.map((i: any) => (i.id === item.id ? item : i))
+    };
+    if (item.slide) {
+      await loadTimelineResponses(item.slide.id);
+    } else {
+      timelineResponses = [];
+    }
+  }
+
+  function navigateTimeline(direction: 'prev' | 'next') {
+    const ids = [...(timeline?.items || [])].sort((a: any, b: any) => a.order - b.order).map((i: any) => i.id);
+    if (ids.length === 0) return;
+    const currentIndex = ids.indexOf(timeline?.active_timeline_item_id);
+    const base = currentIndex === -1 ? 0 : currentIndex;
+    const nextIndex = direction === 'next' ? Math.min(base + 1, ids.length - 1) : Math.max(base - 1, 0);
+    const nextId = ids[nextIndex];
+    if (nextId && nextId !== timeline?.active_timeline_item_id) {
+      activatePresentationItem(nextId);
+    }
+  }
+
+  async function handleInsertTimelineItem(itemType: string, position: number) {
+    await withSaveState(async () => {
+      await insertTimelineItem(sessionId, itemType, position);
+      await loadPresentationData();
+    });
+  }
+
+  async function handleUpdateTimelineItemContent(itemId: string, contentJson: Record<string, unknown>) {
+    await withSaveState(async () => {
+      const updated = await updateTimelineItem(sessionId, itemId, contentJson);
+      timeline = { ...timeline, items: timeline.items.map((i: any) => (i.id === updated.id ? updated : i)) };
+    });
+  }
+
+  async function handleDeleteTimelineItem(itemId: string) {
+    // Confirmation is now handled inline in TimelineSidebar (Yes/Cancel row) —
+    // by the time this fires the moderator has already confirmed.
+    await withSaveState(async () => {
+      await deleteTimelineItem(sessionId, itemId);
+      await loadPresentationData();
+    });
+  }
+
+  async function handleDuplicateTimelineItem(itemId: string) {
+    const item = (timeline?.items || []).find((i: any) => i.id === itemId);
+    if (!item || item.item_type === 'PAGE' || !item.slide) return;
+    await withSaveState(async () => {
+      await insertTimelineItem(sessionId, item.item_type, item.order + 1, item.slide.content_json || {});
+      await loadPresentationData();
+    });
+  }
+
+  async function handleReorderTimelineItems(itemIds: string[]) {
+    await withSaveState(async () => {
+      timeline = await reorderTimelineItems(sessionId, itemIds);
+    });
+  }
+
 </script>
 
 <svelte:head>
@@ -515,6 +702,38 @@
     {:else if errorMessage}
       <div class="card text-center text-red-500 py-10 px-6">{errorMessage}</div>
     {:else}
+      {#if !session?.presentation_id}
+        <PresentationEmptyState
+          eventId={session?.event_id ?? null}
+          onUpload={handleUploadPresentation}
+          onUploadDone={handleUploadDone}
+          onAttach={handleAttachExistingPresentation}
+        />
+      {/if}
+
+      {#if session?.presentation_id}
+        <PresentationWorkspace
+          {session}
+          {presentation}
+          {timeline}
+          responses={timelineResponses}
+          {wsStatus}
+          {saveState}
+          onToggleLive={toggleLive}
+          onActivateItem={activatePresentationItem}
+          onNavigate={navigateTimeline}
+          onInsertItem={handleInsertTimelineItem}
+          onUpdateItemContent={handleUpdateTimelineItemContent}
+          onDeleteItem={handleDeleteTimelineItem}
+          onDuplicateItem={handleDuplicateTimelineItem}
+          onReorderItems={handleReorderTimelineItems}
+          onReplace={handleReplacePresentation}
+          onRegenerate={handleRegeneratePresentation}
+          onDetach={handleDetachPresentation}
+          onDeletePresentation={handleDeletePresentation}
+          onDetailsClosedAfterChange={handlePresentationDetailsClosedAfterChange}
+        />
+      {:else}
       <div class="grid grid-cols-12 gap-5">
         <Sidebar
           {session}
@@ -658,13 +877,12 @@
                       <div class="text-xs text-surface-400">Page {activeSlide.content_json?.file_page || 1}{activeSlide.content_json?.total_pages ? ` / ${activeSlide.content_json.total_pages}` : ''}</div>
                     </div>
                     <div class="overflow-x-auto">
-                      {#key activeSlide.content_json?.file_page}
-                        <img
-                          alt={`Page ${activeSlide.content_json?.file_page || 1}`}
-                          src={getPageImageUrl(sessionId, activeSlide.id, activeSlide.content_json?.file_page || 1)}
-                          class="max-h-[500px] rounded-xl border border-surface-200 mx-auto"
-                        />
-                      {/key}
+                      <PageImageViewer
+                        src={getPageImageUrl(sessionId, activeSlide.id, activeSlide.content_json?.file_page || 1)}
+                        page={activeSlide.content_json?.file_page || 1}
+                        alt={`Page ${activeSlide.content_json?.file_page || 1}`}
+                        imgClass="max-h-[500px] rounded-xl border border-surface-200 mx-auto"
+                      />
                     </div>
                 {/if}
                 <div class="border border-surface-200 rounded-xl p-4 sm:p-5 bg-surface-50">
@@ -702,6 +920,7 @@
           {/if}
         </section>
       </div>
+      {/if}
     {/if}
 
     <!-- Moderator Setup -->

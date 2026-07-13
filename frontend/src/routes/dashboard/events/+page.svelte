@@ -157,7 +157,15 @@
     const selected = new Set(eventSelections[eventId] || []);
     return sessions.filter((session) => !selected.has(session.id));
   }
+
+  function handleGlobalKeydown(e: KeyboardEvent) {
+    if (e.key !== 'Escape') return;
+    if (showCreateEvent) showCreateEvent = false;
+    else if (showEditEvent) showEditEvent = false;
+  }
 </script>
+
+<svelte:window onkeydown={handleGlobalKeydown} />
 
 <svelte:head>
   <title>Events – Rforum</title>
@@ -210,7 +218,9 @@
 </main>
 
 {#if showCreateEvent}
-  <div class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center px-4 z-50">
+  <div class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center px-4 z-50"
+       onclick={(e) => { if (e.target === e.currentTarget) showCreateEvent = false; }}
+       role="dialog" aria-modal="true" aria-label="Create Event">
     <div class="card w-full max-w-lg max-h-[90vh] overflow-y-auto">
       <div class="flex items-center justify-between mb-4">
         <h2 class="text-lg font-semibold">Create Event</h2>
@@ -234,7 +244,9 @@
 {/if}
 
 {#if showEditEvent}
-  <div class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center px-4 z-50">
+  <div class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center px-4 z-50"
+       onclick={(e) => { if (e.target === e.currentTarget) showEditEvent = false; }}
+       role="dialog" aria-modal="true" aria-label="Edit Event">
     <div class="card w-full max-w-lg max-h-[90vh] overflow-y-auto">
       <div class="flex items-center justify-between mb-4">
         <h2 class="text-lg font-semibold">Edit Event</h2>

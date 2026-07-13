@@ -180,6 +180,12 @@
   function copyCode(code: string) { navigator.clipboard.writeText(code); }
   function isToday(dateStr: string) { return dateStr === new Date().toISOString().slice(0, 10); }
 
+  function handleGlobalKeydown(e: KeyboardEvent) {
+    if (e.key !== 'Escape') return;
+    if (showCreateEvent) showCreateEvent = false;
+    else if (showCreateSession) showCreateSession = false;
+  }
+
   const liveSessions = $derived(sessions.filter((s) => s.is_live));
   const upcomingEvents = $derived(
     events
@@ -439,10 +445,13 @@
   {/if}
 </main>
 
+<svelte:window onkeydown={handleGlobalKeydown} />
+
 <!-- Create Event Modal -->
 {#if showCreateEvent}
   <div class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center px-4 z-50"
-       onclick={(e) => { if (e.target === e.currentTarget) showCreateEvent = false; }}>
+       onclick={(e) => { if (e.target === e.currentTarget) showCreateEvent = false; }}
+       role="dialog" aria-modal="true" aria-label="Create Event">
     <div class="card w-full max-w-lg shadow-2xl">
       <div class="flex items-center justify-between mb-6">
         <h2 class="text-xl font-heading font-bold tracking-wide">Create Event</h2>
@@ -477,7 +486,8 @@
 <!-- Create Session Modal -->
 {#if showCreateSession}
   <div class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center px-4 z-50"
-       onclick={(e) => { if (e.target === e.currentTarget) showCreateSession = false; }}>
+       onclick={(e) => { if (e.target === e.currentTarget) showCreateSession = false; }}
+       role="dialog" aria-modal="true" aria-label="Create Session">
     <div class="card w-full max-w-lg shadow-2xl">
       <div class="flex items-center justify-between mb-6">
         <h2 class="text-xl font-heading font-bold tracking-wide">Create Session</h2>

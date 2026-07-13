@@ -76,6 +76,8 @@
         <button
           onclick={() => onDelete(event.id)}
           class="btn-danger p-2"
+          title="Delete"
+          aria-label={`Delete event ${event.title}`}
         >
           <Trash2 class="w-4 h-4" />
         </button>

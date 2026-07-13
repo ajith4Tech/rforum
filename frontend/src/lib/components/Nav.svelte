@@ -154,6 +154,9 @@
       <button
         onclick={() => menuOpen = !menuOpen}
         class="btn-secondary flex items-center gap-2 px-2.5 py-1.5"
+        aria-label="Account menu"
+        aria-haspopup="true"
+        aria-expanded={menuOpen}
       >
         {#if $isSuperAdmin}
           <Shield class="w-4 h-4 text-rose-500" />

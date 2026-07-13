@@ -4,7 +4,7 @@ import os
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, status
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,6 +14,7 @@ from app.database import get_db
 from app.models import Event, Session, SessionAsset, Slide, User
 from app.schemas import SessionAssetOut
 from app.services.file_processing import (
+    check_content_length,
     convert_to_pdf_if_needed,
     extract_total_pages,
     validate_upload,
@@ -109,17 +110,28 @@ async def get_storage(
 async def replace_asset_file(
     asset_id: str,
     file: UploadFile,
+    request: Request,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Replace the file for an existing asset and update the linked slide if any."""
     asset = await _get_owned_asset(asset_id, user, db)
+    if asset.presentation_id is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="This asset is a Presentation's original file — use the presentation's replace endpoint instead.",
+        )
 
     settings = get_settings()
+    max_bytes = settings.UPLOAD_MAX_MB * 1024 * 1024
+    try:
+        check_content_length(request.headers.get("content-length"), max_bytes)
+    except ValueError as exc:
+        raise HTTPException(status_code=413, detail=str(exc))
+
     original_name = Path(file.filename or "upload.bin").name or "upload.bin"
     ext = Path(original_name).suffix.lower()
     content = await file.read()
-    max_bytes = settings.UPLOAD_MAX_MB * 1024 * 1024
 
     # ── Validate (extension, size, MIME) ─────────────────
     try:
@@ -210,6 +222,11 @@ async def delete_asset(
 ):
     """Delete an asset: remove file from disk, delete linked slide, delete the record."""
     asset = await _get_owned_asset(asset_id, user, db)
+    if asset.presentation_id is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="This asset is a Presentation's original file and cannot be deleted from here.",
+        )
 
     _remove_file(asset.file_url)
 

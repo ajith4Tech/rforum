@@ -1,13 +1,26 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
-  import { isAuthenticated, exportEventAnalytics, listSlides, formatBytes } from '$lib/api';
-  import { CalendarDays, ChevronRight, Users, MessageSquare, Layers, BarChart2, AlertCircle, Download, Zap, TrendingUp, FileText, Activity } from 'lucide-svelte';
+  import { isAuthenticated, exportEventAnalytics, exportSessionAnalytics, listSlides, formatBytes } from '$lib/api';
+  import { CalendarDays, ChevronRight, ChevronLeft, Users, User, MessageSquare, Layers, BarChart2, AlertCircle, Download, Zap, TrendingUp, FileText, Activity, Search, SlidersHorizontal, Inbox } from 'lucide-svelte';
   import { onMount } from 'svelte';
+  import { fade } from 'svelte/transition';
+  import { rgbToHex, generateHighResPieChart } from '$lib/pdf/charts';
+  import { loadMascot } from '$lib/pdf/mascot';
+  import { BRAND, CHART_PALETTE, FOOTER_TEXT } from '$lib/pdf/constants';
+  import CountUp from '$lib/components/CountUp.svelte';
 
   const eventId = $derived($page.params.eventId);
 
-  interface SessionRow { session_id: string; title: string; total_responses: number; unique_participants: number; avg_rating: number | null; }
+  interface SessionRow {
+    session_id: string;
+    title: string;
+    moderator_name: string | null;
+    total_responses: number;
+    unique_participants: number;
+    slide_count: number;
+    avg_rating: number | null;
+  }
 
   let loading = $state(true);
   let error = $state('');
@@ -17,7 +30,14 @@
   let downloading = $state(false);
   let downloadingJSON = $state(false);
   let generatingPDF = $state(false);
+  let downloadingSessionId = $state('');
   let topPerformingSlide = $state<{ question: string; count: number } | null>(null);
+
+  // Session list search / filter / pagination
+  let sessionSearch = $state('');
+  let sessionFilter = $state<'all' | 'high' | 'low'>('all');
+  let sessionPage = $state(1);
+  const SESSIONS_PER_PAGE = 6;
 
   const totalSessions = $derived(sessions.length);
   const totalParticipants = $derived(sessions.reduce((s, r) => s + r.unique_participants, 0));
@@ -54,8 +74,10 @@
       eventDescription = data.event?.description ?? '';
       sessions = (data.session_engagement ?? []).map((r: any) => ({
         session_id: r.session_id, title: r.title,
+        moderator_name: r.moderator_name ?? null,
         total_responses: r.total_responses ?? 0,
         unique_participants: r.unique_participants ?? 0,
+        slide_count: r.slide_count ?? 0,
         avg_rating: r.avg_rating ?? null,
       }));
 
@@ -128,6 +150,37 @@
     } catch { alert('Download failed'); } finally { downloadingJSON = false; }
   }
 
+  async function downloadSessionReport(sessionId: string) {
+    downloadingSessionId = sessionId;
+    try {
+      const res = await exportSessionAnalytics(sessionId, 'csv');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = `session_${sessionId}_report.csv`;
+      document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    } catch { alert('Download failed'); } finally { downloadingSessionId = ''; }
+  }
+
+  function sessionEngagementPct(s: SessionRow) {
+    return maxPart > 0 ? Math.round((s.unique_participants / maxPart) * 100) : 0;
+  }
+
+  const filteredSessions = $derived(sessions.filter(s => {
+    if (sessionFilter === 'high' && sessionEngagementPct(s) < 50) return false;
+    if (sessionFilter === 'low' && sessionEngagementPct(s) >= 50) return false;
+    const q = sessionSearch.trim().toLowerCase();
+    if (!q) return true;
+    return s.title.toLowerCase().includes(q) || (s.moderator_name ?? '').toLowerCase().includes(q);
+  }));
+  const totalSessionPages = $derived(Math.max(1, Math.ceil(filteredSessions.length / SESSIONS_PER_PAGE)));
+  const pagedSessions = $derived(filteredSessions.slice((sessionPage - 1) * SESSIONS_PER_PAGE, sessionPage * SESSIONS_PER_PAGE));
+
+  $effect(() => {
+    // Reset to page 1 whenever the filtered set changes shape
+    void sessionSearch; void sessionFilter;
+    sessionPage = 1;
+  });
+
   async function generatePDF() {
     generatingPDF = true;
     try {
@@ -159,25 +212,8 @@
       const ph = doc.internal.pageSize.getHeight();
       let y = 20;
 
-      const brand = {
-        purple: [124, 58, 237] as const,
-        purpleSoft: [245, 243, 255] as const,
-        text: [15, 23, 42] as const,
-        muted: [71, 85, 105] as const,
-        line: [226, 232, 240] as const,
-        fill: [248, 250, 252] as const,
-      };
-
-      const chartPalette = [
-        [124, 58, 237],
-        [6, 182, 212],
-        [16, 185, 129],
-        [245, 158, 11],
-        [236, 72, 153],
-        [99, 102, 241],
-        [20, 184, 166],
-        [239, 68, 68],
-      ];
+      const brand = BRAND;
+      const chartPalette = CHART_PALETTE;
 
       function addHeader(pdfDoc: any, pageTitle: string) {
         pdfDoc.setFillColor(255, 255, 255);
@@ -205,7 +241,7 @@
         pdfDoc.setFont('helvetica', 'normal');
         pdfDoc.setFontSize(8);
         pdfDoc.setTextColor(...brand.muted);
-        pdfDoc.text(`Powered by Tech4Good • rforum.t4gc.in • Page ${pageNumber} of ${totalPages}`, pw / 2, ph - 9.5, { align: 'center' });
+        pdfDoc.text(`${FOOTER_TEXT} • Page ${pageNumber} of ${totalPages}`, pw / 2, ph - 9.5, { align: 'center' });
       }
 
       function addSectionTitle(pdfDoc: any, title: string, subtitle?: string) {
@@ -236,78 +272,6 @@
         pdfDoc.setFontSize(emphasis ? 20 : 17);
         pdfDoc.setTextColor(...brand.purple);
         pdfDoc.text(value, x + 4, yPos + height - 5.5);
-      }
-
-      // Hex conversion helper
-      function rgbToHex(rgb: number[]): string {
-        return '#' + rgb.map(x => {
-          const hex = x.toString(16);
-          return hex.length === 1 ? '0' + hex : hex;
-        }).join('');
-      }
-
-      // High-resolution canvas-based donut/pie chart generator
-      function generateHighResPieChart(
-        width: number,
-        height: number,
-        chartData: { value: number; color: string }[],
-        isDonut = false,
-        centerText = '',
-        centerSubtext = ''
-      ): string {
-        const canvas = document.createElement('canvas');
-        const scale = 3;
-        canvas.width = width * scale;
-        canvas.height = height * scale;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return '';
-        ctx.scale(scale, scale);
-
-        const cx = width / 2;
-        const cy = height / 2;
-        const radius = Math.min(width, height) / 2 - 10;
-        const total = chartData.reduce((sum, d) => sum + d.value, 0) || 1;
-
-        let cumulativeAngle = -Math.PI / 2; // Start from top
-        
-        chartData.forEach(d => {
-          const pct = d.value / total;
-          const sweep = pct * Math.PI * 2;
-          if (sweep <= 0.001) return;
-
-          ctx.beginPath();
-          ctx.moveTo(cx, cy);
-          ctx.arc(cx, cy, radius, cumulativeAngle, cumulativeAngle + sweep);
-          ctx.closePath();
-          ctx.fillStyle = d.color;
-          ctx.fill();
-
-          cumulativeAngle += sweep;
-        });
-
-        if (isDonut) {
-          ctx.beginPath();
-          ctx.arc(cx, cy, radius * 0.65, 0, Math.PI * 2);
-          ctx.fillStyle = '#FFFFFF';
-          ctx.fill();
-
-          if (centerText) {
-            ctx.fillStyle = '#0F172A';
-            ctx.font = 'bold 15px sans-serif';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(centerText, cx, cy - (centerSubtext ? 4 : 0));
-          }
-          if (centerSubtext) {
-            ctx.fillStyle = '#64748B';
-            ctx.font = 'normal 8px sans-serif';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(centerSubtext, cx, cy + 9);
-          }
-        }
-
-        return canvas.toDataURL('image/png');
       }
 
       // Helper function to draw a professional horizontal bar chart
@@ -362,19 +326,6 @@
         return curY;
       }
 
-      // Load Mascot Image dynamically
-      const loadMascot = () => new Promise<string>((resolve) => {
-        const img = new Image();
-        img.src = '/logo-mascot.webp';
-        img.onload = () => {
-          const canvas = document.createElement('canvas');
-          canvas.width = img.width; canvas.height = img.height;
-          const ctx = canvas.getContext('2d');
-          if (ctx) { ctx.drawImage(img, 0, 0); resolve(canvas.toDataURL('image/png')); }
-          else { resolve(''); }
-        };
-        img.onerror = () => resolve('');
-      });
       const mascotUri = await loadMascot();
 
       // Cover Page
@@ -472,7 +423,7 @@
       doc.roundedRect(15, y, pw - 30, 48, 4, 4, 'D');
 
       doc.setFontSize(10); doc.setFont('helvetica', 'bold'); doc.setTextColor(...brand.purple);
-      doc.text('Key Takeaways & Insights', 20, y + 8);
+      doc.text('Insights', 20, y + 8);
 
       const topSessTitle = topSession ? (topSession.title.length > 38 ? topSession.title.slice(0, 35) + '…' : topSession.title) : '—';
       doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(51, 65, 85);
@@ -830,9 +781,32 @@
   </nav>
 
   {#if loading}
-    <div class="flex flex-col items-center justify-center py-24 gap-3">
-      <div class="w-10 h-10 border-3 border-brand-500 border-t-transparent rounded-full animate-spin"></div>
-      <span class="text-sm text-surface-500 dark:text-surface-400 font-medium">Loading event analytics…</span>
+    <div aria-busy="true" aria-label="Loading event analytics" class="animate-pulse">
+      <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-5 mb-8">
+        <div class="space-y-3">
+          <div class="h-8 w-64 rounded-lg bg-surface-200 dark:bg-surface-800"></div>
+          <div class="h-4 w-80 max-w-full rounded bg-surface-200 dark:bg-surface-800"></div>
+        </div>
+        <div class="flex gap-2.5">
+          <div class="h-10 w-32 rounded-lg bg-surface-200 dark:bg-surface-800"></div>
+          <div class="h-10 w-20 rounded-lg bg-surface-200 dark:bg-surface-800"></div>
+        </div>
+      </div>
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
+        {#each Array(4) as _}
+          <div class="card p-5 bg-white dark:bg-surface-900 border border-surface-200 dark:border-surface-800">
+            <div class="w-11 h-11 rounded-xl bg-surface-200 dark:bg-surface-800 mb-3.5"></div>
+            <div class="h-7 w-16 rounded bg-surface-200 dark:bg-surface-800 mb-2.5"></div>
+            <div class="h-2.5 w-20 rounded bg-surface-200 dark:bg-surface-800"></div>
+          </div>
+        {/each}
+      </div>
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+        {#each Array(2) as _}
+          <div class="card p-6 h-64 bg-white dark:bg-surface-900 border border-surface-200 dark:border-surface-800"></div>
+        {/each}
+      </div>
+      <div class="card p-6 h-72 bg-white dark:bg-surface-900 border border-surface-200 dark:border-surface-800"></div>
     </div>
   {:else if error}
     <div class="card text-center py-16 max-w-xl mx-auto shadow-sm">
@@ -862,20 +836,21 @@
     </div>
 
     <!-- KPI Cards Grid -->
-    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4 mb-8">
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
       {#each [
-        { label: 'Sessions',        value: totalSessions,             icon: Layers,        bg: 'bg-brand-500/10 dark:bg-brand-500/15',    text: 'text-brand-500 dark:text-brand-400',    hover: 'hover:border-brand-500/30'   },
-        { label: 'Participants',    value: totalParticipants,         icon: Users,         bg: 'bg-emerald-500/10 dark:bg-emerald-500/15', text: 'text-emerald-500 dark:text-emerald-400', hover: 'hover:border-emerald-500/30' },
-        { label: 'Responses',       value: totalResponses,            icon: MessageSquare, bg: 'bg-violet-500/10 dark:bg-violet-500/15',   text: 'text-violet-500 dark:text-violet-400',  hover: 'hover:border-violet-500/30'  },
-        { label: 'Engagement Rate', value: `${eventEngagementRate}%`, icon: TrendingUp,    bg: 'bg-amber-500/10 dark:bg-amber-500/15',    text: 'text-amber-500 dark:text-amber-400',    hover: 'hover:border-amber-500/30'   },
-        { label: 'Storage Used',    value: storageUsed,               icon: Download,      bg: 'bg-pink-500/10 dark:bg-pink-500/15',      text: 'text-pink-500 dark:text-pink-400',      hover: 'hover:border-pink-500/30'    },
-      ] as card}
+        { label: 'Total Sessions',     value: totalSessions,       decimals: 0, suffix: '', icon: Layers,        bg: 'bg-brand-500/10 dark:bg-brand-500/15',    text: 'text-brand-500 dark:text-brand-400',    hover: 'hover:border-brand-500/30'   },
+        { label: 'Total Participants', value: totalParticipants,   decimals: 0, suffix: '', icon: Users,         bg: 'bg-emerald-500/10 dark:bg-emerald-500/15', text: 'text-emerald-500 dark:text-emerald-400', hover: 'hover:border-emerald-500/30' },
+        { label: 'Total Responses',    value: totalResponses,      decimals: 0, suffix: '', icon: MessageSquare, bg: 'bg-violet-500/10 dark:bg-violet-500/15',   text: 'text-violet-500 dark:text-violet-400',  hover: 'hover:border-violet-500/30'  },
+        { label: 'Avg Engagement',     value: eventEngagementRate, decimals: 0, suffix: '%', icon: TrendingUp,   bg: 'bg-amber-500/10 dark:bg-amber-500/15',    text: 'text-amber-500 dark:text-amber-400',    hover: 'hover:border-amber-500/30'   },
+      ] as card, i}
         {@const Icon = card.icon}
-        <div class="card p-5 bg-white dark:bg-surface-900 border border-surface-200 dark:border-surface-800 transition-all duration-300 {card.hover} hover:shadow-md cursor-default group overflow-hidden">
+        <div in:fade={{ duration: 300, delay: i * 60 }} class="card p-5 bg-white dark:bg-surface-900 border border-surface-200 dark:border-surface-800 transition-all duration-300 {card.hover} hover:shadow-md cursor-default group overflow-hidden">
           <div class="w-11 h-11 flex items-center justify-center rounded-xl {card.bg} mb-3.5 transition-transform duration-300 group-hover:scale-110 shadow-sm">
             <Icon class="w-5 h-5 {card.text}" />
           </div>
-          <div class="text-2xl sm:text-3xl font-heading font-extrabold tabular-nums tracking-tight leading-none text-surface-900 dark:text-surface-50">{card.value}</div>
+          <div class="text-2xl sm:text-3xl font-heading font-extrabold tabular-nums tracking-tight leading-none text-surface-900 dark:text-surface-50">
+            <CountUp value={card.value} decimals={card.decimals} suffix={card.suffix} />
+          </div>
           <div class="text-[10px] text-surface-500 dark:text-surface-400 mt-2.5 uppercase tracking-wider font-bold">{card.label}</div>
         </div>
       {/each}
@@ -1014,6 +989,14 @@
           </div>
         </div>
       </div>
+    {:else}
+      <div class="card p-12 flex flex-col items-center justify-center text-center bg-white dark:bg-surface-900 border border-surface-200 dark:border-surface-800 shadow-sm mb-8">
+        <div class="w-14 h-14 rounded-2xl bg-surface-100 dark:bg-surface-800 flex items-center justify-center mb-4">
+          <BarChart2 class="w-7 h-7 text-surface-400 dark:text-surface-600" />
+        </div>
+        <h3 class="font-heading font-bold text-lg text-surface-800 dark:text-surface-100 mb-1">No sessions yet</h3>
+        <p class="text-sm text-surface-500 dark:text-surface-400 max-w-sm">Charts will appear here once this event has at least one session with activity.</p>
+      </div>
     {/if}
 
     <!-- ═══════════════════════════════════════════════════
@@ -1070,45 +1053,137 @@
       {/if}
     </div>
 
-    <!-- Performance Table -->
+    <!-- Session List -->
     <div class="card p-6 bg-white dark:bg-surface-900 border border-surface-200 dark:border-surface-800 shadow-sm">
-      <div class="flex items-center justify-between mb-5 border-b border-surface-100 dark:border-surface-800/80 pb-4">
+      <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-5 border-b border-surface-100 dark:border-surface-800/80 pb-4">
         <div>
-          <h2 class="font-heading font-bold text-lg text-surface-900 dark:text-surface-100">Session Performance Ranking</h2>
+          <h2 class="font-heading font-bold text-lg text-surface-900 dark:text-surface-100">Sessions</h2>
           <p class="text-xs text-surface-500 dark:text-surface-400 mt-0.5">Ranked list of event sessions based on activity volume.</p>
         </div>
-        <span class="text-xs font-semibold px-2.5 py-1 bg-surface-100 dark:bg-surface-800 text-surface-600 dark:text-surface-400 rounded-full">{sessions.length} sessions</span>
-      </div>
-      {#if sessions.length === 0}
-        <div class="flex flex-col items-center justify-center py-12 text-surface-400"><Layers class="w-10 h-10 mb-3 opacity-30" /><p class="text-sm">No sessions found</p></div>
-      {:else}
-        <div class="overflow-x-auto">
-          <table class="w-full text-sm min-w-[600px] border-collapse">
-            <thead>
-              <tr class="border-b border-surface-200 dark:border-surface-800/80 text-surface-400 dark:text-surface-500">
-                <th class="text-left px-4 py-3 text-xs font-bold uppercase tracking-wider">Session</th>
-                <th class="text-right px-4 py-3 text-xs font-bold uppercase tracking-wider">Participants</th>
-                <th class="text-right px-4 py-3 text-xs font-bold uppercase tracking-wider">Responses</th>
-                <th class="text-right px-4 py-3 text-xs font-bold uppercase tracking-wider">Rating</th>
-                <th class="text-right px-4 py-3 text-xs font-bold uppercase tracking-wider">Engagement</th>
-                <th class="px-4 py-3"></th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-surface-100 dark:divide-surface-800/65">
-              {#each sessions as s}
-                {@const pct = maxPart > 0 ? Math.round((s.unique_participants / maxPart) * 100) : 0}
-                <tr class="hover:bg-surface-50 dark:hover:bg-surface-800/40 transition-colors cursor-pointer group" onclick={() => goto(`/dashboard/analytics/${eventId}/${s.session_id}`)}>
-                  <td class="px-4 py-4 font-semibold text-surface-800 dark:text-surface-200 max-w-[220px]"><span class="truncate block group-hover:text-brand-500 dark:group-hover:text-brand-400 transition-colors" title={s.title}>{s.title}</span></td>
-                  <td class="px-4 py-4 text-right tabular-nums text-surface-600 dark:text-surface-300 font-medium">{s.unique_participants}</td>
-                  <td class="px-4 py-4 text-right tabular-nums font-bold text-surface-900 dark:text-surface-100">{s.total_responses}</td>
-                  <td class="px-4 py-4 text-right">{#if s.avg_rating !== null}<span class="text-amber-400 text-xs font-bold">{ratingStars(s.avg_rating)}</span>{:else}<span class="text-surface-400">—</span>{/if}</td>
-                  <td class="px-4 py-4 text-right"><span class="inline-block px-2.5 py-1 rounded-full text-xs font-bold {engBadge(pct)}">{pct}%</span></td>
-                  <td class="px-4 py-4"><ChevronRight class="w-4 h-4 text-surface-400 group-hover:text-brand-500 group-hover:translate-x-0.5 transition-all ml-auto" /></td>
-                </tr>
-              {/each}
-            </tbody>
-          </table>
+        <div class="flex flex-wrap items-center gap-2.5">
+          <div class="relative">
+            <Search class="w-3.5 h-3.5 text-surface-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              type="search"
+              bind:value={sessionSearch}
+              placeholder="Search sessions or moderators…"
+              aria-label="Search sessions"
+              class="pl-8 pr-3 py-2 text-sm rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-800 text-surface-800 dark:text-surface-100 placeholder:text-surface-400 focus:outline-none focus:ring-2 focus:ring-brand-500/40 w-full sm:w-56"
+            />
+          </div>
+          <div class="relative">
+            <SlidersHorizontal class="w-3.5 h-3.5 text-surface-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <select
+              bind:value={sessionFilter}
+              aria-label="Filter sessions by engagement"
+              class="pl-8 pr-7 py-2 text-sm rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-800 text-surface-700 dark:text-surface-200 focus:outline-none focus:ring-2 focus:ring-brand-500/40 appearance-none"
+            >
+              <option value="all">All sessions</option>
+              <option value="high">High engagement</option>
+              <option value="low">Needs attention</option>
+            </select>
+          </div>
+          <span class="text-xs font-semibold px-2.5 py-2 bg-surface-100 dark:bg-surface-800 text-surface-600 dark:text-surface-400 rounded-full whitespace-nowrap">{filteredSessions.length} of {sessions.length}</span>
         </div>
+      </div>
+
+      {#if sessions.length === 0}
+        <div class="flex flex-col items-center justify-center py-16 text-center">
+          <div class="w-14 h-14 rounded-2xl bg-surface-100 dark:bg-surface-800 flex items-center justify-center mb-4">
+            <Inbox class="w-7 h-7 text-surface-400 dark:text-surface-600" />
+          </div>
+          <h3 class="font-heading font-bold text-base text-surface-800 dark:text-surface-100 mb-1">No sessions found</h3>
+          <p class="text-sm text-surface-500 dark:text-surface-400 max-w-xs">Create a session under this event to start collecting analytics.</p>
+        </div>
+      {:else if filteredSessions.length === 0}
+        <div class="flex flex-col items-center justify-center py-16 text-center">
+          <div class="w-14 h-14 rounded-2xl bg-surface-100 dark:bg-surface-800 flex items-center justify-center mb-4">
+            <Search class="w-7 h-7 text-surface-400 dark:text-surface-600" />
+          </div>
+          <h3 class="font-heading font-bold text-base text-surface-800 dark:text-surface-100 mb-1">No matching sessions</h3>
+          <p class="text-sm text-surface-500 dark:text-surface-400 max-w-xs">Try a different search term or reset the engagement filter.</p>
+        </div>
+      {:else}
+        <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {#each pagedSessions as s, i (s.session_id)}
+            {@const pct = sessionEngagementPct(s)}
+            <div in:fade={{ duration: 250, delay: i * 40 }} class="flex flex-col p-5 rounded-2xl border border-surface-200 dark:border-surface-800 bg-surface-50/40 dark:bg-surface-900/30 hover:border-brand-500/30 hover:shadow-md transition-all duration-200">
+              <div class="flex items-start justify-between gap-2 mb-3">
+                <h3 class="font-heading font-semibold text-sm text-surface-900 dark:text-surface-100 truncate flex-1" title={s.title}>{s.title}</h3>
+                <span class="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold flex-shrink-0 {engBadge(pct)}">{pct}%</span>
+              </div>
+              {#if s.moderator_name}
+                <div class="flex items-center gap-1.5 text-xs text-surface-500 dark:text-surface-400 mb-4">
+                  <User class="w-3.5 h-3.5" /> {s.moderator_name}
+                </div>
+              {:else}
+                <div class="mb-4"></div>
+              {/if}
+
+              <div class="grid grid-cols-2 gap-x-3 gap-y-2.5 text-xs mb-5 pb-5 border-b border-surface-200/70 dark:border-surface-800/70">
+                <div class="flex items-center gap-1.5 text-surface-600 dark:text-surface-300">
+                  <Users class="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
+                  <span class="font-bold tabular-nums text-surface-900 dark:text-surface-100">{s.unique_participants}</span> participants
+                </div>
+                <div class="flex items-center gap-1.5 text-surface-600 dark:text-surface-300">
+                  <MessageSquare class="w-3.5 h-3.5 text-violet-400 flex-shrink-0" />
+                  <span class="font-bold tabular-nums text-surface-900 dark:text-surface-100">{s.total_responses}</span> responses
+                </div>
+                <div class="flex items-center gap-1.5 text-surface-600 dark:text-surface-300">
+                  <Layers class="w-3.5 h-3.5 text-brand-400 flex-shrink-0" />
+                  <span class="font-bold tabular-nums text-surface-900 dark:text-surface-100">{s.slide_count}</span> slides
+                </div>
+                <div class="flex items-center gap-1.5 text-surface-600 dark:text-surface-300">
+                  {#if s.avg_rating !== null}
+                    <span class="text-amber-400 text-xs font-bold">{ratingStars(s.avg_rating)}</span>
+                  {:else}
+                    <span class="text-surface-400">No ratings</span>
+                  {/if}
+                </div>
+              </div>
+
+              <div class="flex items-center gap-2 mt-auto">
+                <button
+                  onclick={() => goto(`/dashboard/analytics/${eventId}/${s.session_id}`)}
+                  class="btn-primary text-xs px-3 py-2 flex-1 text-center"
+                >
+                  View Analytics
+                </button>
+                <button
+                  onclick={() => downloadSessionReport(s.session_id)}
+                  disabled={downloadingSessionId === s.session_id}
+                  aria-label={`Download report for ${s.title}`}
+                  class="btn-secondary text-xs px-3 py-2 flex items-center gap-1.5"
+                >
+                  <Download class="w-3.5 h-3.5" />
+                  {downloadingSessionId === s.session_id ? '…' : 'Report'}
+                </button>
+              </div>
+            </div>
+          {/each}
+        </div>
+
+        {#if totalSessionPages > 1}
+          <div class="flex items-center justify-between mt-6 pt-4 border-t border-surface-100 dark:border-surface-800/70">
+            <button
+              onclick={() => sessionPage = Math.max(1, sessionPage - 1)}
+              disabled={sessionPage <= 1}
+              aria-label="Previous page"
+              class="btn-secondary text-xs px-3 py-2 flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <ChevronLeft class="w-3.5 h-3.5" /> Prev
+            </button>
+            <span class="text-xs text-surface-500 dark:text-surface-400 font-medium">Page {sessionPage} of {totalSessionPages}</span>
+            <button
+              onclick={() => sessionPage = Math.min(totalSessionPages, sessionPage + 1)}
+              disabled={sessionPage >= totalSessionPages}
+              aria-label="Next page"
+              class="btn-secondary text-xs px-3 py-2 flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Next <ChevronRight class="w-3.5 h-3.5" />
+            </button>
+          </div>
+        {/if}
       {/if}
     </div>
   {/if}

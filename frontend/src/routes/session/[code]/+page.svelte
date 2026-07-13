@@ -3,6 +3,9 @@
   import { RforumWebSocket } from '$lib/ws';
   import { theme, toggleTheme } from '$lib/theme';
   import { onMount, onDestroy } from 'svelte';
+  import PageImageViewer from '$lib/components/PageImageViewer.svelte';
+  import PresentationLiveView from '$lib/components/timeline/PresentationLiveView.svelte';
+  import { upsertTimelineItemFromWs } from '$lib/timelineTypes';
   import {
     Orbit, Send, ChevronUp, BarChart3, MessageSquare, AlignLeft, FileText, CheckCircle2, Cloud, Sun, Moon
   } from 'lucide-svelte';
@@ -12,6 +15,16 @@
   let session: any = $state(null);
   let activeSlide: any = $state(null);
   let responses: any[] = $state([]);
+  // Presentation Timeline (additive — only populated when session.presentation_id is set)
+  let presentationTimeline: any = $state(null);
+  let timelineResponses: any[] = $state([]);
+  const activeTimelineItem = $derived(
+    presentationTimeline
+      ? [...(presentationTimeline.items || [])].sort((a: any, b: any) => a.order - b.order)
+          .find((i: any) => i.id === presentationTimeline.active_timeline_item_id) || null
+      : null
+  );
+  const hasActiveContent = $derived(session?.presentation_id ? !!activeTimelineItem : !!activeSlide);
   let ws: RforumWebSocket | null = $state(null);
   let error = $state('');
   let loading = $state(true);
@@ -23,6 +36,42 @@
   let feedbackRating = $state(5);
   let actionError = $state('');
   let thankYou = $state(false);
+  let isSubmitting = $state(false);
+
+  // "Already responded" is persisted per-guest so a page refresh doesn't
+  // resurface a fresh voting form for a poll/feedback slide already answered —
+  // mirrors the InteractionView.svelte presentation-timeline equivalent.
+  function respondedStorageKey() {
+    return `rforum_responded_${guestId}`;
+  }
+  function getRespondedMap(): Record<string, string> {
+    if (!guestId || typeof localStorage === 'undefined') return {};
+    try {
+      return JSON.parse(localStorage.getItem(respondedStorageKey()) || '{}');
+    } catch {
+      return {};
+    }
+  }
+  function markResponded(slideId: string, value: string) {
+    if (!guestId || typeof localStorage === 'undefined') return;
+    try {
+      const map = getRespondedMap();
+      map[slideId] = value;
+      localStorage.setItem(respondedStorageKey(), JSON.stringify(map));
+    } catch {
+      // localStorage unavailable — non-fatal, just skip persistence
+    }
+  }
+  function restoreSubmittedState(slide: any) {
+    if (!slide || (slide.type !== 'POLL' && slide.type !== 'FEEDBACK')) {
+      submitted = false;
+      selectedOption = '';
+      return;
+    }
+    const prior = getRespondedMap()[slide.id];
+    submitted = prior !== undefined;
+    selectedOption = slide.type === 'POLL' && prior !== undefined ? prior : '';
+  }
 
   // Message queue to prevent race conditions
   let messageQueue: any[] = [];
@@ -112,7 +161,17 @@
       const active = normalizeSlide(session.slides?.find((s: any) => s.is_active));
       if (active) {
         activeSlide = active;
+        restoreSubmittedState(active);
         responses = await listResponses(active.id);
+      }
+
+      if (session.presentation_id && session.timeline) {
+        presentationTimeline = session.timeline;
+        const items = [...(presentationTimeline.items || [])].sort((a: any, b: any) => a.order - b.order);
+        const activeItem = items.find((i: any) => i.id === presentationTimeline.active_timeline_item_id);
+        if (activeItem?.slide) {
+          timelineResponses = await listResponses(activeItem.slide.id);
+        }
       }
 
       // Connect WebSocket
@@ -136,6 +195,28 @@
   });
 
   async function handleWsMessage(msg: any) {
+    // Presentation-timeline activation — distinct payload shape from the legacy
+    // slide_change (timeline_item_id instead of slide_id), same event name per design.
+    if (msg.event === 'slide_change' && msg.data?.timeline_item_id !== undefined) {
+      if (presentationTimeline) {
+        presentationTimeline = {
+          ...presentationTimeline,
+          active_timeline_item_id: msg.data.timeline_item_id,
+          items: upsertTimelineItemFromWs(presentationTimeline.items || [], msg.data)
+        };
+      }
+      if (msg.data.slide) {
+        try {
+          timelineResponses = await listResponses(msg.data.slide.id);
+        } catch (err) {
+          console.error('Failed to load responses for new timeline item:', err);
+          timelineResponses = [];
+        }
+      } else {
+        timelineResponses = [];
+      }
+      return;
+    }
     if (msg.event === 'slide_change') {
       if (msg.data?.slide) {
         // Use the slide data embedded in the message — no HTTP round-trip needed
@@ -143,8 +224,7 @@
         if ('file_url' in cj) { cj.has_file = true; delete cj.file_url; }
         delete cj.file_name;
         activeSlide = normalizeSlide({ ...msg.data.slide, content_json: cj });
-        submitted = false;
-        selectedOption = '';
+        restoreSubmittedState(activeSlide);
         inputValue = '';
         // Always reload responses for the new slide to prevent stale data
         try {
@@ -159,8 +239,7 @@
           session = await joinSession(code);
           const active = normalizeSlide(session.slides?.find((s: any) => s.is_active));
           activeSlide = active || null;
-          submitted = false;
-          selectedOption = '';
+          restoreSubmittedState(activeSlide);
           inputValue = '';
           if (active) {
             responses = await listResponses(active.id);
@@ -181,9 +260,18 @@
           responses = [...responses, msg.data];
         }
       }
+      if (msg.data && activeTimelineItem?.slide && msg.data.slide_id === activeTimelineItem.slide.id) {
+        const timelineExists = timelineResponses.some((r) => r.id === msg.data.id);
+        if (!timelineExists) {
+          timelineResponses = [...timelineResponses, msg.data];
+        }
+      }
     } else if (msg.event === 'upvote') {
       // Update the response with new upvote count
       responses = responses.map((r) =>
+        r.id === msg.data.id ? { ...r, upvotes: msg.data.upvotes } : r
+      );
+      timelineResponses = timelineResponses.map((r) =>
         r.id === msg.data.id ? { ...r, upvotes: msg.data.upvotes } : r
       );
     } else if (msg.event === 'page_change') {
@@ -206,10 +294,12 @@
   }
 
   async function handlePollVote(option: string) {
+    if (submitted) return;
     selectedOption = option;
     submitted = true;
     try {
       await submitResponse(activeSlide.id, option, guestId);
+      markResponded(activeSlide.id, option);
       // No need to manually broadcast - backend handles publishing via Redis
     } catch (err: any) {
       actionError = err?.message || 'Could not submit vote';
@@ -218,10 +308,9 @@
   }
 
   async function handleTextSubmit() {
+    if (isSubmitting) return;
     if (!inputValue.trim()) return;
-    if (activeSlide.type === 'POLL') {
-      submitted = true;
-    }
+    isSubmitting = true;
     try {
       // Trim name and default to "Guest" if empty
       const trimmedName = guestName.trim() || "Guest";
@@ -237,8 +326,7 @@
       actionError = '';
       if (activeSlide.type === 'FEEDBACK') {
         submitted = true;
-      } else if (activeSlide.type !== 'POLL') {
-        submitted = false;
+        markResponded(activeSlide.id, String(feedbackRating));
       }
       if (activeSlide.type === 'QNA' || activeSlide.type === 'WORD_CLOUD') {
         guestName = trimmedName;
@@ -248,6 +336,8 @@
     } catch (err: any) {
       actionError = err?.message || 'Could not submit';
       submitted = false;
+    } finally {
+      isSubmitting = false;
     }
   }
 
@@ -324,12 +414,12 @@
 
     {#if loading}
       <p class="text-slate-500">Connecting...</p>
-    {:else if error && !activeSlide}
+    {:else if error && !hasActiveContent}
       <div class="text-center">
-        <p class="text-red-500 text-lg mb-2">{error}</p>
+        <p class="text-red-500 text-lg mb-2" role="alert" aria-live="polite">{error}</p>
         <a href="/" class="text-purple-600 hover:underline text-sm">Go home</a>
       </div>
-    {:else if !activeSlide}
+    {:else if !hasActiveContent}
       <div class="text-center text-slate-500 animate-fade-in max-w-sm w-full mt-8">
         <Orbit class="w-16 h-16 mx-auto mb-3 text-purple-400 animate-pulse-live" />
         {#if session?.event?.title}
@@ -352,6 +442,16 @@
           </div>
         {/if}
       </div>
+    {:else if session?.presentation_id}
+      <div class="w-full max-w-lg animate-fade-in mt-6">
+        <PresentationLiveView
+          activeItem={activeTimelineItem}
+          presentationId={session.presentation_id}
+          responses={timelineResponses}
+          variant="guest"
+          {guestId}
+        />
+      </div>
     {:else}
       <div class="w-full max-w-lg animate-fade-in mt-6">
         <!-- Poll Slide -->
@@ -362,7 +462,7 @@
           </div>
 
           {#if submitted}
-            <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 text-center animate-slide-up">
+            <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 text-center animate-slide-up" role="status" aria-live="polite">
               <CheckCircle2 class="w-12 h-12 text-emerald-500 mx-auto mb-3" />
               <p class="font-semibold text-slate-900 dark:text-white">Vote submitted!</p>
               <p class="text-sm text-slate-500 mt-1">You chose: {selectedOption}</p>
@@ -372,6 +472,7 @@
               {#each activeSlide.content_json?.options || [] as option}
                 <button
                   onclick={() => handlePollVote(option)}
+                  aria-pressed={selectedOption === option}
                   class="w-full rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4
                          hover:border-purple-400 dark:hover:border-purple-500/50 hover:bg-purple-50 dark:hover:bg-purple-500/5
                          transition-all duration-200 text-left text-lg font-medium text-slate-900 dark:text-white
@@ -405,21 +506,21 @@
                 placeholder="Type your question..."
                 class="flex-1 rounded-xl px-4 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition"
               />
-              <button type="submit" class="btn-primary p-2">
+              <button type="submit" class="btn-primary p-2" disabled={isSubmitting} aria-label="Submit question">
                 <Send class="w-5 h-5" />
               </button>
             </div>
           </form>
 
           {#if thankYou}
-            <div class="flex items-center justify-center gap-2 mb-4 text-sm text-emerald-500 animate-fade-in">
+            <div class="flex items-center justify-center gap-2 mb-4 text-sm text-emerald-500 animate-fade-in" role="status" aria-live="polite">
               <CheckCircle2 class="w-4 h-4" />
               Thanks for submitting your question!
             </div>
           {/if}
 
           {#if actionError}
-            <p class="text-red-500 text-sm mb-4 text-center">{actionError}</p>
+            <p class="text-red-500 text-sm mb-4 text-center" role="alert">{actionError}</p>
           {/if}
 
           <div class="space-y-3 max-h-[50vh] overflow-y-auto">
@@ -427,6 +528,7 @@
               <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 flex items-start gap-3 animate-slide-up">
                 <button
                   onclick={() => handleUpvote(response.id)}
+                  aria-label={`Upvote (${response.upvotes} votes)`}
                   class="flex flex-col items-center text-slate-400 hover:text-purple-600 transition-colors shrink-0"
                 >
                   <ChevronUp class="w-5 h-5" />
@@ -451,7 +553,7 @@
           </div>
 
           {#if submitted}
-            <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 text-center animate-slide-up">
+            <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 text-center animate-slide-up" role="status" aria-live="polite">
               <CheckCircle2 class="w-12 h-12 text-emerald-500 mx-auto mb-3" />
               <p class="font-semibold text-slate-900 dark:text-white">Thanks for your feedback!</p>
             </div>
@@ -480,7 +582,7 @@
                   class="w-24 rounded-xl px-4 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition"
                 />
               </div>
-              <button type="submit" class="btn-primary w-full flex items-center justify-center gap-2">
+              <button type="submit" class="btn-primary w-full flex items-center justify-center gap-2" disabled={isSubmitting}>
                 <Send class="w-4 h-4" />
                 Submit
               </button>
@@ -509,21 +611,21 @@
                 placeholder="Type your answer..."
                 class="flex-1 rounded-xl px-4 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition"
               />
-              <button type="submit" class="btn-primary p-2">
+              <button type="submit" class="btn-primary p-2" disabled={isSubmitting} aria-label="Submit answer">
                 <Send class="w-5 h-5" />
               </button>
             </div>
           </form>
 
           {#if thankYou}
-            <div class="flex items-center justify-center gap-2 text-sm text-emerald-500 animate-fade-in">
+            <div class="flex items-center justify-center gap-2 text-sm text-emerald-500 animate-fade-in" role="status" aria-live="polite">
               <CheckCircle2 class="w-4 h-4" />
               Thanks for your answer!
             </div>
           {/if}
 
           {#if actionError}
-            <p class="text-red-500 text-sm text-center">{actionError}</p>
+            <p class="text-red-500 text-sm text-center" role="alert">{actionError}</p>
           {/if}
         {/if}
 
@@ -534,16 +636,14 @@
             <h1 class="text-2xl font-bold text-slate-900 dark:text-white mb-4">{activeSlide.content_json?.title}</h1>
             <p class="text-slate-600 dark:text-slate-300 leading-relaxed">{activeSlide.content_json?.body}</p>
               {#if (activeSlide.content_json?.file_url || activeSlide.content_json?.has_file) && session?.id}
-                {#key activeSlide.content_json?.file_page}
-                  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-                  <img
-                    alt={`Slide page ${activeSlide.content_json?.file_page || 1}`}
+                <div style="-webkit-touch-callout: none; -webkit-user-select: none;">
+                  <PageImageViewer
                     src={getPageImageUrl(session.id, activeSlide.id, activeSlide.content_json?.file_page || 1)}
-                    class="w-full mt-6 rounded-xl border border-slate-200 dark:border-slate-800 select-none pointer-events-none"
-                    draggable="false"
-                    style="-webkit-touch-callout: none; -webkit-user-select: none;"
+                    page={activeSlide.content_json?.file_page || 1}
+                    alt={`Slide page ${activeSlide.content_json?.file_page || 1}`}
+                    imgClass="w-full mt-6 rounded-xl border border-slate-200 dark:border-slate-800 select-none pointer-events-none"
                   />
-                {/key}
+                </div>
                 <div class="text-xs text-slate-500 mt-2">Page {activeSlide.content_json?.file_page || 1}{activeSlide.content_json?.total_pages ? ` / ${activeSlide.content_json.total_pages}` : ''}</div>
               {/if}
           </div>

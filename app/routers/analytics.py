@@ -239,8 +239,10 @@ async def download_event_analytics(
         select(
             Session.id,
             Session.title,
+            Session.moderator_name,
             func.count(Response.id).label('total_responses'),
             func.count(func.distinct(Response.guest_identifier)).label('unique_participants'),
+            func.count(func.distinct(Slide.id)).label('slide_count'),
             func.avg(
                 case(
                     (Slide.type == SlideType.FEEDBACK, Response.rating),
@@ -252,7 +254,7 @@ async def download_event_analytics(
         .outerjoin(Slide, Slide.session_id == Session.id)
         .outerjoin(Response, Response.slide_id == Slide.id)
         .where(Session.event_id == event_id)
-        .group_by(Session.id, Session.title)
+        .group_by(Session.id, Session.title, Session.moderator_name)
         .order_by(func.count(Response.id).desc())
     )
     res = await db.execute(session_eng_q)
@@ -274,8 +276,10 @@ async def download_event_analytics(
             {
                 'session_id': str(row.id),
                 'title': row.title,
+                'moderator_name': row.moderator_name,
                 'total_responses': int(row.total_responses or 0),
                 'unique_participants': int(row.unique_participants or 0),
+                'slide_count': int(row.slide_count or 0),
                 'avg_rating': float(row.avg_rating) if row.avg_rating is not None else None,
             }
             for row in session_rows

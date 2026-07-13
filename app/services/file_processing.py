@@ -4,6 +4,7 @@ File processing service — upload validation, MIME detection, PDF conversion, p
 All functions are pure (no FastAPI imports, no DB access) so they are independently testable.
 Routers import from here; they convert ValueError → HTTPException.
 """
+import hashlib
 import logging
 import os
 import shutil
@@ -92,6 +93,10 @@ class ConversionResult:
     output_path: str | None = None
     converted_type: str | None = None
     warnings: list[str] = field(default_factory=list)
+    # Populated only by convert_to_pdf_bytes() — the bytes-oriented sibling of
+    # convert_to_pdf_if_needed() used by the storage-backed presentation
+    # pipeline, which has no on-disk output_path to read from.
+    output_bytes: bytes | None = None
 
 
 @dataclass
@@ -137,6 +142,31 @@ def detect_actual_file_type(content: bytes, filename: str = "") -> str:
             return canonical
 
     return detected
+
+
+def check_content_length(content_length_header: str | None, max_bytes: int) -> None:
+    """
+    Reject an oversized upload using the client-declared Content-Length header,
+    before the body is ever read into memory. Best-effort: a client that omits
+    or lies about this header still gets caught by validate_upload's post-read
+    size check — this just avoids buffering/hashing/converting an upload that's
+    already known (from its declared size) to be doomed to fail.
+
+    Raises ValueError, same contract as validate_upload, so callers can share
+    the same try/except ValueError -> HTTPException(400) translation.
+    """
+    if content_length_header is None:
+        return
+    try:
+        declared_bytes = int(content_length_header)
+    except ValueError:
+        return
+    if declared_bytes > max_bytes:
+        limit_mb = max_bytes // (1024 * 1024)
+        declared_mb = declared_bytes / (1024 * 1024)
+        raise ValueError(
+            f"File size {declared_mb:.1f} MB exceeds the {limit_mb} MB limit."
+        )
 
 
 def validate_upload(
@@ -346,6 +376,199 @@ def extract_total_pages(file_path: str) -> tuple[int, list[str]]:
                 pass
 
     return 1, warnings
+
+
+def render_all_pages(file_path: str, output_dir: str, basename: str) -> tuple[list[tuple[str, str]], list[str]]:
+    """
+    Render every page of `file_path` to a full-res PNG and a thumbnail PNG,
+    written into `output_dir` as "{basename}_p{n}.png" / "{basename}_p{n}_thumb.png".
+
+    Returns (pages, warnings) where pages is an ordered list of
+    (image_path, thumbnail_path) tuples, one per page (1-indexed order).
+    Never raises; returns ([], [warning]) on failure so callers can mark the
+    Presentation as FAILED rather than crash the request.
+    """
+    warnings: list[str] = []
+
+    if not os.path.exists(file_path):
+        msg = f"File not found, cannot render pages: '{file_path}'"
+        warnings.append(msg)
+        logger.warning(msg)
+        return [], warnings
+
+    doc = None
+    pages: list[tuple[str, str]] = []
+    try:
+        doc = fitz.open(file_path)
+        os.makedirs(output_dir, exist_ok=True)
+        for i, page in enumerate(doc, start=1):
+            image_path = os.path.join(output_dir, f"{basename}_p{i}.png")
+            thumb_path = os.path.join(output_dir, f"{basename}_p{i}_thumb.png")
+
+            full_pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
+            full_pix.save(image_path)
+
+            thumb_pix = page.get_pixmap(matrix=fitz.Matrix(0.4, 0.4))
+            thumb_pix.save(thumb_path)
+
+            pages.append((image_path, thumb_path))
+
+    except fitz.EmptyFileError:
+        msg = "File is empty and cannot be opened for page rendering."
+        warnings.append(msg)
+        logger.warning("Empty file at '%s': %s", file_path, msg)
+        return [], warnings
+
+    except fitz.FileDataError as exc:
+        msg = f"File may be corrupted or password-protected: {exc}"
+        warnings.append(msg)
+        logger.warning("FileDataError for '%s': %s", file_path, exc)
+        return [], warnings
+
+    except Exception as exc:
+        msg = f"Unexpected error rendering pages: {exc}"
+        warnings.append(msg)
+        logger.warning("render_all_pages failed for '%s'", file_path, exc_info=True)
+        return [], warnings
+
+    finally:
+        if doc is not None:
+            try:
+                doc.close()
+            except Exception:
+                pass
+
+    return pages, warnings
+
+
+# ── Bytes-oriented API (storage-backed Presentation pipeline) ──────────────────
+#
+# The functions above work on disk paths and are kept untouched — they back
+# the legacy per-slide upload flow (slides.py / session_assets.py), which is
+# out of scope for the storage redesign. Everything below operates purely on
+# bytes in / bytes out so callers never assume a local filesystem: the
+# StorageBackend (app/storage/) is the only thing that touches disk.
+
+def compute_checksum(content: bytes) -> str:
+    """sha256 hex digest of raw upload bytes — used for duplicate-upload detection."""
+    return hashlib.sha256(content).hexdigest()
+
+
+def convert_to_pdf_bytes(content: bytes, ext: str) -> ConversionResult:
+    """
+    Bytes-in/bytes-out sibling of convert_to_pdf_if_needed(): writes `content`
+    to a scratch temp file, delegates to the existing (tested) LibreOffice
+    invocation, reads the result back into memory, and cleans up — no
+    duplicated conversion logic, no bytes ever persisted outside a temp dir.
+    """
+    with tempfile.TemporaryDirectory(prefix="rforum_convert_") as tmpdir:
+        input_path = os.path.join(tmpdir, f"input{ext}")
+        with open(input_path, "wb") as handle:
+            handle.write(content)
+
+        result = convert_to_pdf_if_needed(input_path, ext)
+        if result.success and result.output_path and os.path.exists(result.output_path):
+            with open(result.output_path, "rb") as handle:
+                result.output_bytes = handle.read()
+        return result
+
+
+def extract_page_count_and_size(content: bytes, ext: str) -> tuple[int, tuple[float, float], list[str]]:
+    """
+    Bytes-oriented sibling of extract_total_pages() that also returns the
+    first page's (width, height) in points — cheap (no rendering), used to
+    populate Presentation metadata without touching disk.
+
+    Returns (page_count, (width, height), warnings). Never raises; falls back
+    to (1, (0.0, 0.0), [warning]) on any failure.
+    """
+    warnings: list[str] = []
+    filetype = ext.lstrip(".")
+    doc = None
+    try:
+        doc = fitz.open(stream=content, filetype=filetype)
+        total = len(doc)
+        if total < 1:
+            warnings.append(f"File opened but reported {total} pages; defaulting to 1.")
+            return 1, (0.0, 0.0), warnings
+        rect = doc[0].rect
+        return total, (rect.width, rect.height), warnings
+    except fitz.EmptyFileError:
+        warnings.append("File is empty and cannot be opened for page counting.")
+    except fitz.FileDataError as exc:
+        warnings.append(f"File may be corrupted or password-protected: {exc}")
+    except Exception as exc:
+        warnings.append(f"Unexpected error counting pages: {exc}")
+        logger.warning("extract_page_count_and_size failed", exc_info=True)
+    finally:
+        if doc is not None:
+            try:
+                doc.close()
+            except Exception:
+                pass
+    return 1, (0.0, 0.0), warnings
+
+
+def _render_page_bytes(content: bytes, ext: str, page_number: int, scale: float) -> bytes:
+    """Render one 1-indexed page of `content` to WebP bytes at `scale`. Raises on failure."""
+    filetype = ext.lstrip(".")
+    doc = fitz.open(stream=content, filetype=filetype)
+    try:
+        if page_number < 1 or page_number > len(doc):
+            raise ValueError(f"page_number {page_number} out of range (1..{len(doc)})")
+        page = doc[page_number - 1]
+        pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale))
+        return pix.pil_tobytes(format="WEBP", quality=82)
+    finally:
+        doc.close()
+
+
+def render_thumbnail(content: bytes, ext: str, page_number: int) -> bytes:
+    """Render one page as a small WebP thumbnail (0.4x scale)."""
+    return _render_page_bytes(content, ext, page_number, scale=0.4)
+
+
+def render_page(content: bytes, ext: str, page_number: int) -> bytes:
+    """Render one page as a full-resolution WebP image (2x scale)."""
+    return _render_page_bytes(content, ext, page_number, scale=2.0)
+
+
+def render_all_thumbnails(content: bytes, ext: str) -> tuple[list[bytes], list[str]]:
+    """
+    Render every page of `content` to a small WebP thumbnail. Used only at
+    upload time — full-resolution pages are rendered lazily on first view
+    (see app/routers/presentations.py::_serve_page_file) rather than here,
+    so upload stays fast even for 100+ page decks.
+
+    Returns (thumbnails, warnings), one thumbnail per page in order. Returns
+    ([], [warning]) on failure so the caller can reject the upload.
+    """
+    warnings: list[str] = []
+    filetype = ext.lstrip(".")
+    doc = None
+    thumbs: list[bytes] = []
+    try:
+        doc = fitz.open(stream=content, filetype=filetype)
+        for page in doc:
+            pix = page.get_pixmap(matrix=fitz.Matrix(0.4, 0.4))
+            thumbs.append(pix.pil_tobytes(format="WEBP", quality=82))
+        return thumbs, warnings
+    except fitz.EmptyFileError:
+        warnings.append("File is empty and cannot be opened for page rendering.")
+        return [], warnings
+    except fitz.FileDataError as exc:
+        warnings.append(f"File may be corrupted or password-protected: {exc}")
+        return [], warnings
+    except Exception as exc:
+        warnings.append(f"Unexpected error rendering thumbnails: {exc}")
+        logger.warning("render_all_thumbnails failed", exc_info=True)
+        return [], warnings
+    finally:
+        if doc is not None:
+            try:
+                doc.close()
+            except Exception:
+                pass
 
 
 def libreoffice_status() -> dict:

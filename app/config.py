@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     UPLOAD_ALLOWED_EXTENSIONS: list[str] = [
         ".pdf", ".ppt", ".pptx", ".doc", ".docx", ".txt", ".odp", ".odt"
     ]
+    # Presentation storage
+    STORAGE_BACKEND: str = "local"  # "local" today; see app/storage/
+    STORAGE_ROOT: str = "uploads"
+    PRESENTATION_ORPHAN_RETENTION_DAYS: int = 7
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 

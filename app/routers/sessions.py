@@ -9,8 +9,9 @@ from sqlalchemy.orm import selectinload
 
 from app.auth import get_current_user
 from app.database import get_db
-from app.models import Event, Session, User, UserRole
-from app.schemas import SessionCreate, SessionOut, SessionUpdate, SessionWithSlides
+from app.models import Event, PresentationTimeline, PresentationTimelineItem, Session, User, UserRole
+from app.schemas import SessionCreate, SessionOut, SessionUpdate, SessionWithSlides, TimelineOut
+from app.services.guest_view import strip_slide_content_json
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
@@ -160,11 +161,19 @@ async def delete_session(
 
 
 # ── Guest endpoint (no auth) ─────────────────────────
-@router.get("/join/{code}", response_model=SessionWithSlides)
+@router.get("/join/{code}")
 async def join_session(code: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(Session)
-        .options(selectinload(Session.slides))
+        .options(
+            selectinload(Session.slides),
+            selectinload(Session.timeline)
+            .selectinload(PresentationTimeline.items)
+            .selectinload(PresentationTimelineItem.slide),
+            selectinload(Session.timeline)
+            .selectinload(PresentationTimeline.items)
+            .selectinload(PresentationTimelineItem.page),
+        )
         .where(Session.unique_code == code, Session.is_live == True)
     )
     session = result.unique().scalar_one_or_none()
@@ -174,10 +183,17 @@ async def join_session(code: str, db: AsyncSession = Depends(get_db)):
     # Strip private file paths from guest-facing response
     data = SessionWithSlides.model_validate(session)
     for s in data.slides:
-        cj = dict(s.content_json)
-        if "file_url" in cj:
-            cj["has_file"] = True
-            del cj["file_url"]
-        cj.pop("file_name", None)
-        s.content_json = cj
-    return data
+        s.content_json = strip_slide_content_json(s.content_json)
+
+    payload = data.model_dump(mode="json")
+
+    if session.presentation_id and session.timeline:
+        timeline_out = TimelineOut.model_validate(session.timeline)
+        for item in timeline_out.items:
+            if item.slide is not None:
+                item.slide.content_json = strip_slide_content_json(item.slide.content_json)
+        payload["timeline"] = timeline_out.model_dump(mode="json")
+    else:
+        payload["timeline"] = None
+
+    return payload

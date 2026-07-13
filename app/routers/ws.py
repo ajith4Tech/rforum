@@ -1,9 +1,11 @@
 import asyncio
 import json
+import logging
 import uuid
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from redis.asyncio import Redis
 
+logger = logging.getLogger(__name__)
 router = APIRouter(tags=["websocket"])
 
 # Unique identifier for this process to avoid re-broadcasting our own Redis messages
@@ -113,8 +115,8 @@ async def websocket_endpoint(websocket: WebSocket, session_code: str):
                 await redis.publish(f"session:{session_code}", json.dumps(message))
             except WebSocketDisconnect:
                 break
-            except Exception as e:
-                print(f"[WS] Error: {e}")
+            except Exception:
+                logger.exception("WebSocket handler error for session %s", session_code)
                 break
     finally:
         await manager.disconnect(session_code, websocket)
