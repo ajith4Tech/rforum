@@ -14,6 +14,7 @@
   let {
     activeItem,
     presentationId,
+    sessionCode = '',
     responses = [],
     variant = 'guest',
     guestId = '',
@@ -21,6 +22,8 @@
   }: {
     activeItem: any;
     presentationId: string;
+    /** The session's join code — proves to the unauthenticated page-image endpoint that this guest/screen belongs to a live session this presentation is attached to. */
+    sessionCode?: string;
     responses?: any[];
     variant?: 'guest' | 'screen';
     guestId?: string;
@@ -38,7 +41,7 @@
     {#if activeItem?.item_type === 'PAGE' && activeItem.page}
       <div class={variant === 'guest' ? '' : 'w-full flex flex-col items-center gap-4 max-h-[70vh]'} style={variant === 'guest' ? '-webkit-touch-callout: none; -webkit-user-select: none;' : ''}>
         <PageImageViewer
-          src={getPresentationPageImageUrl(presentationId, activeItem.page.page_number)}
+          src={getPresentationPageImageUrl(presentationId, activeItem.page.page_number, sessionCode)}
           page={activeItem.page.page_number}
           alt={`Page ${activeItem.page.page_number}`}
           imgClass={pageImgClass}

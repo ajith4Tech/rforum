@@ -19,6 +19,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, status
 from fastapi.responses import StreamingResponse
+from jose import JWTError, jwt
 from redis.asyncio import Redis
 from sqlalchemy import delete, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,6 +31,7 @@ from app.auth import get_current_user
 from app.config import get_settings
 from app.database import get_db
 from app.models import (
+    Event,
     Presentation,
     PresentationPage,
     PresentationSourceFormat,
@@ -772,6 +774,14 @@ async def list_my_presentations(
             event_uuid = uuid.UUID(event_id)
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid event ID format")
+
+        event_query = select(Event.id).where(Event.id == event_uuid)
+        if user.role != UserRole.SUPER_ADMIN:
+            event_query = event_query.where(Event.owner_id == user.id)
+        event_exists = (await db.execute(event_query)).scalar_one_or_none()
+        if event_exists is None:
+            raise HTTPException(status_code=404, detail="Event not found")
+
         same_event_presentation_ids = select(Session.presentation_id).where(
             Session.event_id == event_uuid, Session.presentation_id.isnot(None)
         )
@@ -1143,16 +1153,73 @@ async def activate_timeline_item(
 
 
 # ── Page images (no-auth — guests view rendered pages, never the raw file) ──
+#
+# These routes have no Depends(get_current_user) so guests can view them without
+# logging in, but that means presentation_id alone must not be enough to view
+# arbitrary content — callers must additionally prove either ownership (token)
+# or audience membership in a live session this exact presentation is attached
+# to (code == that session's unique_code), mirroring how sessions.py's guest
+# join endpoint already gates access on unique_code + is_live.
+
+async def _authorize_presentation_asset(
+    pres_uuid: uuid.UUID, token: str | None, code: str | None, db: AsyncSession
+) -> None:
+    if token:
+        try:
+            settings = get_settings()
+            payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+            user_id = payload.get("sub")
+            if user_id:
+                result = await db.execute(select(User).where(User.id == uuid.UUID(user_id)))
+                user = result.scalar_one_or_none()
+                if user is not None:
+                    presentation = await db.get(Presentation, pres_uuid)
+                    if presentation is not None and (
+                        user.role == UserRole.SUPER_ADMIN or presentation.owner_id == user.id
+                    ):
+                        return
+        except (JWTError, ValueError):
+            pass
+    if code:
+        result = await db.execute(
+            select(Session).where(
+                Session.unique_code == code,
+                Session.presentation_id == pres_uuid,
+                Session.is_live.is_(True),
+            )
+        )
+        if result.scalar_one_or_none() is not None:
+            return
+    raise HTTPException(status_code=401, detail="Not authorized to view this presentation")
+
 
 @router.get("/api/presentations/{presentation_id}/pages/{page_number}/image")
 async def get_presentation_page_image(
-    presentation_id: str, page_number: int, db: AsyncSession = Depends(get_db)
+    presentation_id: str,
+    page_number: int,
+    token: str | None = None,
+    code: str | None = None,
+    db: AsyncSession = Depends(get_db),
 ):
+    try:
+        pres_uuid = uuid.UUID(presentation_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid presentation ID format")
+    await _authorize_presentation_asset(pres_uuid, token, code, db)
     return await _serve_page_file(presentation_id, page_number, thumbnail=False, db=db)
 
 
 @router.get("/api/presentations/{presentation_id}/pages/{page_number}/thumbnail")
 async def get_presentation_page_thumbnail(
-    presentation_id: str, page_number: int, db: AsyncSession = Depends(get_db)
+    presentation_id: str,
+    page_number: int,
+    token: str | None = None,
+    code: str | None = None,
+    db: AsyncSession = Depends(get_db),
 ):
+    try:
+        pres_uuid = uuid.UUID(presentation_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid presentation ID format")
+    await _authorize_presentation_asset(pres_uuid, token, code, db)
     return await _serve_page_file(presentation_id, page_number, thumbnail=True, db=db)

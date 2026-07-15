@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     STORAGE_BACKEND: str = "local"  # "local" today; see app/storage/
     STORAGE_ROOT: str = "uploads"
     PRESENTATION_ORPHAN_RETENTION_DAYS: int = 7
+    # Pagination defaults for list endpoints (Events, Sessions)
+    DEFAULT_PAGE_SIZE: int = 20
+    MAX_PAGE_SIZE: int = 100
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 

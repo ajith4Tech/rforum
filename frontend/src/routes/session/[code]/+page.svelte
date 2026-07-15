@@ -447,6 +447,7 @@
         <PresentationLiveView
           activeItem={activeTimelineItem}
           presentationId={session.presentation_id}
+          sessionCode={code}
           responses={timelineResponses}
           variant="guest"
           {guestId}
@@ -638,7 +639,7 @@
               {#if (activeSlide.content_json?.file_url || activeSlide.content_json?.has_file) && session?.id}
                 <div style="-webkit-touch-callout: none; -webkit-user-select: none;">
                   <PageImageViewer
-                    src={getPageImageUrl(session.id, activeSlide.id, activeSlide.content_json?.file_page || 1)}
+                    src={getPageImageUrl(session.id, activeSlide.id, activeSlide.content_json?.file_page || 1, code)}
                     page={activeSlide.content_json?.file_page || 1}
                     alt={`Slide page ${activeSlide.content_json?.file_page || 1}`}
                     imgClass="w-full mt-6 rounded-xl border border-slate-200 dark:border-slate-800 select-none pointer-events-none"

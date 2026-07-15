@@ -7,6 +7,8 @@
   } from '$lib/api';
   import { RforumWebSocket } from '$lib/ws';
   import type { ConnectionStatus as WsStatus } from '$lib/ws';
+  import { token } from '$lib/stores';
+  import { get } from 'svelte/store';
   import { onMount, onDestroy } from 'svelte';
   import {
     BarChart3,
@@ -136,8 +138,9 @@
       const savedNotes = localStorage.getItem(`rforum_notes_${sessionId}`);
       if (savedNotes !== null) moderatorNotes = savedNotes;
 
-      // Connect WebSocket
-      ws = new RforumWebSocket(session.unique_code);
+      // Connect WebSocket — pass our JWT so the server recognizes us as this
+      // session's moderator (required to send slide_change/page_change/session_update)
+      ws = new RforumWebSocket(session.unique_code, { token: get(token) || undefined });
       ws.onStatusChange((s) => { wsStatus = s; });
       ws.connect();
       ws.onMessage(handleWsMessage);

@@ -4,8 +4,16 @@ export type MessageHandler = (data: any) => void;
 export type ConnectionStatus = 'connected' | 'disconnected' | 'reconnecting';
 export type StatusHandler = (status: ConnectionStatus) => void;
 
+export interface WsConnectOptions {
+  /** JWT of the authenticated session owner — identifies this connection as a moderator. */
+  token?: string;
+  /** Marks this connection as a read-only projector/screen client. */
+  role?: 'screen';
+}
+
 export class RforumWebSocket {
   private code: string;
+  private opts: WsConnectOptions;
   private socket: WebSocket | null = null;
   private reconnectBackoff = 500;
   private handler: MessageHandler | null = null;
@@ -15,8 +23,9 @@ export class RforumWebSocket {
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   public status: ConnectionStatus = 'disconnected';
 
-  constructor(code: string) {
+  constructor(code: string, opts: WsConnectOptions = {}) {
     this.code = code;
+    this.opts = opts;
   }
 
   onStatusChange(handler: StatusHandler) {
@@ -124,12 +133,21 @@ export class RforumWebSocket {
 
   private buildUrl() {
     const base = (WS_ORIGIN || '').replace(/\/$/, '');
-    if (base) return `${base}/ws/${this.code}`;
+    const path = `/ws/${this.code}${this.buildQuery()}`;
+    if (base) return `${base}${path}`;
 
     // Fallback to API origin converted to WS if available
     // Otherwise use current origin
     const api = (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:8000');
     const wsBase = api.replace(/^http/, 'ws');
-    return `${wsBase}/ws/${this.code}`;
+    return `${wsBase}${path}`;
+  }
+
+  private buildQuery() {
+    const params = new URLSearchParams();
+    if (this.opts.token) params.set('token', this.opts.token);
+    if (this.opts.role) params.set('role', this.opts.role);
+    const qs = params.toString();
+    return qs ? `?${qs}` : '';
   }
 }

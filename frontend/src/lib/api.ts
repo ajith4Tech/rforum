@@ -1,6 +1,29 @@
 const API_PREFIX = '/api';
 const DEFAULT_API_PORT = '8000';
 
+export interface PaginatedResult<T> {
+  items: T[];
+  total: number;
+  limit: number;
+  offset: number;
+  has_more: boolean;
+}
+
+export interface ListParams {
+  limit?: number;
+  offset?: number;
+  search?: string;
+}
+
+function buildListQuery(params: ListParams = {}): string {
+  const q = new URLSearchParams();
+  if (params.limit !== undefined) q.set('limit', String(params.limit));
+  if (params.offset !== undefined) q.set('offset', String(params.offset));
+  if (params.search) q.set('search', params.search);
+  const s = q.toString();
+  return s ? `?${s}` : '';
+}
+
 const guessApiOrigin = () => {
   if (typeof window === 'undefined') return '';
   if (import.meta.env?.VITE_API_ORIGIN) return import.meta.env.VITE_API_ORIGIN as string;
@@ -110,8 +133,8 @@ export async function register(email: string, password: string, inviteCode: stri
 }
 
 // ── Sessions ─────────────────────────────────────────
-export async function listSessions() {
-  return fetchJson('/sessions', { method: 'GET' }, true);
+export async function listSessions(params: ListParams = {}): Promise<PaginatedResult<any>> {
+  return fetchJson(`/sessions${buildListQuery(params)}`, { method: 'GET' }, true);
 }
 
 export async function createSession(
@@ -151,8 +174,8 @@ export async function startSession(sessionId: string) {
 }
 
 // ── Events ───────────────────────────────────────────
-export async function listEvents() {
-  return fetchJson('/events', { method: 'GET' }, true);
+export async function listEvents(params: ListParams = {}): Promise<PaginatedResult<any>> {
+  return fetchJson(`/events${buildListQuery(params)}`, { method: 'GET' }, true);
 }
 
 export async function listPublicEvents(date?: string) {
@@ -242,7 +265,9 @@ export async function getSessionByCode(code: string) {
 }
 
 export async function listResponses(slideId: string) {
-  return fetchJson(`/slides/${slideId}/responses/`, { method: 'GET' });
+  // auth=true attaches our JWT when we have one (moderator dashboard, needs
+  // responses regardless of live status) but is a no-op for guests/screens.
+  return fetchJson(`/slides/${slideId}/responses/`, { method: 'GET' }, true);
 }
 
 export async function submitResponse(
@@ -387,8 +412,8 @@ export function resolveFileUrl(fileUrl?: string | null) {
 }
 
 /** Build the URL for a single rendered page image from the backend */
-export function getPageImageUrl(sessionId: string, slideId: string, page: number) {
-  return buildUrl(`/sessions/${sessionId}/slides/${slideId}/page/${page}`);
+export function getPageImageUrl(sessionId: string, slideId: string, page: number, sessionCode?: string) {
+  return withAssetAuth(buildUrl(`/sessions/${sessionId}/slides/${slideId}/page/${page}`), sessionCode);
 }
 
 // ── Presentations / Timeline ──────────────────────────
@@ -462,14 +487,29 @@ export async function activateTimelineItem(sessionId: string, itemId: string): P
   return fetchJson(`/sessions/${sessionId}/presentation/timeline/activate/${itemId}`, { method: 'POST' }, true);
 }
 
-/** Build the URL for a full-resolution rendered presentation page (no auth required). */
-export function getPresentationPageImageUrl(presentationId: string, pageNumber: number) {
-  return buildUrl(`/presentations/${presentationId}/pages/${pageNumber}/image`);
+/**
+ * Appends whatever access proof is available for an otherwise-unauthenticated
+ * asset URL: our own JWT if we're logged in (moderator previewing their own
+ * library), otherwise the session's join code if the caller has one (guest/
+ * screen viewing a live session's attached presentation).
+ */
+const withAssetAuth = (url: string, sessionCode?: string) => {
+  const params = new URLSearchParams();
+  const token = getToken();
+  if (token) params.set('token', token);
+  else if (sessionCode) params.set('code', sessionCode);
+  const qs = params.toString();
+  return qs ? `${url}?${qs}` : url;
+};
+
+/** Build the URL for a full-resolution rendered presentation page. */
+export function getPresentationPageImageUrl(presentationId: string, pageNumber: number, sessionCode?: string) {
+  return withAssetAuth(buildUrl(`/presentations/${presentationId}/pages/${pageNumber}/image`), sessionCode);
 }
 
-/** Build the URL for a small pre-rendered presentation page thumbnail (no auth required). */
-export function getPresentationPageThumbnailUrl(presentationId: string, pageNumber: number) {
-  return buildUrl(`/presentations/${presentationId}/pages/${pageNumber}/thumbnail`);
+/** Build the URL for a small pre-rendered presentation page thumbnail. */
+export function getPresentationPageThumbnailUrl(presentationId: string, pageNumber: number, sessionCode?: string) {
+  return withAssetAuth(buildUrl(`/presentations/${presentationId}/pages/${pageNumber}/thumbnail`), sessionCode);
 }
 
 // ── Reusable-presentation lifecycle: details, picker, attach/detach, delete ──

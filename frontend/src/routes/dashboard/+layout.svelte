@@ -1,12 +1,14 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
   import { logout, getMe, isAuthenticated } from '$lib/api';
+  import { invalidateAll } from '$lib/dataCache';
   import { currentUser } from '$lib/stores';
   import Nav from '$lib/components/Nav.svelte';
   import { onMount } from 'svelte';
 
   function handleLogout() {
     logout();
+    invalidateAll();
     currentUser.set(null);
     goto('/');
   }
@@ -18,6 +20,7 @@
       currentUser.set(me);
     } catch {
       logout();
+      invalidateAll();
       goto('/login');
     }
   });

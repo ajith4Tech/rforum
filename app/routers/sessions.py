@@ -2,18 +2,41 @@ import random
 import string
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import delete, select
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from redis.asyncio import Redis
+from sqlalchemy import delete, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.auth import get_current_user
+from app.config import get_settings
 from app.database import get_db
-from app.models import Event, PresentationTimeline, PresentationTimelineItem, Session, User, UserRole
-from app.schemas import SessionCreate, SessionOut, SessionUpdate, SessionWithSlides, TimelineOut
+from app.models import (
+    Event,
+    Presentation,
+    PresentationTimeline,
+    PresentationTimelineItem,
+    Session,
+    User,
+    UserRole,
+)
+from app.rate_limit import check_rate_limit
+from app.schemas import (
+    PaginatedSessions,
+    SessionCreate,
+    SessionOut,
+    SessionUpdate,
+    SessionWithSlides,
+    TimelineOut,
+)
 from app.services.guest_view import strip_slide_content_json
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
+
+# Generous per-IP limit: audience members routinely join from a shared
+# conference-WiFi/NAT IP, so this only needs to slow scripted code-guessing.
+JOIN_RATE_LIMIT = 60
+JOIN_RATE_WINDOW_SECONDS = 60
 
 
 def _generate_code() -> str:
@@ -57,16 +80,60 @@ async def create_session(
     return session
 
 
-@router.get("/", response_model=list[SessionOut])
+@router.get("/", response_model=PaginatedSessions)
 async def list_sessions(
+    limit: int | None = None,
+    offset: int = 0,
+    search: str | None = None,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    query = select(Session).order_by(Session.created_at.desc())
+    settings = get_settings()
+    page_size = limit if limit is not None else settings.DEFAULT_PAGE_SIZE
+    page_size = max(1, min(page_size, settings.MAX_PAGE_SIZE))
+    offset = max(0, offset)
+
+    filters = []
     if user.role != UserRole.SUPER_ADMIN:
-        query = query.where(Session.owner_id == user.id)
+        filters.append(Session.owner_id == user.id)
+    if search:
+        pattern = f"%{search}%"
+        # Mirrors the existing client-side sessionSearchHaystack() behavior
+        # being replaced: title, moderator, code, or attached deck's filename.
+        presentation_match = exists(
+            select(Presentation.id).where(
+                Presentation.id == Session.presentation_id,
+                Presentation.original_file_name.ilike(pattern),
+            )
+        )
+        filters.append(
+            or_(
+                Session.title.ilike(pattern),
+                Session.moderator_name.ilike(pattern),
+                Session.unique_code.ilike(pattern),
+                presentation_match,
+            )
+        )
+
+    total = (await db.execute(select(func.count(Session.id)).where(*filters))).scalar_one()
+
+    query = (
+        select(Session)
+        .where(*filters)
+        .order_by(Session.created_at.desc())
+        .limit(page_size)
+        .offset(offset)
+    )
     result = await db.execute(query)
-    return result.scalars().all()
+    items = result.scalars().all()
+
+    return {
+        "items": items,
+        "total": total,
+        "limit": page_size,
+        "offset": offset,
+        "has_more": offset + len(items) < total,
+    }
 
 
 @router.get("/{session_id}", response_model=SessionWithSlides)
@@ -162,7 +229,14 @@ async def delete_session(
 
 # ── Guest endpoint (no auth) ─────────────────────────
 @router.get("/join/{code}")
-async def join_session(code: str, db: AsyncSession = Depends(get_db)):
+async def join_session(code: str, request: Request, db: AsyncSession = Depends(get_db)):
+    redis: Redis = request.app.state.redis
+    allowed = await check_rate_limit(
+        redis, f"rate:join:{request.client.host}", JOIN_RATE_LIMIT, JOIN_RATE_WINDOW_SECONDS
+    )
+    if not allowed:
+        raise HTTPException(status_code=429, detail="Too many attempts. Please slow down.")
+
     result = await db.execute(
         select(Session)
         .options(

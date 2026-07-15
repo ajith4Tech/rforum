@@ -168,6 +168,14 @@ class SessionPublicOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class PaginatedSessions(BaseModel):
+    items: list[SessionOut]
+    total: int
+    limit: int
+    offset: int
+    has_more: bool
+
+
 # ── Event ────────────────────────────────────────────
 class EventCreate(BaseModel):
     title: str = Field(..., min_length=1, max_length=255)
@@ -196,6 +204,14 @@ class EventOut(BaseModel):
 
 class EventWithSessions(EventOut):
     sessions: list[SessionOut] = Field(default_factory=list)
+
+
+class PaginatedEvents(BaseModel):
+    items: list[EventWithSessions]
+    total: int
+    limit: int
+    offset: int
+    has_more: bool
 
 
 class EventPublicOut(BaseModel):

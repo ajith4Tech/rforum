@@ -7,9 +7,9 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.auth import get_current_user
+from app.auth import get_current_user, get_optional_user
 from app.database import get_db
-from app.models import Response, Slide, User
+from app.models import Response, Slide, User, UserRole
 from app.schemas import ResponseCreate, ResponseOut
 
 router = APIRouter(prefix="/api/slides/{slide_id}/responses", tags=["responses"])
@@ -82,13 +82,31 @@ async def submit_response(
 @router.get("/", response_model=list[ResponseOut])
 async def list_responses(
     slide_id: str,
+    user: User | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db),
 ):
     try:
         slide_uuid = uuid.UUID(slide_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid slide ID format")
-    
+
+    result = await db.execute(
+        select(Slide).where(Slide.id == slide_uuid).options(selectinload(Slide.session))
+    )
+    slide = result.scalar_one_or_none()
+    if not slide:
+        raise HTTPException(status_code=404, detail="Slide not found")
+
+    # The moderator dashboard fetches this with no live-session restriction
+    # (they must see responses while composing, before going live, and after
+    # ending). Anyone else — guests, screens — only gets results for a live
+    # session, matching the join-flow access model everywhere else.
+    is_owner_or_admin = user is not None and (
+        user.role == UserRole.SUPER_ADMIN or slide.session.owner_id == user.id
+    )
+    if not is_owner_or_admin and not slide.session.is_live:
+        raise HTTPException(status_code=403, detail="Session is not live")
+
     result = await db.execute(
         select(Response)
         .where(Response.slide_id == slide_uuid)
@@ -164,8 +182,8 @@ async def clear_responses(
     if not slide:
         raise HTTPException(status_code=404, detail="Slide not found")
     
-    # Verify user is the session owner
-    if slide.session.owner_id != user.id:
+    # Verify user is the session owner (or a super admin, consistent with every other router)
+    if user.role != UserRole.SUPER_ADMIN and slide.session.owner_id != user.id:
         raise HTTPException(status_code=403, detail="Not authorized to clear responses")
 
     # Delete all responses for this slide

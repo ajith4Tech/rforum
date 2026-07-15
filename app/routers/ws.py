@@ -3,10 +3,18 @@ import json
 import logging
 import uuid
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from jose import JWTError, jwt
 from redis.asyncio import Redis
+from sqlalchemy import select
+
+from app.config import get_settings
+from app.database import async_session
+from app.models import Session, User, UserRole
+from app.rate_limit import check_rate_limit
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["websocket"])
+settings = get_settings()
 
 # Unique identifier for this process to avoid re-broadcasting our own Redis messages
 SERVER_ID = str(uuid.uuid4())
@@ -18,8 +26,57 @@ ALLOWED_WS_EVENTS = frozenset({
     "response_submitted", "new_response", "upvote", "heartbeat",
 })
 
+# Control events that only an authenticated session owner (or admin) may relay.
+# Everyone else connecting to a session code is a guest or a read-only screen.
+MODERATOR_ONLY_EVENTS = frozenset({"slide_change", "page_change", "session_update"})
+
 # Maximum raw message size accepted from a client (64 KB)
 MAX_WS_MESSAGE_BYTES = 65_536
+
+# Connect attempts allowed per client IP per window. Generous on purpose:
+# audience members at a live event routinely join from a single shared
+# conference-WiFi/NAT IP, so this only needs to stop scripted connection
+# storms, not organic bursts of dozens of simultaneous guests.
+WS_CONNECT_RATE_LIMIT = 60
+WS_CONNECT_RATE_WINDOW_SECONDS = 60
+
+
+async def _get_session_by_code(session_code: str) -> Session | None:
+    async with async_session() as db:
+        result = await db.execute(select(Session).where(Session.unique_code == session_code))
+        return result.scalar_one_or_none()
+
+
+async def resolve_ws_role(session: Session, token: str | None, requested_role: str | None) -> str:
+    """
+    Determine whether a connecting WebSocket client is a "moderator" (the
+    authenticated owner of this session, or a super admin), a "screen"
+    (read-only projector view), or a plain "guest" (audience member).
+
+    Opens and closes its own short-lived DB session rather than depending on
+    a request-scoped one, so we never hold a pooled connection open for the
+    full lifetime of a WebSocket (a single session can have dozens of
+    concurrent audience sockets).
+    """
+    if token:
+        try:
+            payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+            user_id = payload.get("sub")
+            if user_id:
+                async with async_session() as db:
+                    result = await db.execute(
+                        select(User).where(User.id == uuid.UUID(user_id))
+                    )
+                    user = result.scalar_one_or_none()
+                    if user is not None and (
+                        user.role == UserRole.SUPER_ADMIN or session.owner_id == user.id
+                    ):
+                        return "moderator"
+        except (JWTError, ValueError):
+            pass
+    if requested_role == "screen":
+        return "screen"
+    return "guest"
 
 
 class ConnectionManager:
@@ -96,6 +153,31 @@ manager = ConnectionManager()
 @router.websocket("/ws/{session_code}")
 async def websocket_endpoint(websocket: WebSocket, session_code: str):
     redis: Redis = websocket.app.state.redis
+
+    client_host = websocket.client.host if websocket.client else "unknown"
+    allowed = await check_rate_limit(
+        redis,
+        f"rate:ws_connect:{client_host}",
+        WS_CONNECT_RATE_LIMIT,
+        WS_CONNECT_RATE_WINDOW_SECONDS,
+    )
+    if not allowed:
+        await websocket.close(code=4429)
+        return
+
+    # Validate the session exists BEFORE accepting/subscribing — an
+    # unauthenticated client must not be able to open a Redis pubsub
+    # subscription for an arbitrary or nonexistent session_code.
+    session = await _get_session_by_code(session_code)
+    if session is None:
+        await websocket.close(code=4404)
+        return
+
+    role = await resolve_ws_role(
+        session,
+        websocket.query_params.get("token"),
+        websocket.query_params.get("role"),
+    )
     await manager.connect(session_code, websocket, redis)
     try:
         while True:
@@ -107,8 +189,22 @@ async def websocket_endpoint(websocket: WebSocket, session_code: str):
                 message = json.loads(data)
                 if not isinstance(message, dict):
                     continue
+                event = message.get("event")
                 # Drop unknown event types to prevent UI injection by guests
-                if message.get("event") not in ALLOWED_WS_EVENTS:
+                if event not in ALLOWED_WS_EVENTS:
+                    continue
+                # Only the session's moderator (or an admin) may relay control events —
+                # guests can only submit responses (via the HTTP API), and screens are
+                # strictly read-only.
+                if event in MODERATOR_ONLY_EVENTS and role != "moderator":
+                    logger.warning(
+                        "Rejected unauthorized WS event '%s' from role=%s session=%s",
+                        event, role, session_code,
+                    )
+                    await websocket.send_text(json.dumps({
+                        "event": "error",
+                        "message": f"Unauthorized: '{event}' requires moderator role",
+                    }))
                     continue
                 message.setdefault("origin", SERVER_ID)
                 await manager.broadcast(session_code, message)

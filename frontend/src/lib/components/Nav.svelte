@@ -1,9 +1,14 @@
 <script lang="ts">
   import { page } from '$app/stores';
+  import { goto } from '$app/navigation';
+  import { tick } from 'svelte';
   import { theme, toggleTheme } from '$lib/theme';
   import { changePassword } from '$lib/api';
+  import { getEvents, getSessions } from '$lib/dataCache';
+  import { debounce } from '$lib/debounce';
+  import { cycleSearchIndex } from '$lib/search';
   import { isSuperAdmin, currentUser } from '$lib/stores';
-  import { Orbit, Moon, Sun, LogOut, ChevronDown, User, Lock, Info, Shield, Zap, Users, BarChart3, MessageSquare, LogIn, UserPlus, BookOpen, CalendarDays, Presentation, Radio, Layers, BarChart2, MessageCircleQuestion, Star, Cloud, Monitor, Eye, EyeOff } from 'lucide-svelte';
+  import { Orbit, Moon, Sun, LogOut, ChevronDown, User, Lock, Info, Shield, Zap, Users, BarChart3, MessageSquare, LogIn, UserPlus, BookOpen, CalendarDays, Presentation, Radio, Layers, BarChart2, MessageCircleQuestion, Star, Cloud, Monitor, Eye, EyeOff, Search, X } from 'lucide-svelte';
 
   let {
     authenticated = false,
@@ -28,6 +33,23 @@
   let pwdError = $state('');
   let pwdSuccess = $state('');
   let pwdLoading = $state(false);
+
+  // Global search (Events + Sessions) — searched server-side per debounced
+  // keystroke (GET /events?search=&limit=8, GET /sessions?search=&limit=8),
+  // not a client-side filter over a prefetched full list.
+  let showSearch = $state(false);
+  let searchQuery = $state('');
+  let debouncedQuery = $state('');
+  let globalEvents: any[] = $state([]);
+  let globalEventsTotal = $state(0);
+  let globalSessions: any[] = $state([]);
+  let globalSessionsTotal = $state(0);
+  let searchLoading = $state(false);
+  let searchRequestId = 0;
+  let activeIndex = $state(0);
+  let searchInputEl: HTMLInputElement | null = $state(null);
+  const MAX_SEARCH_RESULTS = 8;
+  const applyDebouncedSearch = debounce((value: string) => { debouncedQuery = value; activeIndex = 0; }, 250);
 
   const navLinks = [
     { label: 'Dashboard', href: '/dashboard' },
@@ -61,6 +83,94 @@
     if (!target.closest('[data-profile-menu]'))  profileOpen  = false;
     if (!target.closest('[data-moderator-menu]')) moderatorOpen = false;
     if (!target.closest('[data-menu]')) menuOpen = false;
+  }
+
+  async function runGlobalSearch(query: string) {
+    const myRequest = ++searchRequestId;
+    if (!query) {
+      globalEvents = [];
+      globalEventsTotal = 0;
+      globalSessions = [];
+      globalSessionsTotal = 0;
+      searchLoading = false;
+      return;
+    }
+    searchLoading = true;
+    try {
+      const [eventsResult, sessionsResult] = await Promise.all([
+        getEvents({ search: query, limit: MAX_SEARCH_RESULTS }),
+        getSessions({ search: query, limit: MAX_SEARCH_RESULTS })
+      ]);
+      if (myRequest !== searchRequestId) return; // a newer query already landed
+      globalEvents = eventsResult.items;
+      globalEventsTotal = eventsResult.total;
+      globalSessions = sessionsResult.items;
+      globalSessionsTotal = sessionsResult.total;
+    } catch {
+      if (myRequest === searchRequestId) {
+        globalEvents = [];
+        globalEventsTotal = 0;
+        globalSessions = [];
+        globalSessionsTotal = 0;
+      }
+    } finally {
+      if (myRequest === searchRequestId) searchLoading = false;
+    }
+  }
+
+  $effect(() => { applyDebouncedSearch(searchQuery); });
+  $effect(() => { runGlobalSearch(debouncedQuery); });
+
+  async function openSearch() {
+    menuOpen = false;
+    showSearch = true;
+    searchQuery = '';
+    debouncedQuery = '';
+    activeIndex = 0;
+    globalEvents = [];
+    globalEventsTotal = 0;
+    globalSessions = [];
+    globalSessionsTotal = 0;
+    await tick();
+    searchInputEl?.focus();
+  }
+
+  function closeSearch() {
+    showSearch = false;
+  }
+
+  function clearGlobalSearch() {
+    searchQuery = '';
+    debouncedQuery = '';
+    activeIndex = 0;
+  }
+
+  const combinedResults = $derived.by(() => [
+    ...globalEvents.map((item) => ({ type: 'event' as const, item })),
+    ...globalSessions.map((item) => ({ type: 'session' as const, item }))
+  ]);
+
+  function openResult(result: { type: 'event' | 'session'; item: any }) {
+    showSearch = false;
+    if (result.type === 'event') goto(`/dashboard/events?event=${result.item.id}`);
+    else goto(`/dashboard/${result.item.id}`);
+  }
+
+  function handleSearchKeydown(e: KeyboardEvent) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closeSearch();
+      return;
+    }
+    if (!combinedResults.length) return;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      activeIndex = cycleSearchIndex(e.key, activeIndex, combinedResults.length) ?? activeIndex;
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      const target = combinedResults[activeIndex];
+      if (target) openResult(target);
+    }
   }
 
   function openChangePwd() {
@@ -130,6 +240,17 @@
   </div>
 
   <div class="flex items-center gap-2 sm:gap-3">
+    {#if authenticated}
+      <button
+        onclick={openSearch}
+        class="btn-secondary p-2 flex items-center justify-center"
+        aria-label="Search events and sessions"
+        title="Search events and sessions"
+      >
+        <Search class="w-4 h-4 text-surface-600 dark:text-surface-300" />
+      </button>
+    {/if}
+
     <!-- GitHub Link -->
     <a
       href="https://github.com/ajith4Tech/rforum"
@@ -281,6 +402,90 @@
     </div>
   </div>
 </nav>
+
+<!-- Global Search (Events + Sessions) -->
+{#if showSearch}
+  <div
+    class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-start justify-center px-4 pt-[10vh] z-50"
+    onclick={(e) => { if (e.target === e.currentTarget) closeSearch(); }}
+    role="dialog"
+    aria-modal="true"
+    aria-label="Search events and sessions"
+  >
+    <div class="card w-full max-w-lg shadow-2xl animate-fade-in !p-0 overflow-hidden">
+      <div class="relative border-b border-surface-200 dark:border-surface-800">
+        <Search class="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-400 pointer-events-none" />
+        <input
+          bind:this={searchInputEl}
+          bind:value={searchQuery}
+          onkeydown={handleSearchKeydown}
+          type="search"
+          placeholder="Search events and sessions…"
+          class="w-full bg-transparent pl-11 pr-11 py-4 text-sm focus:outline-none"
+          aria-label="Search events and sessions"
+        />
+        {#if searchQuery}
+          <button
+            class="absolute right-4 top-1/2 -translate-y-1/2 text-surface-400 hover:text-surface-200"
+            onclick={clearGlobalSearch}
+            aria-label="Clear search"
+          >
+            <X class="w-4 h-4" />
+          </button>
+        {/if}
+      </div>
+
+      <div class="max-h-[60vh] overflow-y-auto p-2">
+        {#if searchLoading}
+          <div class="p-4 space-y-2" aria-hidden="true">
+            <div class="skeleton h-9 w-full rounded-xl"></div>
+            <div class="skeleton h-9 w-full rounded-xl"></div>
+            <div class="skeleton h-9 w-full rounded-xl"></div>
+          </div>
+        {:else if combinedResults.length === 0}
+          <div class="flex flex-col items-center justify-center text-center gap-2 py-10">
+            <Search class="w-6 h-6 text-surface-400" />
+            <p class="text-sm text-surface-400">
+              {debouncedQuery ? `No results for "${debouncedQuery}"` : 'Nothing to search yet'}
+            </p>
+          </div>
+        {:else}
+          {#if globalEvents.length > 0}
+            <div class="px-3 pt-2 pb-1 text-xs font-semibold uppercase tracking-wider text-surface-500">
+              Events{globalEventsTotal > globalEvents.length ? ` — showing ${globalEvents.length} of ${globalEventsTotal}` : ''}
+            </div>
+            {#each globalEvents as event, i}
+              <button
+                class="flex items-center gap-3 w-full px-3 py-2.5 rounded-xl text-left transition {activeIndex === i ? 'bg-brand-500/10' : 'hover:bg-surface-100 dark:hover:bg-surface-800'}"
+                onclick={() => openResult({ type: 'event', item: event })}
+                onmouseenter={() => activeIndex = i}
+              >
+                <CalendarDays class="w-4 h-4 text-brand-500 flex-shrink-0" />
+                <span class="text-sm font-medium truncate">{event.title}</span>
+              </button>
+            {/each}
+          {/if}
+          {#if globalSessions.length > 0}
+            <div class="px-3 pt-3 pb-1 text-xs font-semibold uppercase tracking-wider text-surface-500">
+              Sessions{globalSessionsTotal > globalSessions.length ? ` — showing ${globalSessions.length} of ${globalSessionsTotal}` : ''}
+            </div>
+            {#each globalSessions as session, i}
+              <button
+                class="flex items-center gap-3 w-full px-3 py-2.5 rounded-xl text-left transition {activeIndex === globalEvents.length + i ? 'bg-brand-500/10' : 'hover:bg-surface-100 dark:hover:bg-surface-800'}"
+                onclick={() => openResult({ type: 'session', item: session })}
+                onmouseenter={() => activeIndex = globalEvents.length + i}
+              >
+                <Radio class="w-4 h-4 text-accent flex-shrink-0" />
+                <span class="text-sm font-medium truncate">{session.title}</span>
+                <span class="text-xs text-surface-400 font-mono ml-auto flex-shrink-0">{session.unique_code}</span>
+              </button>
+            {/each}
+          {/if}
+        {/if}
+      </div>
+    </div>
+  </div>
+{/if}
 
 <!-- About Rforum Modal -->
 {#if showAbout}

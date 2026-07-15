@@ -93,8 +93,9 @@
       : '';
     guestUrl = typeof window !== 'undefined' ? `${window.location.origin}/session/${code}` : '';
 
-    // Always connect WS so the screen auto-recovers when the session starts
-    ws = new RforumWebSocket(code);
+    // Always connect WS so the screen auto-recovers when the session starts.
+    // role: 'screen' marks this connection as strictly read-only.
+    ws = new RforumWebSocket(code, { role: 'screen' });
     ws.connect();
     ws.onMessage(queueMessage);
 
@@ -416,6 +417,7 @@
           <PresentationLiveView
             activeItem={activeTimelineItem}
             presentationId={session.presentation_id}
+            sessionCode={code}
             responses={timelineResponses}
             variant="screen"
           />
@@ -557,7 +559,7 @@
                     <h1 class="text-3xl font-heading font-bold text-white text-center">{activeSlide.content_json.title}</h1>
                   {/if}
                   <PageImageViewer
-                    src={getPageImageUrl(session.id, activeSlide.id, activeSlide.content_json?.file_page || 1)}
+                    src={getPageImageUrl(session.id, activeSlide.id, activeSlide.content_json?.file_page || 1, code)}
                     page={activeSlide.content_json?.file_page || 1}
                     alt={`Slide page ${activeSlide.content_json?.file_page || 1}`}
                     imgClass="max-w-full max-h-[65vh] w-auto rounded-2xl border border-white/10 object-contain shadow-2xl"

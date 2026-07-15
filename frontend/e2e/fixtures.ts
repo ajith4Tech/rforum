@@ -38,10 +38,13 @@ export async function createEvent(request: APIRequestContext, token: string, tit
   return res.json();
 }
 
-export async function createSession(request: APIRequestContext, token: string, eventId: string, title: string) {
+export async function createSession(
+  request: APIRequestContext, token: string, eventId: string, title: string,
+  extra: Record<string, unknown> = {}
+) {
   const res = await request.post(`${API_BASE}/api/sessions/`, {
     headers: { Authorization: `Bearer ${token}` },
-    data: { title, event_id: eventId },
+    data: { title, event_id: eventId, ...extra },
   });
   if (!res.ok()) throw new Error(`Create session failed: ${res.status()} ${await res.text()}`);
   return res.json();

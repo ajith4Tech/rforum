@@ -8,6 +8,7 @@ from pathlib import Path
 import fitz  # PyMuPDF
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, status
 from fastapi.responses import StreamingResponse
+from jose import JWTError, jwt
 from redis.asyncio import Redis
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -331,19 +332,62 @@ async def upload_content_file(
     return SlideUploadOut(upload_meta=upload_meta, **slide_data)
 
 
+async def _authorize_slide_asset(
+    session_uuid: uuid.UUID, token: str | None, code: str | None, db: AsyncSession
+) -> None:
+    """
+    Mirrors app/routers/presentations.py::_authorize_presentation_asset — this
+    endpoint has no Depends(get_current_user) so guests can view without
+    logging in, but session_id+slide_id alone must not be enough: callers must
+    prove either ownership (token) or audience membership in this exact live
+    session (code == its unique_code).
+    """
+    if token:
+        try:
+            settings = get_settings()
+            payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+            user_id = payload.get("sub")
+            if user_id:
+                result = await db.execute(select(User).where(User.id == uuid.UUID(user_id)))
+                user = result.scalar_one_or_none()
+                if user is not None:
+                    session = await db.get(Session, session_uuid)
+                    if session is not None and (
+                        user.role == UserRole.SUPER_ADMIN or session.owner_id == user.id
+                    ):
+                        return
+        except (JWTError, ValueError):
+            pass
+    if code:
+        result = await db.execute(
+            select(Session).where(
+                Session.id == session_uuid,
+                Session.unique_code == code,
+                Session.is_live.is_(True),
+            )
+        )
+        if result.scalar_one_or_none() is not None:
+            return
+    raise HTTPException(status_code=401, detail="Not authorized to view this slide")
+
+
 @router.get("/{slide_id}/page/{page_num}")
 async def get_page_image(
     session_id: str,
     slide_id: str,
     page_num: int,
+    token: str | None = None,
+    code: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
-    """Render a single PDF page as a PNG image. No auth required so guests can view."""
+    """Render a single PDF page as a PNG image. No login required so guests can view."""
     try:
         slide_uuid = uuid.UUID(slide_id)
         session_uuid = uuid.UUID(session_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid ID format")
+
+    await _authorize_slide_asset(session_uuid, token, code, db)
 
     result = await db.execute(
         select(Slide).where(Slide.id == slide_uuid, Slide.session_id == session_uuid)

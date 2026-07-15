@@ -217,10 +217,15 @@ async def download_event_analytics(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    try:
+        event_uuid = uuid.UUID(event_id)
+    except ValueError:
+        return JSONResponse({'detail': 'Invalid event ID format'}, status_code=400)
+
     # Only owner or super-admin can download
     is_admin = user.role == UserRole.SUPER_ADMIN
     # verify event exists and permission
-    ev_q = select(Event).where(Event.id == event_id)
+    ev_q = select(Event).where(Event.id == event_uuid)
     ev_res = await db.execute(ev_q)
     ev = ev_res.scalar_one_or_none()
     if not ev:
@@ -230,7 +235,7 @@ async def download_event_analytics(
 
     # Build basic analytics for the event
     # Sessions for event
-    sessions_q = select(Session.id, Session.title).where(Session.event_id == event_id)
+    sessions_q = select(Session.id, Session.title).where(Session.event_id == event_uuid)
     sessions_res = await db.execute(sessions_q)
     sessions = sessions_res.all()
 
@@ -385,9 +390,14 @@ async def download_session_analytics(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    try:
+        session_uuid = uuid.UUID(session_id)
+    except ValueError:
+        return JSONResponse({'detail': 'Invalid session ID format'}, status_code=400)
+
     is_admin = user.role == UserRole.SUPER_ADMIN
     # verify session and permission
-    s_q = select(Session).where(Session.id == session_id)
+    s_q = select(Session).where(Session.id == session_uuid)
     s_res = await db.execute(s_q)
     session_obj = s_res.scalar_one_or_none()
     if not session_obj:
@@ -395,8 +405,15 @@ async def download_session_analytics(
     if not is_admin and session_obj.owner_id != user.id:
         return JSONResponse({'detail': 'Forbidden'}, status_code=403)
 
-    # gather responses grouped by slide
-    slides_q = select(Slide.id, Slide.type, Slide.order).where(Slide.session_id == session_id).order_by(Slide.order)
+    # gather responses grouped by slide. content_json is included so callers
+    # (e.g. the PDF report) can render question/option text without a second
+    # request to the legacy /slides endpoint, which 409s for presentation-first
+    # sessions (see app/routers/slides.py::_ensure_not_presentation_session).
+    slides_q = (
+        select(Slide.id, Slide.type, Slide.order, Slide.content_json)
+        .where(Slide.session_id == session_uuid)
+        .order_by(Slide.order)
+    )
     slides_res = await db.execute(slides_q)
     slides = slides_res.all()
 
@@ -414,7 +431,12 @@ async def download_session_analytics(
     data = {
         'session': {'id': str(session_obj.id), 'title': session_obj.title},
         'slides': [
-            {'slide_id': str(s[0]), 'type': s[1].value if hasattr(s[1], 'value') else str(s[1]), 'order': s[2]}
+            {
+                'slide_id': str(s[0]),
+                'type': s[1].value if hasattr(s[1], 'value') else str(s[1]),
+                'order': s[2],
+                'content_json': s[3] or {},
+            }
             for s in slides
         ],
         'responses': [

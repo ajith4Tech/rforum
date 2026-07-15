@@ -20,6 +20,7 @@ settings = get_settings()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
+oauth2_scheme_optional = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
 
 
 def hash_password(password: str) -> str:
@@ -95,6 +96,27 @@ async def get_current_user(
     if user is None:
         raise credentials_exception
     return user
+
+
+async def get_optional_user(
+    token: str | None = Depends(oauth2_scheme_optional),
+    db: AsyncSession = Depends(get_db),
+) -> User | None:
+    """Like get_current_user, but returns None instead of raising 401 when no
+    (or an invalid) bearer token is present — for endpoints guests may call
+    without logging in, where an authenticated caller still gets elevated access."""
+    if not token:
+        return None
+    try:
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        user_id: str = payload.get("sub")
+        if user_id is None:
+            return None
+    except JWTError:
+        return None
+
+    result = await db.execute(select(User).where(User.id == uuid.UUID(user_id)))
+    return result.scalar_one_or_none()
 
 
 async def get_current_super_admin(

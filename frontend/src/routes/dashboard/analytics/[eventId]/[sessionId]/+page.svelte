@@ -1,7 +1,7 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
-  import { isAuthenticated, exportEventAnalytics, exportSessionAnalytics, listSlides } from '$lib/api';
+  import { isAuthenticated, exportEventAnalytics, exportSessionAnalytics } from '$lib/api';
   import {
     ChevronRight, Users, MessageSquare,
     Download, BarChart2, AlertCircle, FileText,
@@ -59,20 +59,13 @@
   async function load() {
     loading = true; error = '';
     try {
-      const [sessData, evData, slidesRaw] = await Promise.all([
+      const [sessData, evData] = await Promise.all([
         exportSessionAnalytics(sessionId, 'json').then((r: Response) => r.json()),
         exportEventAnalytics(eventId,   'json').then((r: Response) => r.json()).catch(() => null),
-        listSlides(sessionId).catch(() => [] as any[]),
       ]);
 
       sessionTitle  = sessData.session?.title ?? 'Session';
       eventTitle    = evData?.event?.title    ?? '';
-
-      const metaMap: Record<string, any> = {};
-      for (const s of (slidesRaw as any[])) {
-        metaMap[s.id] = s;
-        if (s.moderator_name && !moderatorName) moderatorName = s.moderator_name;
-      }
 
       const rawResponses: RawResponse[] = sessData.responses ?? [];
       totalResponses    = rawResponses.length;
@@ -86,8 +79,7 @@
 
       slides = (sessData.slides ?? [])
         .map((sl: any) => {
-          const meta = metaMap[sl.slide_id] ?? {};
-          const cj   = meta.content_json ?? {};
+          const cj = sl.content_json ?? {};
           const question = cj.question ?? cj.title ?? cj.text ?? '';
           const options: string[] = Array.isArray(cj.options) ? cj.options : [];
           return {

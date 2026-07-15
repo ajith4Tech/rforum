@@ -179,6 +179,12 @@ async def client(db, test_engine, owner_user, tmp_path, monkeypatch):
     app.dependency_overrides.clear()
 
 
+def _token_for(user):
+    from app.auth import create_access_token
+
+    return create_access_token(user.id)
+
+
 async def _upload(client, session_id, filename, content, content_type="application/pdf"):
     return await client.post(
         f"/api/sessions/{session_id}/presentation/upload",
@@ -245,11 +251,14 @@ class TestUpload:
 
 class TestLazyPageRendering:
 
-    async def test_first_page_view_renders_and_caches(self, client, owner_session, pdf_3_pages, tmp_path):
+    async def test_first_page_view_renders_and_caches(self, client, owner_session, owner_user, pdf_3_pages, tmp_path):
         resp = await _upload(client, owner_session.id, "deck.pdf", pdf_3_pages)
         presentation_id = resp.json()["presentation"]["id"]
 
-        img_resp = await client.get(f"/api/presentations/{presentation_id}/pages/1/image")
+        # Page images are otherwise-unauthenticated (guests view them without
+        # logging in) but still require proof of access — the owner's token here.
+        auth = {"token": _token_for(owner_user)}
+        img_resp = await client.get(f"/api/presentations/{presentation_id}/pages/1/image", params=auth)
         assert img_resp.status_code == 200
         assert img_resp.headers["content-type"] == "image/webp"
         assert "immutable" in img_resp.headers["cache-control"]
@@ -258,17 +267,20 @@ class TestLazyPageRendering:
         assert len(pages_files) == 1
 
         # Second request is a pure cache hit — same bytes, no new files created.
-        img_resp_2 = await client.get(f"/api/presentations/{presentation_id}/pages/1/image")
+        img_resp_2 = await client.get(f"/api/presentations/{presentation_id}/pages/1/image", params=auth)
         assert img_resp_2.status_code == 200
         assert img_resp_2.content == img_resp.content
         pages_files_after = list(tmp_path.glob(f"uploads/presentations/*/{presentation_id}/pages/*.webp"))
         assert len(pages_files_after) == 1
 
-    async def test_thumbnail_available_immediately_without_view(self, client, owner_session, pdf_1_page):
+    async def test_thumbnail_available_immediately_without_view(self, client, owner_session, owner_user, pdf_1_page):
         resp = await _upload(client, owner_session.id, "deck.pdf", pdf_1_page)
         presentation_id = resp.json()["presentation"]["id"]
 
-        thumb_resp = await client.get(f"/api/presentations/{presentation_id}/pages/1/thumbnail")
+        thumb_resp = await client.get(
+            f"/api/presentations/{presentation_id}/pages/1/thumbnail",
+            params={"token": _token_for(owner_user)},
+        )
         assert thumb_resp.status_code == 200
         assert thumb_resp.headers["content-type"] == "image/webp"
 

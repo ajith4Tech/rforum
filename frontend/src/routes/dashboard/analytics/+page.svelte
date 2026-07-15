@@ -1,6 +1,7 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
-  import { getAnalytics, listEvents, isAuthenticated, formatBytes } from '$lib/api';
+  import { getAnalytics, isAuthenticated, formatBytes } from '$lib/api';
+  import { getEvents } from '$lib/dataCache';
   import {
     CalendarDays, ChevronRight, ArrowRight, Users, MessageSquare,
     Layers, BarChart2, HardDrive, Radio, TrendingUp, AlertCircle,
@@ -37,12 +38,17 @@
   let sessionEngagement: { session_id: string; title: string; total_responses: number; unique_participants: number; avg_rating: number | null }[] = $state([]);
 
   // ── Load ──────────────────────────────────────────────
+  // This is a browse/overview list, not the paginated Events management
+  // page — it fetches a bounded page (the backend's MAX_PAGE_SIZE) rather
+  // than paging through everything.
+  const OVERVIEW_LIMIT = 100;
+
   onMount(async () => {
     if (!isAuthenticated()) { goto('/login'); return; }
     try {
-      const [analyticsData, eventsData]: [any, any] = await Promise.all([
+      const [analyticsData, eventsResult] = await Promise.all([
         getAnalytics(),
-        listEvents(),
+        getEvents({ limit: OVERVIEW_LIMIT }),
       ]);
       totalEvents            = analyticsData.total_events            ?? 0;
       totalSessions          = analyticsData.total_sessions          ?? 0;
@@ -55,7 +61,7 @@
       slideTypeDistribution  = analyticsData.slide_type_distribution ?? {};
       responseCountsByType   = analyticsData.response_counts_by_type ?? {};
       sessionEngagement      = analyticsData.session_engagement      ?? [];
-      events = eventsData as EventItem[];
+      events = eventsResult.items as EventItem[];
     } catch (e: any) {
       const msg = e?.message || '';
       if (msg.includes('Unauthorized') || msg.includes('Not authenticated')) {

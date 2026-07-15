@@ -92,6 +92,18 @@
     @apply rounded-2xl p-4 sm:p-5;
   }
 
+  .skeleton {
+    @apply animate-pulse;
+  }
+
+  [data-theme="dark"] .skeleton {
+    @apply bg-surface-800;
+  }
+
+  [data-theme="light"] .skeleton {
+    @apply bg-surface-200;
+  }
+
   [data-theme="dark"] .card {
     @apply bg-surface-900 border border-surface-800;
   }

@@ -2,11 +2,12 @@ import uuid
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, exists, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.auth import get_current_user
+from app.config import get_settings
 from app.database import get_db
 from app.models import Event, Session, User, UserRole
 from app.schemas import (
@@ -16,6 +17,7 @@ from app.schemas import (
     EventSessionsUpdate,
     EventUpdate,
     EventWithSessions,
+    PaginatedEvents,
 )
 
 router = APIRouter(prefix="/api/events", tags=["events"])
@@ -97,20 +99,55 @@ async def create_event(
     return await _get_event_with_sessions(event.id, user.id, db)
 
 
-@router.get("/", response_model=list[EventWithSessions])
+@router.get("/", response_model=PaginatedEvents)
 async def list_events(
+    limit: int | None = None,
+    offset: int = 0,
+    search: str | None = None,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    settings = get_settings()
+    page_size = limit if limit is not None else settings.DEFAULT_PAGE_SIZE
+    page_size = max(1, min(page_size, settings.MAX_PAGE_SIZE))
+    offset = max(0, offset)
+
+    filters = []
+    if user.role != UserRole.SUPER_ADMIN:
+        filters.append(Event.owner_id == user.id)
+    if search:
+        pattern = f"%{search}%"
+        # A session's moderator name also surfaces its event — mirrors the
+        # existing client-side eventSearchHaystack() behavior being replaced.
+        moderator_match = exists(
+            select(Session.id).where(
+                Session.event_id == Event.id, Session.moderator_name.ilike(pattern)
+            )
+        )
+        filters.append(
+            or_(Event.title.ilike(pattern), Event.description.ilike(pattern), moderator_match)
+        )
+
+    total = (await db.execute(select(func.count(Event.id)).where(*filters))).scalar_one()
+
     query = (
         select(Event)
         .options(selectinload(Event.sessions))
-        .order_by(Event.event_date.desc())
+        .where(*filters)
+        .order_by(Event.event_date.desc(), Event.created_at.desc())
+        .limit(page_size)
+        .offset(offset)
     )
-    if user.role != UserRole.SUPER_ADMIN:
-        query = query.where(Event.owner_id == user.id)
     result = await db.execute(query)
-    return result.unique().scalars().all()
+    items = result.unique().scalars().all()
+
+    return {
+        "items": items,
+        "total": total,
+        "limit": page_size,
+        "offset": offset,
+        "has_more": offset + len(items) < total,
+    }
 
 
 # ── Guest endpoint (no auth) ─────────────────────────

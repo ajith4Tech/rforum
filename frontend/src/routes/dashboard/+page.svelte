@@ -1,15 +1,14 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
   import {
-    listSessions,
     createSession,
-    listEvents,
     createEvent,
     listAssets,
     getStorageUsage,
     formatBytes,
     isAuthenticated
   } from '$lib/api';
+  import { getEvents, getSessions, invalidateEvents, invalidateSessions } from '$lib/dataCache';
   import { Plus, ExternalLink, Copy, Calendar, Presentation, Radio, ArrowRight, CheckSquare, Square, Trash2, HardDrive, File, RefreshCw, Upload } from 'lucide-svelte';
   import { onMount, onDestroy } from 'svelte';
 
@@ -55,6 +54,11 @@
     saveChecklist(checklist);
   }
 
+  // This overview only needs "enough" events/sessions to summarize (live
+  // sessions widget, upcoming events widget, quick-create dropdown) — not a
+  // paginated view, so it fetches a bounded page (the backend's
+  // MAX_PAGE_SIZE) rather than paging through everything.
+  const OVERVIEW_LIMIT = 100;
   let sessions: any[] = $state([]);
   let events: any[] = $state([]);
   let recentAssets: any[] = $state([]);
@@ -104,10 +108,10 @@
     if (!isAuthenticated()) { goto('/login'); return; }
     try {
       const [sessionsResult, eventsResult] = await Promise.all([
-        listSessions(), listEvents()
+        getSessions({ limit: OVERVIEW_LIMIT }), getEvents({ limit: OVERVIEW_LIMIT })
       ]);
-      sessions = sessionsResult;
-      events = eventsResult;
+      sessions = sessionsResult.items;
+      events = eventsResult.items;
     } catch {
       goto('/login');
     }
@@ -135,6 +139,7 @@
     try {
       const event = await createEvent({ title: newEventTitle.trim(), event_date: newEventDate, description: newEventDescription.trim() || null });
       events = [event, ...events];
+      invalidateEvents();
       newEventTitle = ''; newEventDate = ''; newEventDescription = '';
       showCreateEvent = false;
       goto('/dashboard/events');
@@ -152,6 +157,7 @@
         newSessionSpeakers
       );
       sessions = [session, ...sessions];
+      invalidateSessions();
       newSessionTitle = '';
       newSessionEventId = '';
       newSessionModerator = '';
