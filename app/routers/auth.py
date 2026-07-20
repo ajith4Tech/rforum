@@ -1,3 +1,5 @@
+import hmac
+
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from redis.asyncio import Redis
@@ -20,6 +22,8 @@ REGISTER_RATE_LIMIT = 30
 REGISTER_RATE_WINDOW_SECONDS = 60
 LOGIN_RATE_LIMIT = 30
 LOGIN_RATE_WINDOW_SECONDS = 60
+CHANGE_PASSWORD_RATE_LIMIT = 30
+CHANGE_PASSWORD_RATE_WINDOW_SECONDS = 60
 
 
 @router.get("/me", response_model=UserOut)
@@ -37,7 +41,9 @@ async def register(payload: UserCreate, request: Request, db: AsyncSession = Dep
         raise HTTPException(status_code=429, detail="Too many registration attempts. Please try again later.")
 
     settings = get_settings()
-    if payload.invite_code.strip().upper() != settings.INVITE_CODE.strip().upper():
+    if not hmac.compare_digest(
+        payload.invite_code.strip().upper(), settings.INVITE_CODE.strip().upper()
+    ):
         raise HTTPException(status_code=403, detail="Invalid invite code")
 
     existing = await db.execute(select(User).where(User.email == payload.email))
@@ -60,9 +66,17 @@ async def register(payload: UserCreate, request: Request, db: AsyncSession = Dep
 @router.post("/change-password", status_code=200)
 async def change_password(
     payload: ChangePasswordPayload,
+    request: Request,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    redis: Redis = request.app.state.redis
+    allowed = await check_rate_limit(
+        redis, f"rate:change_password:{user.id}", CHANGE_PASSWORD_RATE_LIMIT, CHANGE_PASSWORD_RATE_WINDOW_SECONDS
+    )
+    if not allowed:
+        raise HTTPException(status_code=429, detail="Too many attempts. Please try again later.")
+
     if not verify_password(payload.current_password, user.hashed_password):
         raise HTTPException(status_code=400, detail="Current password is incorrect")
     if len(payload.new_password) < 8:

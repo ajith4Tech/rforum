@@ -59,24 +59,21 @@ async def _get_public_event_for_date(
     return result.unique().scalars().first()
 
 
-async def _get_event_sessions_payload(
-    event_id: uuid.UUID,
-    db: AsyncSession,
-) -> list[dict]:
-    result = await db.execute(
-        select(Session)
-        .where(Session.event_id == event_id)
-        .order_by(Session.created_at.asc())
-    )
-    sessions = []
-    for session in result.scalars().all():
-        sessions.append({
+def _event_sessions_payload(sessions: list[Session]) -> list[dict]:
+    """Builds the public sessions payload from an already-loaded
+    Event.sessions collection (selectinload'd alongside the Event query) —
+    callers must not re-query per event, that's an N+1 the eager load already
+    avoided. Sorted in Python to match the previous Session.created_at.asc()
+    ordering, since the relationship itself carries no explicit order_by."""
+    return [
+        {
             "id": str(session.id),
             "title": session.title,
             "is_live": session.is_live,
             "unique_code": session.unique_code if session.is_live else None,
-        })
-    return sessions
+        }
+        for session in sorted(sessions, key=lambda s: s.created_at)
+    ]
 
 
 @router.post("/", response_model=EventWithSessions, status_code=status.HTTP_201_CREATED)
@@ -162,7 +159,7 @@ async def get_today_event(db: AsyncSession = Depends(get_db)):
     events = result.unique().scalars().all()
     payload = []
     for event in events:
-        sessions = await _get_event_sessions_payload(event.id, db)
+        sessions = _event_sessions_payload(event.sessions)
         payload.append({
             "id": str(event.id),
             "title": event.title,
@@ -197,7 +194,7 @@ async def list_public_events(
     events = result.unique().scalars().all()
     payload = []
     for event in events:
-        sessions = await _get_event_sessions_payload(event.id, db)
+        sessions = _event_sessions_payload(event.sessions)
         payload.append({
             "id": str(event.id),
             "title": event.title,

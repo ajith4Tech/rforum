@@ -35,7 +35,10 @@ def _require_test_postgres():
         capture_output=True, text=True, env=env,
     )
     if check.returncode != 0:
-        pytest.skip(f"Postgres not reachable at localhost:5433 — skipping pagination tests: {check.stderr.strip()}")
+        pytest.skip(
+            f"Postgres not reachable at localhost:5433 — skipping pagination tests: {check.stderr.strip()}",
+            allow_module_level=True,
+        )
         return
     if check.stdout.strip() != "1":
         subprocess.run(

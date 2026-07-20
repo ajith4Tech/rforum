@@ -46,6 +46,8 @@
   let draggedItemId: string | null = $state(null);
   let dragOverIndex: number | null = $state(null);
   let confirmingDeleteId: string | null = $state(null);
+  let reorderAnnouncement = $state('');
+  let loadedThumbs: Record<string, boolean> = $state({});
 
   function handleDragStart(item: any) {
     if (item.item_type === 'PAGE') return;
@@ -74,6 +76,7 @@
     const adjustedTarget = fromIndex < targetIndex ? targetIndex - 1 : targetIndex;
     reordered.splice(adjustedTarget, 0, draggedItemId);
     draggedItemId = null;
+    reorderAnnouncement = 'Timeline reordered';
     onReorder(reordered);
   }
 
@@ -86,6 +89,7 @@
     const newIdx = idx + delta;
     if (idx === -1 || newIdx < 0 || newIdx >= ids.length) return;
     [ids[idx], ids[newIdx]] = [ids[newIdx], ids[idx]];
+    reorderAnnouncement = delta < 0 ? 'Moved up' : 'Moved down';
     onReorder(ids);
   }
 
@@ -101,7 +105,7 @@
   }
 </script>
 
-<aside class="col-span-12 lg:col-span-4 space-y-4">
+<aside class="col-span-12 lg:col-span-4 order-2 lg:order-1 space-y-4">
   <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5">
     <div class="flex items-center justify-between mb-3">
       <div class="text-lg font-semibold text-slate-900 dark:text-white truncate">{session?.title}</div>
@@ -145,10 +149,12 @@
       <span class="text-xs text-slate-400">{items.length}</span>
     </div>
 
+    <span class="sr-only" role="status" aria-live="polite">{reorderAnnouncement}</span>
+
     <div>
       <TimelineInserter position={0} {onInsert} />
       {#each items as item, index (item.id)}
-        <div animate:flip={{ duration: 200 }}>
+        <div animate:flip={{ duration: 200 }} class="transition-opacity {draggedItemId === item.id ? 'opacity-40' : ''}">
           {#if item.item_type === 'PAGE'}
             <button
               onclick={() => onActivate(item.id)}
@@ -159,13 +165,20 @@
                 ? 'border-purple-500/60 bg-purple-500/5 dark:bg-purple-500/10 shadow-sm'
                 : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'} {dragOverIndex === index ? 'ring-2 ring-purple-400' : ''}"
             >
-              <img
-                src={getPresentationPageThumbnailUrl(presentation.id, item.page.page_number)}
-                alt={`Page ${item.page.page_number}`}
-                loading="lazy"
-                decoding="async"
-                class="w-12 h-8 object-cover rounded-md border border-slate-200 dark:border-slate-700 flex-shrink-0 bg-slate-100 dark:bg-slate-800"
-              />
+              <span class="relative w-16 h-11 flex-shrink-0 rounded-md overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800">
+                {#if !loadedThumbs[item.id]}
+                  <span class="absolute inset-0 animate-pulse-live bg-slate-200 dark:bg-slate-700"></span>
+                {/if}
+                <img
+                  src={getPresentationPageThumbnailUrl(presentation.id, item.page.page_number)}
+                  alt={`Page ${item.page.page_number}`}
+                  loading="lazy"
+                  decoding="async"
+                  onload={() => (loadedThumbs = { ...loadedThumbs, [item.id]: true })}
+                  onerror={() => (loadedThumbs = { ...loadedThumbs, [item.id]: true })}
+                  class="w-full h-full object-cover transition-opacity duration-200 {loadedThumbs[item.id] ? 'opacity-100' : 'opacity-0'}"
+                />
+              </span>
               <span class="text-xs font-medium {item.id === activeItemId ? 'text-purple-700 dark:text-purple-300' : 'text-slate-600 dark:text-slate-400'}">
                 Page {item.page.page_number}
               </span>
@@ -185,9 +198,9 @@
               ondragover={(e) => handleDragOver(e, index)}
               ondrop={(e) => handleDrop(e, index)}
               aria-current={item.id === activeItemId ? 'true' : undefined}
-              class="group flex items-center gap-1 p-2 rounded-xl border transition-all cursor-grab active:cursor-grabbing {item.id === activeItemId
+              class="group flex items-center gap-1 p-2 rounded-xl border transition-all duration-150 cursor-grab active:cursor-grabbing {item.id === activeItemId
                 ? 'border-purple-500/60 shadow-sm ' + meta.ring
-                : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'} {dragOverIndex === index ? 'ring-2 ring-purple-400' : ''}"
+                : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'} {dragOverIndex === index ? 'ring-2 ring-purple-400 scale-[1.01]' : ''}"
             >
               <span class="w-4 h-4 flex items-center justify-center opacity-40 group-hover:opacity-100 transition-opacity text-slate-400 flex-shrink-0">
                 <GripVertical class="w-3.5 h-3.5" />
@@ -219,9 +232,10 @@
         </div>
       {/each}
       {#if items.length === 0}
-        <div class="flex flex-col items-center gap-2 py-6 text-center">
-          <FileText class="w-8 h-8 text-slate-300 dark:text-slate-700" />
-          <p class="text-xs text-slate-400">No pages yet.</p>
+        <div class="flex flex-col items-center gap-2 py-8 text-center">
+          <FileText class="w-9 h-9 text-slate-300 dark:text-slate-700" />
+          <p class="text-sm font-medium text-slate-500 dark:text-slate-400">No pages yet</p>
+          <p class="text-xs text-slate-400 dark:text-slate-500 max-w-[16rem]">Use "Add Interaction" above to insert a Poll, Q&amp;A, Word Cloud, Feedback or Rating item.</p>
         </div>
       {/if}
     </div>

@@ -3,7 +3,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from redis.asyncio import Redis
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -36,6 +36,8 @@ async def submit_response(
         raise HTTPException(status_code=404, detail="Slide not found")
     if not slide.is_active:
         raise HTTPException(status_code=400, detail="Slide is not currently active")
+    if not slide.session.is_live:
+        raise HTTPException(status_code=403, detail="Session is not live")
 
     # Rate limit: max 10 submissions per guest per slide per minute. guest_identifier
     # is client-supplied, so also cap per-IP-per-slide — otherwise rotating the
@@ -143,10 +145,18 @@ async def upvote_response(
     response = result.scalar_one_or_none()
     if not response:
         raise HTTPException(status_code=404, detail="Response not found")
+    if not response.slide.session.is_live:
+        raise HTTPException(status_code=403, detail="Session is not live")
 
-    response.upvotes += 1
+    # Atomic at the DB level — `response.upvotes += 1` here would read-modify-write
+    # in Python, losing an increment when two upvotes for the same response commit
+    # concurrently (a real scenario: a poll going viral gets simultaneous upvotes
+    # from different IPs, each allowed by the per-IP dedupe above).
+    await db.execute(
+        update(Response).where(Response.id == response_uuid).values(upvotes=Response.upvotes + 1)
+    )
     await db.commit()
-    await db.refresh(response)
+    await db.refresh(response, attribute_names=["upvotes"])
 
     # Publish upvote to Redis so all WS clients update the vote count live
     session_code = response.slide.session.unique_code

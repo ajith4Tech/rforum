@@ -21,9 +21,17 @@ SERVER_ID = str(uuid.uuid4())
 
 # Events that clients are permitted to relay through the WebSocket.
 # Unknown or unlisted event types are silently dropped to prevent UI injection.
+#
+# "response_submitted"/"new_response"/"upvote" are NOT here on purpose: those
+# are authoritative broadcasts published to Redis only by the REST endpoints
+# in app/routers/responses.py after persisting to the DB (see submit_response/
+# upvote_response), then relayed to every socket by ConnectionManager._listen
+# — which does not consult this set. If a client were allowed to send these
+# event names directly, any guest could forge a fake response/upvote that
+# appears live to the moderator and every other viewer without ever hitting
+# the DB, rate limits, or validation.
 ALLOWED_WS_EVENTS = frozenset({
-    "slide_change", "page_change", "session_update",
-    "response_submitted", "new_response", "upvote", "heartbeat",
+    "slide_change", "page_change", "session_update", "heartbeat",
 })
 
 # Control events that only an authenticated session owner (or admin) may relay.
@@ -68,7 +76,7 @@ async def resolve_ws_role(session: Session, token: str | None, requested_role: s
                         select(User).where(User.id == uuid.UUID(user_id))
                     )
                     user = result.scalar_one_or_none()
-                    if user is not None and (
+                    if user is not None and user.is_active and (
                         user.role == UserRole.SUPER_ADMIN or session.owner_id == user.id
                     ):
                         return "moderator"
@@ -96,11 +104,12 @@ class ConnectionManager:
         await websocket.accept()
         if session_code not in self._connections:
             self._connections[session_code] = set()
-            # Shared pubsub listener — started once per session, not per socket
-            pubsub = redis.pubsub()
-            await pubsub.subscribe(f"session:{session_code}")
+            # Shared pubsub listener — started once per session, not per
+            # socket. _listen owns subscribing (and re-subscribing) itself,
+            # so a failure there can never leave this freshly-registered
+            # bucket orphaned with no task watching it — see _listen.
             task = asyncio.create_task(
-                self._listen(session_code, pubsub),
+                self._listen(session_code, redis),
                 name=f"pubsub:{session_code}",
             )
             self._pubsub_tasks[session_code] = task
@@ -132,19 +141,44 @@ class ConnectionManager:
         for ws in dead:
             await self.disconnect(session_code, ws)
 
-    async def _listen(self, session_code: str, pubsub) -> None:
-        try:
-            async for message in pubsub.listen():
-                if message["type"] == "message":
-                    try:
-                        data = json.loads(message["data"])
-                        if data.get("origin") == SERVER_ID:
-                            continue
-                        await self.broadcast(session_code, data)
-                    except (json.JSONDecodeError, KeyError):
-                        pass
-        except asyncio.CancelledError:
-            await pubsub.unsubscribe(f"session:{session_code}")
+    async def _listen(self, session_code: str, redis: Redis) -> None:
+        """Owns this session's shared Redis pubsub subscription end to end,
+        including subscribing in the first place — so a subscribe failure
+        (transient Redis blip, connection drop) never leaves `connect()`'s
+        freshly-registered `_connections[session_code]` bucket orphaned with
+        no listener watching it. Retries with backoff for as long as the
+        session still has connected sockets, so recovery never requires a
+        process restart."""
+        channel = f"session:{session_code}"
+        delay = 1.0
+        while session_code in self._connections:
+            pubsub = redis.pubsub()
+            try:
+                await pubsub.subscribe(channel)
+                delay = 1.0  # reset backoff after a successful (re)subscribe
+                async for message in pubsub.listen():
+                    if message["type"] == "message":
+                        try:
+                            data = json.loads(message["data"])
+                            if data.get("origin") == SERVER_ID:
+                                continue
+                            await self.broadcast(session_code, data)
+                        except (json.JSONDecodeError, KeyError):
+                            pass
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning(
+                    "ws_pubsub_error session=%s error=%s — retrying in %.1fs",
+                    session_code, exc, delay,
+                )
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, 30.0)
+            finally:
+                try:
+                    await pubsub.unsubscribe(channel)
+                except Exception:
+                    pass
 
 
 manager = ConnectionManager()

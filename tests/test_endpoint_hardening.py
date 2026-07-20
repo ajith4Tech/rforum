@@ -31,7 +31,10 @@ def _require_test_postgres():
         capture_output=True, text=True, env=env,
     )
     if check.returncode != 0:
-        pytest.skip(f"Postgres not reachable at localhost:5433 — skipping hardening tests: {check.stderr.strip()}")
+        pytest.skip(
+            f"Postgres not reachable at localhost:5433 — skipping hardening tests: {check.stderr.strip()}",
+            allow_module_level=True,
+        )
         return
     if check.stdout.strip() != "1":
         subprocess.run(
@@ -225,6 +228,28 @@ async def ended_slide(db, ended_session_with_presentation):
     return slide
 
 
+@pytest_asyncio.fixture(loop_scope="session")
+async def response_on_live_slide(db, live_slide):
+    from app.models import Response
+
+    response = Response(slide_id=live_slide.id, value="hello", guest_identifier="g1")
+    db.add(response)
+    await db.commit()
+    await db.refresh(response)
+    return response
+
+
+@pytest_asyncio.fixture(loop_scope="session")
+async def response_on_ended_slide(db, ended_slide):
+    from app.models import Response
+
+    response = Response(slide_id=ended_slide.id, value="hello", guest_identifier="g1")
+    db.add(response)
+    await db.commit()
+    await db.refresh(response)
+    return response
+
+
 def _token_for(user):
     from app.auth import create_access_token
 
@@ -233,10 +258,28 @@ def _token_for(user):
 
 class _FakeRedis:
     """ASGITransport doesn't run app lifespan, so app.state.redis is never set —
-    clear_responses() only needs .publish() to fire-and-forget the WS broadcast."""
+    submit_response/upvote_response need incr/expire (submission rate limits)
+    and exists/setex (upvote per-IP dedupe) in addition to clear_responses'
+    fire-and-forget .publish() for the WS broadcast."""
+
+    def __init__(self):
+        self._store: dict[str, str] = {}
 
     async def publish(self, *args, **kwargs):
         pass
+
+    async def incr(self, key):
+        self._store[key] = str(int(self._store.get(key, "0")) + 1)
+        return int(self._store[key])
+
+    async def expire(self, *args, **kwargs):
+        pass
+
+    async def exists(self, key):
+        return key in self._store
+
+    async def setex(self, key, ttl, value):
+        self._store[key] = value
 
 
 @pytest_asyncio.fixture(loop_scope="session")
@@ -344,6 +387,67 @@ class TestListResponsesLiveGate:
     async def test_guest_can_list_responses_for_a_live_session(self, client, live_slide):
         resp = await client.get(f"/api/slides/{live_slide.id}/responses/")
         assert resp.status_code == 200
+
+
+class TestSubmitResponseLiveGate:
+    async def test_guest_cannot_submit_to_a_slide_on_a_non_live_session(self, client, ended_slide):
+        resp = await client.post(
+            f"/api/slides/{ended_slide.id}/responses/",
+            json={"guest_identifier": "g1", "value": "hi"},
+        )
+        assert resp.status_code == 403
+
+    async def test_guest_can_submit_to_a_slide_on_a_live_session(self, client, live_slide):
+        resp = await client.post(
+            f"/api/slides/{live_slide.id}/responses/",
+            json={"guest_identifier": "g1", "value": "hi"},
+        )
+        assert resp.status_code == 201
+
+
+class TestUpvoteResponseLiveGate:
+    async def test_guest_cannot_upvote_a_response_on_a_non_live_session(self, client, ended_slide, response_on_ended_slide):
+        resp = await client.post(
+            f"/api/slides/{ended_slide.id}/responses/{response_on_ended_slide.id}/upvote"
+        )
+        assert resp.status_code == 403
+
+    async def test_guest_can_upvote_a_response_on_a_live_session(self, client, live_slide, response_on_live_slide):
+        resp = await client.post(
+            f"/api/slides/{live_slide.id}/responses/{response_on_live_slide.id}/upvote"
+        )
+        assert resp.status_code == 200
+        assert resp.json()["upvotes"] == 1
+
+
+class TestUpvoteAtomicIncrement:
+    async def test_concurrent_upvotes_are_not_lost(self, db, response_on_live_slide, test_engine):
+        """Two concurrent upvotes for the same response, each issuing the same
+        atomic `UPDATE ... SET upvotes = upvotes + 1` the endpoint uses, must
+        both land — a naive read-modify-write (`response.upvotes += 1`) would
+        lose one of the two increments under real concurrency."""
+        import asyncio
+
+        from sqlalchemy import update
+        from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+        from app.models import Response
+
+        session_factory = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+
+        async def bump():
+            async with session_factory() as session:
+                await session.execute(
+                    update(Response)
+                    .where(Response.id == response_on_live_slide.id)
+                    .values(upvotes=Response.upvotes + 1)
+                )
+                await session.commit()
+
+        await asyncio.gather(*(bump() for _ in range(10)))
+
+        await db.refresh(response_on_live_slide, attribute_names=["upvotes"])
+        assert response_on_live_slide.upvotes == 10
 
 
 class TestClearResponsesAdminBypass:

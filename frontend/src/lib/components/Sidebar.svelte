@@ -16,6 +16,8 @@
     onActivateSlide,
     onStartEditing,
     onRemoveSlide,
+    onDuplicateSlide,
+    onMoveSlide,
     onReorder
   }: {
     session: any;
@@ -29,6 +31,8 @@
     onActivateSlide: (id: string) => void;
     onStartEditing: (id: string) => void;
     onRemoveSlide: (id: string) => void;
+    onDuplicateSlide?: (id: string) => void;
+    onMoveSlide?: (id: string, delta: number) => void;
     onReorder?: (slideId: string, newIndex: number) => void;
   } = $props();
 
@@ -85,7 +89,7 @@
   }
 </script>
 
-<aside class="col-span-12 lg:col-span-3 space-y-4">
+<aside class="col-span-12 lg:col-span-3 order-2 lg:order-1 space-y-4">
   <!-- Session info card -->
   <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5">
     <div class="flex items-center justify-between mb-3">
@@ -131,30 +135,36 @@
       <span class="text-xs text-slate-400">{slides.length}</span>
     </div>
     {#if slides.length === 0}
-      <div class="flex flex-col items-center gap-2 py-6 text-center">
-        <Layers class="w-8 h-8 text-slate-300 dark:text-slate-700" />
-        <p class="text-xs text-slate-400">No slides yet. Add one above.</p>
+      <div class="flex flex-col items-center gap-2 py-8 text-center">
+        <Layers class="w-9 h-9 text-slate-300 dark:text-slate-700" />
+        <p class="text-sm font-medium text-slate-500 dark:text-slate-400">No slides yet</p>
+        <p class="text-xs text-slate-400 dark:text-slate-500 max-w-[18rem]">Add a Poll, Q&amp;A, Feedback, Content or Word Cloud slide above to get started.</p>
       </div>
     {:else}
-      <div class="space-y-1.5">
+      <div class="space-y-1">
         {#each slides as slide, index (slide.id)}
           <div
-            ondragstart={() => handleDragStart(slide.id)}
             ondragover={(e) => handleDragOver(e, index)}
             ondragleave={handleDragLeave}
             ondrop={(e) => handleDrop(e, index)}
-            class="transition-all {dragOverIndex === index ? 'opacity-50 border-b-2 border-purple-400' : ''}"
+            class="rounded-lg transition-all {dragOverIndex === index ? 'ring-2 ring-purple-400' : ''}"
           >
-            <SlideCard
-              {slide}
-              active={slide.id === activeSlideId}
-              icon={slideIcons[getSlideTypeKey(slide)]}
-              label={getSlideLabel(slide)}
-              onActivate={onActivateSlide}
-              onEdit={onStartEditing}
-              onRemove={onRemoveSlide}
-              onReorder={onReorder}
-            />
+            <div ondragstart={() => handleDragStart(slide.id)}>
+              <SlideCard
+                {slide}
+                active={slide.id === activeSlideId}
+                icon={slideIcons[getSlideTypeKey(slide)]}
+                label={getSlideLabel(slide)}
+                isFirst={index === 0}
+                isLast={index === slides.length - 1}
+                onActivate={onActivateSlide}
+                onEdit={onStartEditing}
+                onRemove={onRemoveSlide}
+                onDuplicate={onDuplicateSlide}
+                onMove={onMoveSlide}
+                {onReorder}
+              />
+            </div>
           </div>
         {/each}
       </div>

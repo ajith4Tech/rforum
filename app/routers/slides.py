@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import os
@@ -18,6 +19,7 @@ from app.auth import get_current_user
 from app.config import get_settings
 from app.database import get_db
 from app.models import Session, SessionAsset, Slide, User, UserRole
+from app.rate_limit import check_rate_limit
 from app.schemas import SlideCreate, SlideOut, SlideUpdate, SlideUploadOut, UploadMeta
 from app.services.file_processing import (
     check_content_length,
@@ -29,6 +31,21 @@ from app.services.file_processing import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/sessions/{session_id}/slides", tags=["slides"])
+
+UPLOAD_RATE_LIMIT = 10
+UPLOAD_RATE_WINDOW_SECONDS = 60
+
+
+async def _check_upload_rate_limit(request: Request, user: User) -> None:
+    redis: Redis = request.app.state.redis
+    allowed = await check_rate_limit(
+        redis,
+        f"rate:slide_upload:{user.id}",
+        UPLOAD_RATE_LIMIT,
+        UPLOAD_RATE_WINDOW_SECONDS,
+    )
+    if not allowed:
+        raise HTTPException(status_code=429, detail="Too many attempts. Please slow down.")
 
 
 async def _verify_ownership(
@@ -199,6 +216,7 @@ async def upload_content_file(
 ):
     session = await _verify_ownership(session_id, user, db)
     _ensure_not_presentation_session(session)
+    await _check_upload_rate_limit(request, user)
 
     try:
         session_uuid = uuid.UUID(session_id)
@@ -247,8 +265,12 @@ async def upload_content_file(
     os.makedirs("uploads", exist_ok=True)
     filename = f"{slide_id}_{original_name}"
     file_path = os.path.join("uploads", filename)
-    with open(file_path, "wb") as handle:
-        handle.write(content)
+
+    def _write_file():
+        with open(file_path, "wb") as handle:
+            handle.write(content)
+
+    await asyncio.to_thread(_write_file)
 
     file_url = f"/uploads/{filename}"
     file_name = original_name
@@ -256,7 +278,7 @@ async def upload_content_file(
     content_type = actual_mime
 
     # ── Convert PPT/PPTX → PDF ────────────────────────────
-    conversion = convert_to_pdf_if_needed(file_path, ext)
+    conversion = await asyncio.to_thread(convert_to_pdf_if_needed, file_path, ext)
     all_warnings.extend(conversion.warnings)
 
     if conversion.success and conversion.output_path:
@@ -267,7 +289,7 @@ async def upload_content_file(
 
     # ── Extract page count (works for ALL fitz-supported types) ──
     final_path = file_url.lstrip("/")
-    total_pages, page_warnings = extract_total_pages(final_path)
+    total_pages, page_warnings = await asyncio.to_thread(extract_total_pages, final_path)
     all_warnings.extend(page_warnings)
 
     if total_pages == 1 and page_warnings:
@@ -411,7 +433,7 @@ async def get_page_image(
         raise HTTPException(status_code=404, detail="File not found on disk")
 
     try:
-        doc = fitz.open(file_path)
+        doc = await asyncio.to_thread(fitz.open, file_path)
     except fitz.EmptyFileError:
         logger.error("Page render failed — empty file: slide=%s file='%s'", slide_id, file_path)
         raise HTTPException(status_code=422, detail="File is empty and cannot be rendered.")
@@ -443,10 +465,13 @@ async def get_page_image(
         doc.close()
         raise HTTPException(status_code=400, detail=f"Page must be between 1 and {total}")
 
-    page = doc[page_num - 1]
-    # Render at 2x for crisp display on phones
-    pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
-    img_bytes = pix.tobytes("png")
+    def _render_page():
+        page = doc[page_num - 1]
+        # Render at 2x for crisp display on phones
+        pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
+        return pix.tobytes("png")
+
+    img_bytes = await asyncio.to_thread(_render_page)
     doc.close()
 
     return StreamingResponse(

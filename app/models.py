@@ -99,10 +99,10 @@ class Session(Base):
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     owner_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True
     )
     event_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("events.id", ondelete="SET NULL"), nullable=True
+        UUID(as_uuid=True), ForeignKey("events.id", ondelete="SET NULL"), nullable=True, index=True
     )
     unique_code: Mapped[str] = mapped_column(
         String(9), unique=True, nullable=False
@@ -115,7 +115,7 @@ class Session(Base):
     # the backend/frontend use to pick between the legacy slide-list flow and the
     # new Presentation Timeline flow.
     presentation_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("presentations.id", ondelete="SET NULL"), nullable=True
+        UUID(as_uuid=True), ForeignKey("presentations.id", ondelete="SET NULL"), nullable=True, index=True
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -145,7 +145,7 @@ class Slide(Base):
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     session_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("sessions.id", ondelete="CASCADE"), nullable=False
+        UUID(as_uuid=True), ForeignKey("sessions.id", ondelete="CASCADE"), nullable=False, index=True
     )
     type: Mapped[SlideType] = mapped_column(
         Enum(SlideType, native_enum=True), nullable=False
@@ -167,7 +167,7 @@ class Response(Base):
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     slide_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("slides.id", ondelete="CASCADE"), nullable=False
+        UUID(as_uuid=True), ForeignKey("slides.id", ondelete="CASCADE"), nullable=False, index=True
     )
     value: Mapped[str] = mapped_column(Text, nullable=False)
     guest_identifier: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -234,20 +234,21 @@ class SessionAsset(Base):
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     session_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("sessions.id", ondelete="SET NULL"), nullable=True
+        UUID(as_uuid=True), ForeignKey("sessions.id", ondelete="SET NULL"), nullable=True, index=True
     )
     event_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("events.id", ondelete="SET NULL"), nullable=True
+        UUID(as_uuid=True), ForeignKey("events.id", ondelete="SET NULL"), nullable=True, index=True
     )
     slide_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("slides.id", ondelete="SET NULL"), nullable=True
+        UUID(as_uuid=True), ForeignKey("slides.id", ondelete="SET NULL"), nullable=True, index=True
     )
     # Set when this asset is the immutable original file behind a Presentation.
     # Destructive asset actions (replace/delete) must refuse when this is set —
-    # those flows go through the presentations router instead.
+    # those flows go through the presentations router instead. Never filtered/
+    # joined on directly (only set on insert), so no index here.
     presentation_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("presentations.id", ondelete="SET NULL"), nullable=True
     )
@@ -350,7 +351,7 @@ class PresentationPage(Base):
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     presentation_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("presentations.id", ondelete="CASCADE"), nullable=False
+        UUID(as_uuid=True), ForeignKey("presentations.id", ondelete="CASCADE"), nullable=False, index=True
     )
     page_number: Mapped[int] = mapped_column(Integer, nullable=False)
     image_url: Mapped[str] = mapped_column(String(1000), nullable=False)
@@ -419,7 +420,7 @@ class PresentationTimelineItem(Base):
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     timeline_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("presentation_timelines.id", ondelete="CASCADE"), nullable=False
+        UUID(as_uuid=True), ForeignKey("presentation_timelines.id", ondelete="CASCADE"), nullable=False, index=True
     )
     order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     item_type: Mapped[TimelineItemType] = mapped_column(

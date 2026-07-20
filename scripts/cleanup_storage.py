@@ -42,6 +42,8 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from app.storage.keys import dir_prefix_from_known_key, pdf_key_for_dir  # noqa: E402
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s — %(message)s")
 logger = logging.getLogger("cleanup_storage")
 
@@ -99,26 +101,55 @@ async def _delete_expired(conn, retention_days: int, dry_run: bool, storage) -> 
     deleted = 0
     for row in rows:
         pres_id = row["id"]
-        page_rows = await conn.fetch(
-            "SELECT image_url, thumbnail_url FROM presentation_pages WHERE presentation_id = $1",
-            pres_id,
-        )
-        keys = (
-            [row["original_file_url"]]
-            + [pr["image_url"] for pr in page_rows]
-            + [pr["thumbnail_url"] for pr in page_rows]
-        )
+        try:
+            if dry_run:
+                logger.info(
+                    "Would delete expired presentation %s (owner=%s, orphaned past %d days) [DRY RUN]",
+                    pres_id, row["owner_id"], retention_days,
+                )
+                deleted += 1
+                continue
 
-        logger.info(
-            "Deleting expired presentation %s (owner=%s, orphaned past %d days)%s",
-            pres_id, row["owner_id"], retention_days, " [DRY RUN]" if dry_run else "",
-        )
-        if not dry_run:
-            await conn.execute("DELETE FROM presentations WHERE id = $1", pres_id)
+            page_rows = await conn.fetch(
+                "SELECT image_url, thumbnail_url FROM presentation_pages WHERE presentation_id = $1",
+                pres_id,
+            )
+            prefix = dir_prefix_from_known_key(row["original_file_url"], pres_id)
+            keys = (
+                [row["original_file_url"], pdf_key_for_dir(prefix)]
+                + [pr["image_url"] for pr in page_rows]
+                + [pr["thumbnail_url"] for pr in page_rows]
+            )
+
+            # Re-check the reference at delete time, not just at the initial scan
+            # above — closes the window where a concurrent attach re-references
+            # this presentation between that SELECT and this DELETE.
+            deleted_row = await conn.fetchrow(
+                """
+                DELETE FROM presentations p
+                WHERE p.id = $1
+                  AND NOT EXISTS (SELECT 1 FROM sessions s WHERE s.presentation_id = p.id)
+                RETURNING p.id
+                """,
+                pres_id,
+            )
+            if deleted_row is None:
+                logger.info(
+                    "Skipping presentation %s — re-attached to a session since the initial scan",
+                    pres_id,
+                )
+                continue
+
             for key in keys:
                 storage.delete(key)
-            storage.delete_prefix(f"presentations/{row['owner_id']}/{pres_id}")
-        deleted += 1
+            storage.delete_prefix(prefix)
+            logger.info(
+                "Deleted expired presentation %s (owner=%s, orphaned past %d days)",
+                pres_id, row["owner_id"], retention_days,
+            )
+            deleted += 1
+        except Exception:
+            logger.exception("Failed to delete expired presentation %s — skipping", pres_id)
     return deleted
 
 
@@ -176,6 +207,68 @@ def _sweep_disk_orphans(known_ids: set[str], storage_root: Path, dry_run: bool) 
     return removed
 
 
+def _sweep_s3_orphans(known_ids: set[str], storage, dry_run: bool) -> int:
+    """
+    S3 equivalent of _sweep_disk_orphans — only runs when the active storage
+    backend has an S3 primary (STORAGE_PROVIDER=s3, see app/storage/fallback.py).
+    Groups S3 keys under "presentations/" into per-presentation prefixes via
+    StorageBackend.list_keys(), same UUID-detection convention as the disk
+    sweep (old `presentations/<uuid>/` shape and new
+    `presentations/<owner_uuid>/<presentation_uuid>/` shape), and deletes any
+    prefix with zero matching DB row — skipping anything newer than 1h so an
+    in-flight upload is never touched.
+    """
+    from app.storage.s3 import S3StorageBackend
+
+    s3 = getattr(storage, "primary", None)
+    if not isinstance(s3, S3StorageBackend):
+        return 0
+
+    keys = s3.list_keys("presentations")
+    dir_keys: dict[str, list[str]] = {}
+    for key in keys:
+        parts = key.split("/")
+        if len(parts) < 3:
+            continue
+        try:
+            uuid.UUID(parts[1])
+            dir_prefix = "/".join(parts[:2])
+        except ValueError:
+            if len(parts) < 4:
+                continue
+            try:
+                uuid.UUID(parts[2])
+            except ValueError:
+                continue
+            dir_prefix = "/".join(parts[:3])
+        dir_keys.setdefault(dir_prefix, []).append(key)
+
+    grace_cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
+    removed = 0
+    for dir_prefix, dir_key_list in dir_keys.items():
+        pres_id = dir_prefix.rstrip("/").split("/")[-1]
+        if pres_id in known_ids:
+            continue
+        # Check every key's last-modified, not just one — an upload still in
+        # progress can have an old "original" but a fresh "thumbnails/*" being
+        # written, and lexicographic key order doesn't track write order.
+        last_modified_times = [
+            head["last_modified"]
+            for head in (s3.head(key) for key in dir_key_list)
+            if head is not None
+        ]
+        if not last_modified_times or max(last_modified_times) > grace_cutoff:
+            continue  # could be an in-flight upload — leave it alone
+        logger.info(
+            "Removing S3-orphaned prefix %s (no matching DB row)%s",
+            dir_prefix, " [DRY RUN]" if dry_run else "",
+        )
+        if not dry_run:
+            s3.delete_prefix(dir_prefix)
+        removed += 1
+    return removed
+
+
 async def _mark_stuck_failed(conn, dry_run: bool) -> int:
     rows = await conn.fetch(
         """
@@ -220,6 +313,7 @@ async def _run(args: argparse.Namespace) -> None:
 
         known_ids = {str(r["id"]) for r in await conn.fetch("SELECT id FROM presentations")}
         disk_removed = _sweep_disk_orphans(known_ids, Path(settings.STORAGE_ROOT).resolve(), args.dry_run)
+        s3_removed = _sweep_s3_orphans(known_ids, storage, args.dry_run)
 
         stuck = await _mark_stuck_failed(conn, args.dry_run)
     finally:
@@ -227,8 +321,9 @@ async def _run(args: argparse.Namespace) -> None:
 
     label = "would_" if args.dry_run else ""
     logger.info(
-        "Done. %smark_orphaned=%d %sdelete_expired=%d %sdisk_orphans_removed=%d %smark_stuck_failed=%d",
-        label, marked, label, deleted, label, disk_removed, label, stuck,
+        "Done. %smark_orphaned=%d %sdelete_expired=%d %sdisk_orphans_removed=%d "
+        "%ss3_orphans_removed=%d %smark_stuck_failed=%d",
+        label, marked, label, deleted, label, disk_removed, label, s3_removed, label, stuck,
     )
 
 

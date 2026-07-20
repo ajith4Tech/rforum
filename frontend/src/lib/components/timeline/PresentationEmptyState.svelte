@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte';
   import { getPresentationPageThumbnailUrl } from '$lib/api';
   import UploadProgress from './UploadProgress.svelte';
   import PresentationPickerDialog from './PresentationPickerDialog.svelte';
@@ -34,6 +35,8 @@
     fakeStageTimers = [];
   }
 
+  onDestroy(clearFakeStageTimers);
+
   async function startUpload(file: File) {
     pendingFile = file;
     stage = 'uploading';
@@ -57,8 +60,10 @@
 
       // Briefly show the Ready state (slide count + preview) before revealing
       // the full workspace, so the moderator actually sees the result of the
-      // upload rather than an instant jump-cut.
-      setTimeout(() => onUploadDone(result), 900);
+      // upload rather than an instant jump-cut. Tracked in fakeStageTimers too
+      // so it's cancelled (not fired against a torn-down component) if the
+      // moderator navigates away inside this window.
+      fakeStageTimers.push(setTimeout(() => onUploadDone(result), 900));
     } catch (err: any) {
       clearFakeStageTimers();
       stage = 'error';
@@ -94,8 +99,13 @@
   }
 
   async function handleAttachFromPicker(presentationId: string) {
-    await onAttach(presentationId);
-    pickerOpen = false;
+    try {
+      await onAttach(presentationId);
+      pickerOpen = false;
+    } catch {
+      // Parent surfaces the failure via its own save-error banner; leave the
+      // picker open so the moderator can retry instead of silently closing it.
+    }
   }
 </script>
 
@@ -122,15 +132,16 @@
     <div
       role="button"
       tabindex="0"
+      aria-label="Upload a presentation file — drag and drop, or press Enter to browse"
       ondragover={(e) => { e.preventDefault(); dragOver = true; }}
       ondragleave={() => (dragOver = false)}
       ondrop={handleDrop}
       onclick={() => document.getElementById('presentation-file-input')?.click()}
       onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); document.getElementById('presentation-file-input')?.click(); } }}
-      class="flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed py-8 px-4 text-center cursor-pointer transition-colors
-        {dragOver ? 'border-brand-500 bg-brand-500/5' : 'border-surface-200 dark:border-surface-800 hover:border-surface-300 dark:hover:border-surface-700'}"
+      class="flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed py-8 px-4 text-center cursor-pointer transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2
+        {dragOver ? 'border-brand-500 bg-brand-500/5 scale-[1.01] shadow-md' : 'border-surface-200 dark:border-surface-800 hover:border-surface-300 dark:hover:border-surface-700'}"
     >
-      <UploadCloud class="w-7 h-7 {dragOver ? 'text-brand-500' : 'text-surface-400'}" />
+      <UploadCloud class="w-7 h-7 transition-transform duration-150 {dragOver ? 'text-brand-500 scale-110' : 'text-surface-400'}" />
       <p class="text-sm font-medium">Drag &amp; drop a file here, or click to browse</p>
       <p class="text-xs text-surface-500">PDF, PPT, or PPTX</p>
       <input

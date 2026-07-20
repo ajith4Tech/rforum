@@ -1,6 +1,5 @@
 <script lang="ts">
   import { getPresentationPageImageUrl } from '$lib/api';
-  import PageImageViewer from '$lib/components/PageImageViewer.svelte';
   import Modal from '$lib/components/Modal.svelte';
   import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
   import PresentationDetailsPanel from './PresentationDetailsPanel.svelte';
@@ -8,8 +7,9 @@
   import TimelineSidebar from './TimelineSidebar.svelte';
   import PresentationLiveView from './PresentationLiveView.svelte';
   import { metaForItem } from '$lib/timelineTypes';
-  import { Eye, Pencil, Check, Loader2 } from 'lucide-svelte';
+  import { Eye, Pencil, Check, Loader2, Undo2, Redo2, Maximize, Minimize } from 'lucide-svelte';
   import type { ConnectionStatus as WsStatus } from '$lib/ws';
+  import ZoomableImageViewer from '$lib/components/ZoomableImageViewer.svelte';
 
   let {
     session,
@@ -18,6 +18,8 @@
     responses = [],
     wsStatus = 'disconnected' as WsStatus,
     saveState = 'idle' as 'idle' | 'saving' | 'saved',
+    canUndo = false,
+    canRedo = false,
     onToggleLive,
     onActivateItem,
     onNavigate,
@@ -30,7 +32,10 @@
     onRegenerate,
     onDetach,
     onDeletePresentation,
-    onDetailsClosedAfterChange
+    onDetailsClosedAfterChange,
+    onDirtyChange,
+    onUndo,
+    onRedo
   }: {
     session: any;
     presentation: any;
@@ -38,6 +43,8 @@
     responses?: any[];
     wsStatus?: WsStatus;
     saveState?: 'idle' | 'saving' | 'saved';
+    canUndo?: boolean;
+    canRedo?: boolean;
     onToggleLive: () => void;
     onActivateItem: (itemId: string) => void;
     onNavigate: (direction: 'prev' | 'next') => void;
@@ -51,7 +58,28 @@
     onDetach: () => Promise<void>;
     onDeletePresentation: (presentationId: string) => Promise<void>;
     onDetailsClosedAfterChange: () => void;
+    onDirtyChange?: (dirty: boolean) => void;
+    onUndo?: () => void;
+    onRedo?: () => void;
   } = $props();
+
+  let workspaceEl: HTMLDivElement | null = $state(null);
+  let isFullscreen = $state(false);
+
+  function toggleFullscreen() {
+    if (!workspaceEl) return;
+    if (!document.fullscreenElement) {
+      workspaceEl.requestFullscreen?.().catch(() => {});
+    } else {
+      document.exitFullscreen?.().catch(() => {});
+    }
+  }
+
+  $effect(() => {
+    function onFsChange() { isFullscreen = document.fullscreenElement === workspaceEl; }
+    document.addEventListener('fullscreenchange', onFsChange);
+    return () => document.removeEventListener('fullscreenchange', onFsChange);
+  });
 
   const sortedItems = $derived([...(timeline?.items || [])].sort((a: any, b: any) => a.order - b.order));
   const activeItem = $derived(sortedItems.find((i: any) => i.id === timeline?.active_timeline_item_id) || null);
@@ -62,6 +90,7 @@
   let replaceInputEl: HTMLInputElement | null = $state(null);
   let previewVariant: 'guest' | 'screen' | null = $state(null);
   let pageImageLoaded = $state(false);
+  let pageImageErrored = $state(false);
   let detailsOpen = $state(false);
   let detachedWhileDetailsOpen = $state(false);
   let confirmingReplaceFile: File | null = $state(null);
@@ -94,7 +123,9 @@
   }
 
   function requestDeleteActive() {
-    if (activeItem && activeItem.item_type !== 'PAGE') {
+    // Mirror the sidebar's confirm-before-delete gate — Delete/Backspace
+    // must not remove an interaction with fewer steps than the mouse path.
+    if (activeItem && activeItem.item_type !== 'PAGE' && confirm(`Delete this ${activeMeta?.label ?? 'interaction'}?`)) {
       onDeleteItem(activeItem.id);
     }
   }
@@ -102,6 +133,7 @@
   $effect(() => {
     void activeItem?.id; // re-run (and reset the skeleton) whenever the active item changes
     pageImageLoaded = false;
+    pageImageErrored = false;
   });
 
   $effect(() => {
@@ -139,7 +171,10 @@
   onchange={handleReplaceFileChange}
 />
 
-<div class="grid grid-cols-12 gap-5">
+<div
+  bind:this={workspaceEl}
+  class="grid grid-cols-12 gap-5 {isFullscreen ? 'h-screen overflow-y-auto bg-surface-50 dark:bg-surface-950 p-4 sm:p-6' : ''}"
+>
   <TimelineSidebar
     {session}
     {presentation}
@@ -157,7 +192,7 @@
     onOpenDetails={openDetails}
   />
 
-  <section class="col-span-12 lg:col-span-8">
+  <section class="col-span-12 lg:col-span-8 order-1 lg:order-2">
     {#if !activeItem}
       <div class="card text-center text-surface-400 py-20">Select a page or interaction to get started.</div>
     {:else}
@@ -184,6 +219,26 @@
               {/if}
             </span>
           {/if}
+
+          {#if onUndo && onRedo}
+            <div class="flex items-center rounded-lg border border-surface-200 dark:border-surface-800 overflow-hidden">
+              <button onclick={onUndo} disabled={!canUndo} class="p-1.5 text-surface-500 hover:bg-surface-100 dark:hover:bg-surface-800 transition disabled:opacity-30 disabled:pointer-events-none" aria-label="Undo" title="Undo (Ctrl+Z)">
+                <Undo2 class="w-3.5 h-3.5" />
+              </button>
+              <button onclick={onRedo} disabled={!canRedo} class="p-1.5 border-l border-surface-200 dark:border-surface-800 text-surface-500 hover:bg-surface-100 dark:hover:bg-surface-800 transition disabled:opacity-30 disabled:pointer-events-none" aria-label="Redo" title="Redo (Ctrl+Shift+Z)">
+                <Redo2 class="w-3.5 h-3.5" />
+              </button>
+            </div>
+          {/if}
+
+          <button
+            onclick={toggleFullscreen}
+            class="p-1.5 rounded-lg border border-surface-200 dark:border-surface-800 text-surface-500 hover:bg-surface-100 dark:hover:bg-surface-800 transition"
+            aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+            title={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+          >
+            {#if isFullscreen}<Minimize class="w-3.5 h-3.5" />{:else}<Maximize class="w-3.5 h-3.5" />{/if}
+          </button>
 
           <div class="flex items-center rounded-lg border border-surface-200 dark:border-surface-800 overflow-hidden text-xs font-medium">
             <button
@@ -225,18 +280,32 @@
         <div class="card p-4 sm:p-5">
           <div class="text-lg font-semibold mb-3">Page {activeItem.page.page_number}</div>
           <div class="overflow-x-auto relative">
-            {#if !pageImageLoaded}
-              <div class="max-h-[500px] aspect-[4/3] rounded-xl bg-surface-200 dark:bg-surface-800 animate-pulse-live mx-auto"></div>
+            {#if pageImageErrored}
+              <div class="max-h-[500px] aspect-[4/3] rounded-xl bg-surface-100 dark:bg-surface-900 border border-surface-200 dark:border-surface-800 mx-auto flex flex-col items-center justify-center gap-2 text-sm text-surface-500 dark:text-surface-400">
+                <span>Couldn't load this page.</span>
+                <button
+                  type="button"
+                  class="text-brand-600 dark:text-brand-400 font-medium hover:underline"
+                  onclick={() => { pageImageLoaded = false; pageImageErrored = false; }}
+                >
+                  Retry
+                </button>
+              </div>
+            {:else}
+              {#if !pageImageLoaded}
+                <div class="max-h-[500px] aspect-[4/3] rounded-xl bg-surface-200 dark:bg-surface-800 animate-pulse-live mx-auto"></div>
+              {/if}
+              <div class={pageImageLoaded ? '' : 'hidden'}>
+                <ZoomableImageViewer
+                  src={getPresentationPageImageUrl(presentation.id, activeItem.page.page_number)}
+                  page={activeItem.page.page_number}
+                  alt={`Page ${activeItem.page.page_number}`}
+                  imgClass="rounded-xl border border-surface-200 mx-auto"
+                  onLoad={() => (pageImageLoaded = true)}
+                  onError={() => { pageImageErrored = true; }}
+                />
+              </div>
             {/if}
-            <div class={pageImageLoaded ? '' : 'hidden'}>
-              <PageImageViewer
-                src={getPresentationPageImageUrl(presentation.id, activeItem.page.page_number)}
-                page={activeItem.page.page_number}
-                alt={`Page ${activeItem.page.page_number}`}
-                imgClass="max-h-[500px] rounded-xl border border-surface-200 mx-auto"
-                onLoad={() => (pageImageLoaded = true)}
-              />
-            </div>
           </div>
         </div>
       {:else}
@@ -248,6 +317,7 @@
             editing={editingItemId === activeItem.id}
             onToggleEdit={() => (editingItemId = editingItemId === activeItem.id ? null : activeItem.id)}
             onSaveContent={(cj) => onUpdateItemContent(activeItem.id, cj)}
+            {onDirtyChange}
           />
         {/key}
       {/if}

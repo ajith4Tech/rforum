@@ -64,3 +64,21 @@ class LocalFilesystemBackend(StorageBackend):
 
     def size(self, key: str) -> int:
         return self._resolve(key).stat().st_size
+
+    def path_for(self, key: str) -> Path:
+        """Public escape hatch for the migration script (mirrors
+        S3StorageBackend.object_key_for), which needs the literal on-disk
+        path to stream-hash a file without loading it fully into memory."""
+        return self._resolve(key)
+
+    def list_keys(self, prefix: str) -> list[str]:
+        path = self._resolve(prefix)
+        if path.is_file():
+            return [str(path.relative_to(self.root)).replace(os.sep, "/")]
+        if not path.is_dir():
+            return []
+        return sorted(
+            str(p.relative_to(self.root)).replace(os.sep, "/")
+            for p in path.rglob("*")
+            if p.is_file()
+        )

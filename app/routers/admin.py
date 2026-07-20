@@ -12,11 +12,12 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import delete, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_super_admin
 from app.database import get_db
-from app.models import Event, Session, SessionAsset, User, UserRole
+from app.models import Event, Session, SessionAsset, User
 from app.schemas import UserAdminOut, UserOut, UserRoleUpdate
 
 
@@ -150,8 +151,9 @@ async def delete_user(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Permanently delete a user and all their owned content
-    (sessions, slides, events cascade via FK).
+    Permanently delete a user. Presentations and session assets cascade via FK;
+    a user who still owns any Session or Event must have those reassigned or
+    deleted first (owner_id has no cascade rule for those tables).
     Super admin cannot delete themselves.
     """
     try:
@@ -162,10 +164,17 @@ async def delete_user(
     if uid == admin.id:
         raise HTTPException(status_code=400, detail="Cannot delete your own account")
 
-    result = await db.execute(delete(User).where(User.id == uid))
-    if result.rowcount == 0:
-        raise HTTPException(status_code=404, detail="User not found")
-    await db.commit()
+    try:
+        result = await db.execute(delete(User).where(User.id == uid))
+        if result.rowcount == 0:
+            raise HTTPException(status_code=404, detail="User not found")
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot delete user: they still own sessions or events. Delete or reassign those first.",
+        )
 
 
 # ── Sessions (moderation) ─────────────────────────────────────────────────────

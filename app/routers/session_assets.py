@@ -1,4 +1,5 @@
 """Session Assets router – CRUD for uploaded files with storage tracking."""
+import asyncio
 import logging
 import os
 import uuid
@@ -12,6 +13,7 @@ from app.auth import get_current_user
 from app.config import get_settings
 from app.database import get_db
 from app.models import Event, Session, SessionAsset, Slide, User
+from app.rate_limit import check_rate_limit
 from app.schemas import SessionAssetOut
 from app.services.file_processing import (
     check_content_length,
@@ -24,15 +26,42 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/assets", tags=["session_assets"])
 
+UPLOAD_RATE_LIMIT = 10
+UPLOAD_RATE_WINDOW_SECONDS = 60
+
+
+async def _check_upload_rate_limit(request: Request, user: User) -> None:
+    redis = request.app.state.redis
+    allowed = await check_rate_limit(
+        redis,
+        f"rate:asset_upload:{user.id}",
+        UPLOAD_RATE_LIMIT,
+        UPLOAD_RATE_WINDOW_SECONDS,
+    )
+    if not allowed:
+        raise HTTPException(status_code=429, detail="Too many attempts. Please slow down.")
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _remove_file(file_url: str | None) -> None:
-    """Silently remove file from disk if it exists."""
+    """Silently remove file from disk if it exists.
+
+    file_url is always server-constructed today, but resolve-and-confine to
+    uploads/ anyway (matching the same defensive pattern slides.py's
+    page-serving path uses) rather than trust a DB-stored path unconditionally
+    — a stray "../" here would otherwise let this delete outside uploads/."""
     if not file_url:
         return
     path = file_url.lstrip("/")
-    if path and os.path.exists(path):
+    if not path:
+        return
+    uploads_dir = os.path.realpath("uploads")
+    resolved = os.path.realpath(path)
+    if resolved != uploads_dir and not resolved.startswith(uploads_dir + os.sep):
+        logger.warning("Refusing to remove file outside uploads/: %r", file_url)
+        return
+    if os.path.exists(path):
         try:
             os.remove(path)
         except OSError:
@@ -121,6 +150,7 @@ async def replace_asset_file(
             status_code=409,
             detail="This asset is a Presentation's original file — use the presentation's replace endpoint instead.",
         )
+    await _check_upload_rate_limit(request, user)
 
     settings = get_settings()
     max_bytes = settings.UPLOAD_MAX_MB * 1024 * 1024
@@ -151,20 +181,24 @@ async def replace_asset_file(
     )
 
     # Remove old file from disk
-    _remove_file(asset.file_url)
+    await asyncio.to_thread(_remove_file, asset.file_url)
 
     os.makedirs("uploads", exist_ok=True)
     filename = f"{asset_id}_{original_name}"
     file_path = os.path.join("uploads", filename)
-    with open(file_path, "wb") as fh:
-        fh.write(content)
+
+    def _write_file():
+        with open(file_path, "wb") as fh:
+            fh.write(content)
+
+    await asyncio.to_thread(_write_file)
 
     content_type = actual_mime
     file_url = f"/uploads/{filename}"
     file_name = original_name
 
     # ── Convert PPT/PPTX → PDF ────────────────────────────
-    conversion = convert_to_pdf_if_needed(file_path, ext)
+    conversion = await asyncio.to_thread(convert_to_pdf_if_needed, file_path, ext)
     if conversion.warnings:
         logger.warning(
             "Asset replace conversion warnings. asset=%s: %s",
@@ -179,7 +213,7 @@ async def replace_asset_file(
 
     # ── Extract page count (works for ALL fitz-supported types) ──
     final_path = file_url.lstrip("/")
-    total_pages, page_warnings = extract_total_pages(final_path)
+    total_pages, page_warnings = await asyncio.to_thread(extract_total_pages, final_path)
     if page_warnings:
         logger.warning(
             "Asset replace page count warnings. asset=%s: %s",
@@ -228,7 +262,7 @@ async def delete_asset(
             detail="This asset is a Presentation's original file and cannot be deleted from here.",
         )
 
-    _remove_file(asset.file_url)
+    await asyncio.to_thread(_remove_file, asset.file_url)
 
     if asset.slide_id:
         await db.execute(delete(Slide).where(Slide.id == asset.slide_id))

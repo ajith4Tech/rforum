@@ -87,3 +87,29 @@ class TestPathTraversalGuard:
 
     def test_exists_returns_false_rather_than_raise_for_traversal(self, backend):
         assert backend.exists("../../etc/passwd") is False
+
+
+class TestListKeys:
+
+    def test_list_keys_returns_all_files_under_prefix(self, backend):
+        backend.save("presentations/owner1/p1/original.pdf", b"x")
+        backend.save("presentations/owner1/p1/thumbs/0001.webp", b"y")
+        backend.save("presentations/owner1/p2/original.pdf", b"other")
+
+        keys = backend.list_keys("presentations/owner1/p1")
+
+        assert set(keys) == {
+            "presentations/owner1/p1/original.pdf",
+            "presentations/owner1/p1/thumbs/0001.webp",
+        }
+
+    def test_list_keys_empty_for_missing_prefix(self, backend):
+        assert backend.list_keys("presentations/owner1/nope") == []
+
+    def test_list_keys_does_not_match_sibling_with_shared_prefix_string(self, backend):
+        backend.save("presentations/owner1/p1/original.pdf", b"x")
+        backend.save("presentations/owner1/p10/original.pdf", b"sibling")
+
+        keys = backend.list_keys("presentations/owner1/p1")
+
+        assert keys == ["presentations/owner1/p1/original.pdf"]

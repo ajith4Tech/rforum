@@ -45,7 +45,10 @@ def _require_test_postgres():
         capture_output=True, text=True, env=env,
     )
     if check.returncode != 0:
-        pytest.skip(f"Postgres not reachable at localhost:5433 — skipping integration tests: {check.stderr.strip()}")
+        pytest.skip(
+            f"Postgres not reachable at localhost:5433 — skipping integration tests: {check.stderr.strip()}",
+            allow_module_level=True,
+        )
         return
     if check.stdout.strip() != "1":
         subprocess.run(
@@ -218,7 +221,7 @@ class TestUpload:
         # Only thumbnails + original should exist on disk — no pages/ files yet.
         pages_dirs = list(tmp_path.glob(f"uploads/presentations/*/{presentation_id}/pages"))
         assert pages_dirs == [] or all(not any(d.iterdir()) for d in pages_dirs)
-        thumbs_dirs = list(tmp_path.glob(f"uploads/presentations/*/{presentation_id}/thumbs"))
+        thumbs_dirs = list(tmp_path.glob(f"uploads/presentations/*/{presentation_id}/thumbnails"))
         assert len(thumbs_dirs) == 1
         assert len(list(thumbs_dirs[0].iterdir())) == 3
 
@@ -261,7 +264,9 @@ class TestLazyPageRendering:
         img_resp = await client.get(f"/api/presentations/{presentation_id}/pages/1/image", params=auth)
         assert img_resp.status_code == 200
         assert img_resp.headers["content-type"] == "image/webp"
-        assert "immutable" in img_resp.headers["cache-control"]
+        # Not "immutable": regenerate_presentation can replace the bytes behind
+        # this same URL, so the response is cacheable but bounded, not permanent.
+        assert img_resp.headers["cache-control"] == "public, max-age=3600"
 
         pages_files = list(tmp_path.glob(f"uploads/presentations/*/{presentation_id}/pages/*.webp"))
         assert len(pages_files) == 1
@@ -283,6 +288,42 @@ class TestLazyPageRendering:
         )
         assert thumb_resp.status_code == 200
         assert thumb_resp.headers["content-type"] == "image/webp"
+
+
+class TestPdfConversionCaching:
+    """A PPT/PPTX upload's PDF conversion is persisted to pdf/presentation.pdf
+    (see app.storage.keys.pdf_key_for_dir) so it isn't re-run by every later
+    lazy page render — see app.routers.presentations._load_render_source."""
+
+    async def test_pptx_upload_persists_pdf_and_lazy_render_reuses_it(
+        self, client, owner_session, owner_user, pptx_bytes, tmp_path, monkeypatch
+    ):
+        import app.routers.presentations as presentations_module
+
+        real_convert = presentations_module.convert_to_pdf_bytes
+        calls = []
+
+        def counting_convert(content, ext):
+            calls.append(ext)
+            return real_convert(content, ext)
+
+        monkeypatch.setattr(presentations_module, "convert_to_pdf_bytes", counting_convert)
+
+        resp = await _upload(
+            client, owner_session.id, "deck.pptx", pptx_bytes,
+            content_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        )
+        assert resp.status_code == 201, resp.text
+        presentation_id = resp.json()["presentation"]["id"]
+        assert len(calls) == 1  # one conversion to produce upload-time thumbnails
+
+        pdf_files = list(tmp_path.glob(f"uploads/presentations/*/{presentation_id}/pdf/presentation.pdf"))
+        assert len(pdf_files) == 1
+
+        auth = {"token": _token_for(owner_user)}
+        img_resp = await client.get(f"/api/presentations/{presentation_id}/pages/1/image", params=auth)
+        assert img_resp.status_code == 200
+        assert len(calls) == 1  # lazy render read the cached PDF instead of re-converting
 
 
 class TestReplace:
@@ -441,6 +482,64 @@ class TestOwnership:
 
         resp = await _upload(client, owner_session.id, "deck.pdf", pdf_bytes)
         assert resp.status_code == 404
+
+    async def test_regenerate_requires_presentation_ownership_not_just_session_ownership(
+        self, client, db, owner_user, other_user, owner_session, pdf_1_page
+    ):
+        """A presentation shared into a session via event visibility (attach)
+        must not be mutable in place via /regenerate by someone who doesn't
+        own it — regenerate overwrites the shared render artifacts for every
+        session/event referencing that presentation, unlike attach which only
+        links to it."""
+        import datetime as dt
+
+        from app.auth import get_current_user
+        from app.main import app
+        from app.models import Event, Session as SessionModel
+
+        upload_resp = await _upload(client, owner_session.id, "deck.pdf", pdf_1_page)
+        presentation_id = upload_resp.json()["presentation"]["id"]
+
+        event = Event(owner_id=other_user.id, title="Shared Event", event_date=dt.date(2026, 8, 1))
+        db.add(event)
+        await db.commit()
+        await db.refresh(event)
+
+        # A session owner_user controls, in other_user's event, with the deck
+        # attached — this is what makes the presentation event-visible to
+        # other_user in the first place.
+        source_session = SessionModel(
+            owner_id=owner_user.id, event_id=event.id, unique_code="TEST-REG1", title="Source"
+        )
+        db.add(source_session)
+        await db.commit()
+        await db.refresh(source_session)
+        await client.post(f"/api/sessions/{owner_session.id}/presentation/detach")
+        await client.post(
+            f"/api/sessions/{source_session.id}/presentation/attach/{presentation_id}"
+        )
+
+        # other_user owns a second session in the same event and attaches the
+        # same (not-their-own) deck to it via event visibility.
+        other_session = SessionModel(
+            owner_id=other_user.id, event_id=event.id, unique_code="TEST-REG2", title="Other"
+        )
+        db.add(other_session)
+        await db.commit()
+        await db.refresh(other_session)
+
+        app.dependency_overrides[get_current_user] = lambda: other_user
+        attach_resp = await client.post(
+            f"/api/sessions/{other_session.id}/presentation/attach/{presentation_id}"
+        )
+        assert attach_resp.status_code == 200, attach_resp.text
+
+        # other_user owns `other_session` but not the presentation itself —
+        # regenerate must be rejected even though session ownership checks out.
+        regenerate_resp = await client.post(
+            f"/api/sessions/{other_session.id}/presentation/regenerate"
+        )
+        assert regenerate_resp.status_code == 404
 
 
 class TestLastUsedAt:
@@ -601,7 +700,7 @@ class TestDownload:
         upload_resp = await _upload(client, owner_session.id, "deck.pdf", pdf_1_page)
         presentation_id = upload_resp.json()["presentation"]["id"]
 
-        for f in tmp_path.glob(f"uploads/presentations/*/{presentation_id}/original*"):
+        for f in tmp_path.glob(f"uploads/presentations/*/{presentation_id}/original/*"):
             f.unlink()
 
         resp = await client.get(f"/api/presentations/{presentation_id}/download")

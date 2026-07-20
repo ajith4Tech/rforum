@@ -316,6 +316,22 @@ class TestValidateUpload:
 # These test the FastAPI layer with a mocked database.
 # ═══════════════════════════════════════════════════════════════════
 
+class _FakeRedis:
+    """TestClient(app) without a `with` block doesn't run app lifespan, so
+    app.state.redis is never set — provide just enough of the redis.asyncio.Redis
+    surface for check_rate_limit()'s incr()/expire() calls."""
+
+    def __init__(self):
+        self._counts: dict[str, int] = {}
+
+    async def incr(self, key):
+        self._counts[key] = self._counts.get(key, 0) + 1
+        return self._counts[key]
+
+    async def expire(self, key, seconds):
+        pass
+
+
 def _make_app_with_mocked_db(mock_slide, mock_session_obj, mock_asset=None):
     """Return a FastAPI TestClient with the DB dependency overridden."""
     from unittest.mock import AsyncMock, MagicMock
@@ -357,6 +373,7 @@ def _make_app_with_mocked_db(mock_slide, mock_session_obj, mock_asset=None):
 
     app.dependency_overrides[get_db] = mock_get_db
     app.dependency_overrides[get_current_user] = lambda: mock_user
+    app.state.redis = _FakeRedis()
 
     client = TestClient(app, raise_server_exceptions=True)
     return client, app

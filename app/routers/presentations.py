@@ -10,6 +10,7 @@ the full rationale. `Slide.is_active` remains the single gate
 `responses.py::submit_response` checks, so every mutation here that changes
 `active_timeline_item_id` keeps it in sync.
 """
+import asyncio
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -22,6 +23,7 @@ from fastapi.responses import StreamingResponse
 from jose import JWTError, jwt
 from redis.asyncio import Redis
 from sqlalchemy import delete, or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -30,6 +32,7 @@ import json
 from app.auth import get_current_user
 from app.config import get_settings
 from app.database import get_db
+from app.rate_limit import check_rate_limit
 from app.models import (
     Event,
     Presentation,
@@ -69,10 +72,23 @@ from app.services.file_processing import (
     validate_upload,
 )
 from app.storage import get_storage_backend
+from app.storage.keys import (
+    dir_prefix_from_known_key,
+    original_key,
+    page_key,
+    pdf_key_for_dir,
+    thumbnail_key,
+)
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["presentations"])
+
+# Deck upload/replace/regenerate run LibreOffice + PyMuPDF and are the most
+# expensive requests in the app — rate-limited per user like every other
+# credential/resource-adjacent endpoint (login, register, join).
+PRESENTATION_WRITE_RATE_LIMIT = 10
+PRESENTATION_WRITE_RATE_WINDOW_SECONDS = 60
 
 _EXT_TO_SOURCE_FORMAT: dict[str, PresentationSourceFormat] = {
     ".pdf": PresentationSourceFormat.PDF,
@@ -231,18 +247,18 @@ async def _process_upload(
     render_source = content
     render_ext = ext
     if ext in {".ppt", ".pptx"}:
-        conversion = convert_to_pdf_bytes(content, ext)
+        conversion = await asyncio.to_thread(convert_to_pdf_bytes, content, ext)
         conversion_warnings.extend(conversion.warnings)
         if conversion.success and conversion.output_bytes:
             render_source = conversion.output_bytes
             render_ext = ".pdf"
 
-    page_count, (page_width, page_height), count_warnings = extract_page_count_and_size(
-        render_source, render_ext
+    page_count, (page_width, page_height), count_warnings = await asyncio.to_thread(
+        extract_page_count_and_size, render_source, render_ext
     )
     conversion_warnings.extend(count_warnings)
 
-    thumbs, thumb_warnings = render_all_thumbnails(render_source, render_ext)
+    thumbs, thumb_warnings = await asyncio.to_thread(render_all_thumbnails, render_source, render_ext)
     conversion_warnings.extend(thumb_warnings)
     if not thumbs:
         logger.warning(
@@ -256,17 +272,24 @@ async def _process_upload(
 
     presentation_id = uuid.uuid4()
     storage = get_storage_backend()
-    base_key = f"presentations/{user.id}/{presentation_id}"
+    orig_key = original_key(user.email, user.id, presentation_id, original_name)
+    pres_dir = dir_prefix_from_known_key(orig_key, presentation_id)
 
-    storage.save(f"{base_key}/original{ext}", content)
+    await asyncio.to_thread(storage.save, orig_key, content)
+    if render_ext == ".pdf" and ext != ".pdf":
+        # Persist the PPT/PPTX -> PDF conversion so regenerate and lazy page
+        # rendering don't have to re-run LibreOffice on every cache miss.
+        await asyncio.to_thread(storage.save, pdf_key_for_dir(pres_dir), render_source)
     for i, thumb_bytes in enumerate(thumbs, start=1):
-        storage.save(f"{base_key}/thumbs/{i:04d}.webp", thumb_bytes)
+        await asyncio.to_thread(
+            storage.save, thumbnail_key(user.email, user.id, presentation_id, i), thumb_bytes
+        )
 
     presentation = Presentation(
         id=presentation_id,
         owner_id=user.id,
         original_file_name=original_name,
-        original_file_url=f"{base_key}/original{ext}",
+        original_file_url=orig_key,
         original_file_type=validation.actual_mime,
         original_file_size=len(content),
         source_format=_EXT_TO_SOURCE_FORMAT[ext],
@@ -286,8 +309,8 @@ async def _process_upload(
             PresentationPage(
                 presentation_id=presentation.id,
                 page_number=i,
-                image_url=f"{base_key}/pages/{i:04d}.webp",
-                thumbnail_url=f"{base_key}/thumbs/{i:04d}.webp",
+                image_url=page_key(user.email, user.id, presentation_id, i),
+                thumbnail_url=thumbnail_key(user.email, user.id, presentation_id, i),
             )
         )
     await db.flush()
@@ -320,6 +343,43 @@ async def _build_timeline_for_presentation(
     presentation.last_used_at = datetime.now(timezone.utc)
     await db.flush()
     return timeline
+
+
+async def _check_presentation_write_rate_limit(request: Request, user: User) -> None:
+    redis: Redis = request.app.state.redis
+    allowed = await check_rate_limit(
+        redis,
+        f"rate:presentation_write:{user.id}",
+        PRESENTATION_WRITE_RATE_LIMIT,
+        PRESENTATION_WRITE_RATE_WINDOW_SECONDS,
+    )
+    if not allowed:
+        raise HTTPException(status_code=429, detail="Too many attempts. Please slow down.")
+
+
+async def _presentation_visible_via_event(
+    db: AsyncSession, user: User, presentation_id: uuid.UUID, event_id: uuid.UUID | None = None
+) -> bool:
+    """True if `presentation_id` is READY and currently attached to a session
+    in an event the caller owns (or, if `event_id` is given, specifically that
+    event) — the same widening rule list_my_presentations applies so a caller
+    can act on a co-organizer's deck they were shown in the event-scoped
+    "Choose Existing Presentation" picker, without granting access to decks
+    they were never shown."""
+    query = (
+        select(Presentation.id)
+        .join(Session, Session.presentation_id == Presentation.id)
+        .join(Event, Event.id == Session.event_id)
+        .where(
+            Presentation.id == presentation_id,
+            Presentation.status == PresentationStatus.READY,
+            Event.owner_id == user.id,
+        )
+    )
+    if event_id is not None:
+        query = query.where(Event.id == event_id)
+    result = await db.execute(query.limit(1))
+    return result.scalar_one_or_none() is not None
 
 
 async def _is_presentation_referenced(
@@ -375,15 +435,40 @@ def _distribute_interactions_among_pages(
     return plan
 
 
+def _load_render_source(storage, presentation: Presentation) -> tuple[bytes, str]:
+    """Return (bytes, ext) to feed into render_page/render_all_thumbnails for
+    `presentation`. PPT/PPTX decks are converted to PDF once and the result is
+    cached at pdf/presentation.pdf (see pdf_key_for_dir) — a cache hit skips
+    the LibreOffice conversion entirely; a miss converts, persists, and
+    returns the fresh PDF. Every other source format renders straight from
+    the original file."""
+    ext = Path(presentation.original_file_name).suffix.lower()
+    if ext not in {".ppt", ".pptx"}:
+        return storage.read(presentation.original_file_url), ext
+
+    pdf_cache_key = pdf_key_for_dir(
+        dir_prefix_from_known_key(presentation.original_file_url, presentation.id)
+    )
+    if storage.exists(pdf_cache_key):
+        return storage.read(pdf_cache_key), ".pdf"
+
+    original_bytes = storage.read(presentation.original_file_url)
+    conversion = convert_to_pdf_bytes(original_bytes, ext)
+    if conversion.success and conversion.output_bytes:
+        storage.save(pdf_cache_key, conversion.output_bytes)
+        return conversion.output_bytes, ".pdf"
+    return original_bytes, ext
+
+
 async def _serve_page_file(presentation_id: str, page_number: int, thumbnail: bool, db: AsyncSession):
     """
     Serve a rendered page. Thumbnails are always eagerly created at upload
     time (missing = a data problem, 404). Full-resolution pages are rendered
     lazily on first request and cached to disk permanently — every request
-    after the first is a straight cache read, served with a long-lived
-    immutable Cache-Control header since PresentationPage content never
-    changes once rendered (regenerate explicitly invalidates this cache
-    rather than mutating it in place).
+    after the first is a straight cache read. The URL is not content-addressed
+    and `regenerate_presentation` can replace the bytes behind it in place, so
+    the response is NOT marked immutable — max-age is bounded so a client that
+    cached the pre-regenerate image picks up the new one within the hour.
     """
     try:
         pres_uuid = uuid.UUID(presentation_id)
@@ -403,28 +488,24 @@ async def _serve_page_file(presentation_id: str, page_number: int, thumbnail: bo
     key = page.thumbnail_url if thumbnail else page.image_url
     storage = get_storage_backend()
 
-    if storage.exists(key):
-        img_bytes = storage.read(key)
+    if await asyncio.to_thread(storage.exists, key):
+        img_bytes = await asyncio.to_thread(storage.read, key)
     else:
         if thumbnail:
             raise HTTPException(status_code=404, detail="Thumbnail not found on disk")
 
         presentation = await db.get(Presentation, page.presentation_id)
-        if presentation is None or not storage.exists(presentation.original_file_url):
+        if presentation is None or not await asyncio.to_thread(
+            storage.exists, presentation.original_file_url
+        ):
             raise HTTPException(status_code=404, detail="Original file not found on disk")
 
-        original_bytes = storage.read(presentation.original_file_url)
-        ext = Path(presentation.original_file_name).suffix.lower()
-        render_source = original_bytes
-        render_ext = ext
-        if ext in {".ppt", ".pptx"}:
-            conversion = convert_to_pdf_bytes(original_bytes, ext)
-            if conversion.success and conversion.output_bytes:
-                render_source = conversion.output_bytes
-                render_ext = ".pdf"
+        render_source, render_ext = await asyncio.to_thread(
+            _load_render_source, storage, presentation
+        )
 
         try:
-            img_bytes = render_page(render_source, render_ext, page_number)
+            img_bytes = await asyncio.to_thread(render_page, render_source, render_ext, page_number)
         except Exception as exc:
             logger.error(
                 "Lazy page render failed. presentation=%s page=%d error=%s",
@@ -435,14 +516,14 @@ async def _serve_page_file(presentation_id: str, page_number: int, thumbnail: bo
                 detail="Could not render this page. The file may be corrupted.",
             )
 
-        storage.save(key, img_bytes)
+        await asyncio.to_thread(storage.save, key, img_bytes)
 
     media_type = "image/webp" if key.endswith(".webp") else "image/png"
     return StreamingResponse(
         BytesIO(img_bytes),
         media_type=media_type,
         headers={
-            "Cache-Control": "public, max-age=31536000, immutable",
+            "Cache-Control": "public, max-age=3600",
             "Content-Disposition": "inline",
         },
     )
@@ -474,6 +555,7 @@ async def upload_presentation(
     db: AsyncSession = Depends(get_db),
 ):
     session = await _verify_ownership(session_id, user, db)
+    await _check_presentation_write_rate_limit(request, user)
     if session.presentation_id is not None:
         raise HTTPException(
             status_code=409, detail="Session already has a presentation — use replace instead"
@@ -483,7 +565,17 @@ async def upload_presentation(
     await _build_timeline_for_presentation(db, session, presentation)
     db.add(_new_asset_for_presentation(user, session, presentation))
 
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        # A concurrent upload/attach for this same (presentation-less) session
+        # won the race between our check above and this commit — same
+        # conflict the check is meant to prevent (PresentationTimeline.session_id
+        # is unique).
+        await db.rollback()
+        raise HTTPException(
+            status_code=409, detail="Session already has a presentation — use replace instead"
+        )
     timeline = await _get_timeline_for_session(db, session.id)
     return {"presentation": presentation, "timeline": timeline, "reused_existing": reused_existing}
 
@@ -500,6 +592,7 @@ async def replace_presentation(
     db: AsyncSession = Depends(get_db),
 ):
     session = await _verify_ownership(session_id, user, db)
+    await _check_presentation_write_rate_limit(request, user)
     if session.presentation_id is None:
         raise HTTPException(status_code=404, detail="Session has no presentation to replace")
 
@@ -577,6 +670,7 @@ async def replace_presentation(
 )
 async def regenerate_presentation(
     session_id: str,
+    request: Request,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -590,6 +684,7 @@ async def regenerate_presentation(
     with the fresh content on next view, same as a first-time upload.
     """
     session = await _verify_ownership(session_id, user, db)
+    await _check_presentation_write_rate_limit(request, user)
     if session.presentation_id is None:
         raise HTTPException(status_code=404, detail="Session has no presentation")
 
@@ -599,22 +694,19 @@ async def regenerate_presentation(
         .options(selectinload(Presentation.pages))
     )
     presentation = result.scalar_one()
+    # Regenerating overwrites this presentation's stored render artifacts in
+    # place, affecting every other session/event that references the same
+    # (potentially shared, event-visible) Presentation row — unlike attach,
+    # which only links, this requires actual ownership, not just visibility.
+    if user.role != UserRole.SUPER_ADMIN and presentation.owner_id != user.id:
+        raise HTTPException(status_code=404, detail="Presentation not found")
 
     storage = get_storage_backend()
-    if not storage.exists(presentation.original_file_url):
+    if not await asyncio.to_thread(storage.exists, presentation.original_file_url):
         raise HTTPException(status_code=404, detail="Original file not found on disk")
-    original_bytes = storage.read(presentation.original_file_url)
+    render_source, render_ext = await asyncio.to_thread(_load_render_source, storage, presentation)
 
-    ext = Path(presentation.original_file_name).suffix.lower()
-    render_source = original_bytes
-    render_ext = ext
-    if ext in {".ppt", ".pptx"}:
-        conversion = convert_to_pdf_bytes(original_bytes, ext)
-        if conversion.success and conversion.output_bytes:
-            render_source = conversion.output_bytes
-            render_ext = ".pdf"
-
-    thumbs, warnings = render_all_thumbnails(render_source, render_ext)
+    thumbs, warnings = await asyncio.to_thread(render_all_thumbnails, render_source, render_ext)
     if warnings:
         logger.warning("Regenerate warnings for presentation %s: %s", presentation.id, warnings)
     if not thumbs:
@@ -635,8 +727,8 @@ async def regenerate_presentation(
         page = pages_by_number.get(i)
         if not page:
             continue
-        storage.save(page.thumbnail_url, thumb_bytes)
-        storage.delete(page.image_url)  # invalidate cached full-res render — re-renders lazily
+        await asyncio.to_thread(storage.save, page.thumbnail_url, thumb_bytes)
+        await asyncio.to_thread(storage.delete, page.image_url)  # invalidate cached full-res render — re-renders lazily
 
     presentation.status = PresentationStatus.READY
     await db.commit()
@@ -731,16 +823,22 @@ async def attach_presentation(
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid presentation ID format")
 
-    query = (
+    result = await db.execute(
         select(Presentation)
         .where(Presentation.id == pres_uuid)
         .options(selectinload(Presentation.pages))
     )
-    if user.role != UserRole.SUPER_ADMIN:
-        query = query.where(Presentation.owner_id == user.id)
-    result = await db.execute(query)
     presentation = result.scalar_one_or_none()
     if not presentation:
+        raise HTTPException(status_code=404, detail="Presentation not found")
+    if (
+        user.role != UserRole.SUPER_ADMIN
+        and presentation.owner_id != user.id
+        and not (
+            session.event_id is not None
+            and await _presentation_visible_via_event(db, user, presentation.id, session.event_id)
+        )
+    ):
         raise HTTPException(status_code=404, detail="Presentation not found")
     if presentation.status != PresentationStatus.READY:
         raise HTTPException(status_code=409, detail="Presentation is not ready")
@@ -805,18 +903,23 @@ async def list_my_presentations(
     result = await db.execute(query)
     presentations = result.scalars().all()
 
-    sessions_result = await db.execute(
-        select(Session.id, Session.presentation_id).where(Session.presentation_id.isnot(None))
-    )
     # A Presentation may now be attached to more than one session; attached_session_id
     # is a convenience hint for the listing (storage_status below is the accurate
     # active/detached signal) — _is_presentation_referenced remains the source of
-    # truth for "can this be deleted."
+    # truth for "can this be deleted." Scoped to just the presentation ids we're
+    # about to return — not every session on the platform.
     referenced_presentation_ids: set[uuid.UUID] = set()
     attached_session_by_presentation: dict[uuid.UUID, uuid.UUID] = {}
-    for row in sessions_result.all():
-        referenced_presentation_ids.add(row.presentation_id)
-        attached_session_by_presentation.setdefault(row.presentation_id, row.id)
+    presentation_ids = [p.id for p in presentations]
+    if presentation_ids:
+        sessions_result = await db.execute(
+            select(Session.id, Session.presentation_id).where(
+                Session.presentation_id.in_(presentation_ids)
+            )
+        )
+        for row in sessions_result.all():
+            referenced_presentation_ids.add(row.presentation_id)
+            attached_session_by_presentation.setdefault(row.presentation_id, row.id)
 
     return [
         PresentationLibraryOut(
@@ -848,16 +951,21 @@ async def get_presentation_details(
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid presentation ID format")
 
-    query = select(Presentation, User.email).join(User, User.id == Presentation.owner_id).where(
-        Presentation.id == pres_uuid
+    result = await db.execute(
+        select(Presentation, User.email)
+        .join(User, User.id == Presentation.owner_id)
+        .where(Presentation.id == pres_uuid)
     )
-    if user.role != UserRole.SUPER_ADMIN:
-        query = query.where(Presentation.owner_id == user.id)
-    result = await db.execute(query)
     row = result.first()
     if not row:
         raise HTTPException(status_code=404, detail="Presentation not found")
     presentation, owner_email = row
+    if (
+        user.role != UserRole.SUPER_ADMIN
+        and presentation.owner_id != user.id
+        and not await _presentation_visible_via_event(db, user, presentation.id)
+    ):
+        raise HTTPException(status_code=404, detail="Presentation not found")
 
     sessions_result = await db.execute(
         select(Session.id, Session.title, Session.unique_code).where(
@@ -909,9 +1017,9 @@ async def download_presentation_original(
         raise HTTPException(status_code=404, detail="Presentation not found")
 
     storage = get_storage_backend()
-    if not storage.exists(presentation.original_file_url):
+    if not await asyncio.to_thread(storage.exists, presentation.original_file_url):
         raise HTTPException(status_code=404, detail="Original file not found on disk")
-    content = storage.read(presentation.original_file_url)
+    content = await asyncio.to_thread(storage.read, presentation.original_file_url)
 
     return StreamingResponse(
         BytesIO(content),
@@ -936,11 +1044,7 @@ async def delete_presentation(
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid presentation ID format")
 
-    query = (
-        select(Presentation)
-        .where(Presentation.id == pres_uuid)
-        .options(selectinload(Presentation.pages))
-    )
+    query = select(Presentation).where(Presentation.id == pres_uuid)
     if user.role != UserRole.SUPER_ADMIN:
         query = query.where(Presentation.owner_id == user.id)
     result = await db.execute(query)
@@ -954,22 +1058,31 @@ async def delete_presentation(
             detail="Presentation is attached to a session — detach it first",
         )
 
-    # Delete every known key explicitly (works for both the old flat-per-uuid
-    # disk layout and the new owner-scoped one), then sweep the owner-scoped
-    # directory as defense-in-depth for stray temp files.
-    keys_to_delete = [presentation.original_file_url]
-    for page in presentation.pages:
-        keys_to_delete.append(page.image_url)
-        keys_to_delete.append(page.thumbnail_url)
-    owner_dir_prefix = f"presentations/{presentation.owner_id}/{presentation.id}"
+    # dir_prefix_from_known_key derives this presentation's own root directory
+    # (works for both the old flat-per-uuid disk layout and the new
+    # owner-scoped one) by locating presentation.id as a literal path segment
+    # — it raises rather than guess if that segment isn't found, so this can
+    # never resolve to a shared/ancestor prefix another presentation also
+    # lives under. delete_prefix below recursively removes everything under
+    # it (original, pdf cache, thumbnails, pages, and any stray temp files) —
+    # covering the exact same set of keys an explicit per-key delete loop
+    # would, without the redundant extra round-trips.
+    owner_dir_prefix = dir_prefix_from_known_key(presentation.original_file_url, presentation.id)
 
-    await db.execute(delete(Presentation).where(Presentation.id == presentation.id))
-    await db.commit()
+    try:
+        await db.execute(delete(Presentation).where(Presentation.id == presentation.id))
+        await db.commit()
+    except IntegrityError:
+        # A concurrent attach created a live reference between our check above
+        # and this delete — same conflict the check is meant to prevent.
+        await db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Presentation is attached to a session — detach it first",
+        )
 
     storage = get_storage_backend()
-    for key in keys_to_delete:
-        storage.delete(key)
-    storage.delete_prefix(owner_dir_prefix)
+    await asyncio.to_thread(storage.delete_prefix, owner_dir_prefix)
 
 
 # ── Timeline item CRUD ────────────────────────────────────────────────────────

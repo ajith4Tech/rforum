@@ -93,7 +93,7 @@ async def get_current_user(
 
     result = await db.execute(select(User).where(User.id == uuid.UUID(user_id)))
     user = result.scalar_one_or_none()
-    if user is None:
+    if user is None or not user.is_active:
         raise credentials_exception
     return user
 
@@ -116,7 +116,10 @@ async def get_optional_user(
         return None
 
     result = await db.execute(select(User).where(User.id == uuid.UUID(user_id)))
-    return result.scalar_one_or_none()
+    user = result.scalar_one_or_none()
+    if user is None or not user.is_active:
+        return None
+    return user
 
 
 async def get_current_super_admin(

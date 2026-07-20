@@ -33,3 +33,10 @@ class StorageBackend(ABC):
     @abstractmethod
     def size(self, key: str) -> int:
         """Size in bytes of `key`. Raises FileNotFoundError if absent."""
+
+    @abstractmethod
+    def list_keys(self, prefix: str) -> list[str]:
+        """List every key under `prefix` (e.g. a presentation's directory),
+        as keys in the same shape callers pass to save()/read(). Empty list
+        if `prefix` doesn't exist. Used by the cleanup service and the S3
+        migration script — never by request-serving hot paths."""

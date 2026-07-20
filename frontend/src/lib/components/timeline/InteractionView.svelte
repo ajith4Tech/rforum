@@ -25,7 +25,8 @@
     readOnly = false,
     editing = false,
     onToggleEdit,
-    onSaveContent
+    onSaveContent,
+    onDirtyChange
   }: {
     slide: any;
     responses?: any[];
@@ -35,7 +36,8 @@
     readOnly?: boolean;
     editing?: boolean;
     onToggleEdit?: () => void;
-    onSaveContent?: (contentJson: Record<string, unknown>) => void;
+    onSaveContent?: (contentJson: Record<string, unknown>) => void | Promise<void>;
+    onDirtyChange?: (dirty: boolean) => void;
   } = $props();
 
   const isRatingOnly = $derived(slide?.content_json?.mode === 'rating_only');
@@ -155,19 +157,70 @@
   function updateEditOption(i: number, v: string) { editOptions = editOptions.map((o, idx) => (idx === i ? v : o)); }
   function removeEditOption(i: number) { editOptions = editOptions.filter((_, idx) => idx !== i); }
 
-  function saveEdit() {
-    if (slide.type === 'POLL') {
-      const cleaned = editOptions.map((o) => o.trim()).filter(Boolean);
-      if (!editQuestion.trim() || cleaned.length < 2) {
-        alert('Provide a question and at least two options.');
-        return;
+  async function saveEdit() {
+    try {
+      if (slide.type === 'POLL') {
+        const cleaned = editOptions.map((o) => o.trim()).filter(Boolean);
+        if (!editQuestion.trim() || cleaned.length < 2) {
+          alert('Provide a question and at least two options.');
+          return;
+        }
+        await onSaveContent?.({ ...slide.content_json, question: editQuestion.trim(), options: cleaned });
+      } else {
+        await onSaveContent?.({ ...slide.content_json, prompt: editPrompt.trim() });
       }
-      onSaveContent?.({ ...slide.content_json, question: editQuestion.trim(), options: cleaned });
-    } else {
-      onSaveContent?.({ ...slide.content_json, prompt: editPrompt.trim() });
+    } catch {
+      // Save failed — keep the form open (with the attempted edits) so the
+      // moderator can retry instead of losing their changes silently.
+      return;
     }
     onToggleEdit?.();
   }
+
+  // Resync the buffered edit fields from the slide's real content whenever
+  // the edit form (re)opens — otherwise a Cancel followed by Edit again
+  // shows the discarded draft instead of the slide's current content.
+  $effect(() => {
+    if (editing) {
+      editQuestion = slide?.content_json?.question ?? '';
+      editOptions = slide?.content_json?.options ? [...slide.content_json.options] : [];
+      editPrompt = slide?.content_json?.prompt ?? '';
+    }
+  });
+
+  // ── Unsaved-changes tracking for the buffered edit form above ──────────
+  const isDirty = $derived.by(() => {
+    if (!editing) return false;
+    if (slide.type === 'POLL') {
+      const cleaned = editOptions.map((o) => o.trim()).filter(Boolean);
+      return editQuestion.trim() !== (slide.content_json?.question || '')
+        || JSON.stringify(cleaned) !== JSON.stringify(slide.content_json?.options || []);
+    }
+    return editPrompt.trim() !== (slide.content_json?.prompt || '');
+  });
+
+  $effect(() => {
+    onDirtyChange?.(isDirty);
+  });
+  $effect(() => {
+    return () => onDirtyChange?.(false); // clear on unmount (item switch / navigate away)
+  });
+
+  // Ctrl/Cmd+S flushes this form's buffered edit — mirrors the legacy
+  // editor's Ctrl+S handling in the route, but scoped locally since this
+  // component owns its own edit buffer. Only attached for the moderator
+  // variant — guest/screen viewers never have anything to flush.
+  $effect(() => {
+    if (variant !== 'moderator') return;
+    function onKeydown(e: KeyboardEvent) {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        if (editing) saveEdit();
+      }
+    }
+    window.addEventListener('keydown', onKeydown);
+    return () => window.removeEventListener('keydown', onKeydown);
+  });
 
   // ── Moderator / screen results ──────────────────────
   function pollResults() {

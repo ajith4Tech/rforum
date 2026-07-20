@@ -36,7 +36,10 @@ def _require_test_postgres():
         capture_output=True, text=True, env=env,
     )
     if check.returncode != 0:
-        pytest.skip(f"Postgres not reachable at localhost:5433 — skipping WS auth tests: {check.stderr.strip()}")
+        pytest.skip(
+            f"Postgres not reachable at localhost:5433 — skipping WS auth tests: {check.stderr.strip()}",
+            allow_module_level=True,
+        )
         return
     if check.stdout.strip() != "1":
         subprocess.run(
@@ -200,3 +203,54 @@ class TestUnrestrictedEventsUnchanged:
             sender_ws.send_json({"event": "heartbeat", "data": {}})
             received = receiver_ws.receive_json()
             assert received["event"] == "heartbeat"
+
+
+class TestPubsubSubscriptionRecovery:
+    """ConnectionManager._listen owns subscribing (and re-subscribing)
+    itself, so a subscribe failure — the very first attempt, or a connection
+    drop mid-listen — retries with backoff instead of permanently leaving a
+    session's cross-process relay dead until a process restart."""
+
+    def test_first_subscribe_failure_is_retried_and_recovers(self):
+        import app.routers.ws as ws_module
+
+        async def scenario():
+            manager = ws_module.ConnectionManager()
+            session_code = "RETRY-TEST"
+            # Stands in for a connected websocket — only its truthiness in
+            # `self._connections` matters to keep _listen's retry loop alive.
+            manager._connections[session_code] = {object()}
+
+            attempts = {"n": 0}
+
+            class FakePubSub:
+                async def subscribe(self, channel):
+                    attempts["n"] += 1
+                    if attempts["n"] == 1:
+                        raise ConnectionError("simulated Redis blip")
+
+                async def listen(self):
+                    # Blocks "forever" once subscribed, until the task is cancelled.
+                    await asyncio.Event().wait()
+                    if False:
+                        yield  # pragma: no cover — makes this an async generator
+
+                async def unsubscribe(self, channel):
+                    pass
+
+            class FakeRedis:
+                def pubsub(self):
+                    return FakePubSub()
+
+            task = asyncio.create_task(manager._listen(session_code, FakeRedis()))
+            try:
+                # First (failing) attempt runs immediately; the retried
+                # attempt fires after the ~1s backoff — give it enough room.
+                await asyncio.sleep(1.3)
+                assert attempts["n"] == 2
+            finally:
+                task.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await task
+
+        asyncio.run(scenario())

@@ -10,7 +10,8 @@
     alt = '',
     imgClass = '',
     draggable = false,
-    onLoad
+    onLoad,
+    onError
   }: {
     src: string;
     page?: number;
@@ -18,9 +19,10 @@
     imgClass?: string;
     draggable?: boolean;
     onLoad?: () => void;
+    onError?: () => void;
   } = $props();
 </script>
 
 {#key page}
-  <img {src} {alt} class={imgClass} {draggable} loading="lazy" decoding="async" onload={onLoad} />
+  <img {src} {alt} class={imgClass} {draggable} loading="lazy" decoding="async" onload={onLoad} onerror={onError} />
 {/key}

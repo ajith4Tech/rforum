@@ -3,7 +3,6 @@ import { defineConfig } from 'vite';
 
 export default defineConfig({
   plugins: [sveltekit()],
-  build: { sourcemap: true },
   server: {
     allowedHosts: ['rforum.t4gc.in'],
     proxy: {
