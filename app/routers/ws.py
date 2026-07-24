@@ -123,16 +123,27 @@ class ConnectionManager:
         bucket = self._connections.get(session_code)
         if not bucket:
             return
-        # Serialise once, send to every socket
+        # Serialise once, fan out to every socket concurrently. Sending
+        # sequentially here meant one slow/stalled client's socket write
+        # (network backpressure, dead TCP peer not yet detected) delayed
+        # delivery to every other socket behind it in the loop — with
+        # hundreds of guests per session that turned into multi-second
+        # broadcast tails. A bounded per-send timeout guarantees one bad
+        # socket can't hold up the round at all.
         payload = json.dumps(message)
-        dead: list[WebSocket] = []
-        for ws in list(bucket):
+        sockets = list(bucket)
+
+        async def _send(ws: WebSocket) -> WebSocket | None:
             try:
-                await ws.send_text(payload)
+                await asyncio.wait_for(ws.send_text(payload), timeout=5.0)
+                return None
             except Exception:
-                dead.append(ws)
+                return ws
+
+        dead = await asyncio.gather(*(_send(ws) for ws in sockets))
         for ws in dead:
-            await self.disconnect(session_code, ws)
+            if ws is not None:
+                await self.disconnect(session_code, ws)
 
     async def _listen(self, session_code: str, redis: Redis) -> None:
         """Owns this session's shared Redis pubsub subscription end to end,
