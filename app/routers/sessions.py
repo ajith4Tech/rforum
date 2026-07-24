@@ -227,9 +227,17 @@ async def delete_session(
 async def join_session(code: str, request: Request, db: AsyncSession = Depends(get_db)):
     redis: Redis = request.app.state.redis
     settings = get_settings()
+    # Scoped by (IP, session code), not IP alone: a shared venue/NAT IP
+    # running a single large workshop should get the full burst budget for
+    # THAT session, without an unrelated session sharing the same IP (e.g. a
+    # second, different workshop behind the same corporate NAT) eating into
+    # or being starved by it. Keyed on the raw path param — deliberately
+    # before the "does this session exist / is it live" lookup below, so
+    # even a guess against a nonexistent code only ever affects that one
+    # guessed code's bucket.
     allowed = await check_rate_limit(
         redis,
-        f"rate:join:{request.client.host}",
+        f"rate:join:{request.client.host}:{code}",
         settings.JOIN_RATE_LIMIT,
         settings.JOIN_RATE_LIMIT_WINDOW_SECONDS,
     )

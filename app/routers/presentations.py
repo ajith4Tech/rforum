@@ -71,7 +71,7 @@ from app.services.file_processing import (
     render_page,
     validate_upload,
 )
-from app.storage import get_storage_backend
+from app.storage import get_storage_backend, run_in_storage_executor
 from app.storage.keys import (
     dir_prefix_from_known_key,
     original_key,
@@ -521,8 +521,14 @@ async def _serve_page_file(presentation_id: str, page_number: int, thumbnail: bo
     # (page already rendered/cached) is one storage round trip instead of
     # two — for an S3 backend that's one GET instead of a HEAD+GET pair,
     # which matters when hundreds of guests request the same page at once.
+    #
+    # Uses the dedicated storage-I/O executor (app/storage/__init__.py), not
+    # asyncio.to_thread()'s shared default one — see STORAGE_IO_CONCURRENCY's
+    # docstring for why: the default executor's ~6 threads (2-vCPU host)
+    # queue hundreds of concurrent reads for this exact hot path badly
+    # enough to produce multi-second tail latency and, past that, timeouts.
     try:
-        img_bytes = await asyncio.to_thread(storage.read, key)
+        img_bytes = await run_in_storage_executor(storage.read, key)
     except FileNotFoundError:
         if thumbnail:
             raise HTTPException(status_code=404, detail="Thumbnail not found on disk")
@@ -532,21 +538,43 @@ async def _serve_page_file(presentation_id: str, page_number: int, thumbnail: bo
             # Re-check after acquiring the lock: whoever held it first may
             # have already rendered and saved this exact page while we waited.
             try:
-                img_bytes = await asyncio.to_thread(storage.read, key)
+                img_bytes = await run_in_storage_executor(storage.read, key)
             except FileNotFoundError:
                 presentation = await db.get(Presentation, page.presentation_id)
                 await db.commit()  # same reasoning as above — release before the render itself
-                if presentation is None or not await asyncio.to_thread(
+                if presentation is None or not await run_in_storage_executor(
                     storage.exists, presentation.original_file_url
                 ):
                     raise HTTPException(status_code=404, detail="Original file not found on disk")
 
-                render_source, render_ext = await asyncio.to_thread(
-                    _load_render_source, storage, presentation
-                )
+                # Unlike the read()s above, nothing catches FileNotFoundError/
+                # PermissionError/ConnectionError here on their own — left
+                # unhandled, a storage hiccup surfaces as a raw 500 instead
+                # of a meaningful status. FileNotFoundError can reach here
+                # for real (e.g. the original was deleted from storage after
+                # this page's row was created); PermissionError/
+                # ConnectionError are FallbackStorageBackend's signal that
+                # even its local-disk fallback didn't have this key either
+                # (see app/storage/fallback.py) — genuinely transient/infra,
+                # not a bad request, hence 503 rather than 404/422.
+                try:
+                    render_source, render_ext = await run_in_storage_executor(
+                        _load_render_source, storage, presentation
+                    )
+                except FileNotFoundError:
+                    raise HTTPException(status_code=404, detail="Original file not found in storage")
+                except (PermissionError, ConnectionError) as exc:
+                    logger.error(
+                        "Storage unavailable while loading render source. presentation=%s page=%d error=%s",
+                        presentation_id, page_number, exc, exc_info=True,
+                    )
+                    raise HTTPException(
+                        status_code=503,
+                        detail="Storage is temporarily unavailable. Please try again shortly.",
+                    )
 
                 try:
-                    img_bytes = await asyncio.to_thread(render_page, render_source, render_ext, page_number)
+                    img_bytes = await run_in_storage_executor(render_page, render_source, render_ext, page_number)
                 except Exception as exc:
                     logger.error(
                         "Lazy page render failed. presentation=%s page=%d error=%s",
@@ -557,7 +585,18 @@ async def _serve_page_file(presentation_id: str, page_number: int, thumbnail: bo
                         detail="Could not render this page. The file may be corrupted.",
                     )
 
-                await asyncio.to_thread(storage.save, key, img_bytes)
+                try:
+                    await run_in_storage_executor(storage.save, key, img_bytes)
+                except (PermissionError, ConnectionError) as exc:
+                    # img_bytes already rendered successfully — serve it now
+                    # rather than fail a request over a cache-write hiccup.
+                    # The next request just re-renders (self-healing); no
+                    # retry loop, no data loss beyond one skipped cache write.
+                    logger.warning(
+                        "Failed to cache rendered page (will retry on next request). "
+                        "presentation=%s page=%d error=%s",
+                        presentation_id, page_number, exc,
+                    )
 
     media_type = "image/webp" if key.endswith(".webp") else "image/png"
     return StreamingResponse(

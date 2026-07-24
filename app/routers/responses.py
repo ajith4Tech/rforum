@@ -11,6 +11,7 @@ from app.auth import get_current_user, get_optional_user
 from app.config import get_settings
 from app.database import get_db
 from app.models import Response, Slide, User, UserRole
+from app.rate_limit import check_rate_limit
 from app.schemas import ResponseCreate, ResponseOut
 
 router = APIRouter(prefix="/api/slides/{slide_id}/responses", tags=["responses"])
@@ -46,20 +47,32 @@ async def submit_response(
     # The per-IP cap is deliberately much higher than the per-guest one: many
     # legitimate guests behind one shared venue/NAT IP submitting to the same
     # slide is the expected case at a live workshop, not the abuse case.
+    #
+    # Uses the shared check_rate_limit() helper (app/rate_limit.py) rather than
+    # a hand-rolled incr/expire pair, so a transient Redis error fails OPEN
+    # here too, consistent with the join and WS-connect rate limits — this
+    # used to be its own ad-hoc incr/expire with no error handling, so a
+    # Redis blip during a live workshop would have turned every response
+    # submission into a hard 500 instead of just skipping the rate check.
     settings = get_settings()
     redis: Redis = request.app.state.redis
-    rate_key = f"rate:response:{payload.guest_identifier}:{slide_id}"
-    count = await redis.incr(rate_key)
-    if count == 1:
-        await redis.expire(rate_key, settings.RESPONSE_RATE_LIMIT_PER_GUEST_WINDOW_SECONDS)
-    if count > settings.RESPONSE_RATE_LIMIT_PER_GUEST:
+
+    guest_allowed = await check_rate_limit(
+        redis,
+        f"rate:response:{payload.guest_identifier}:{slide_id}",
+        settings.RESPONSE_RATE_LIMIT_PER_GUEST,
+        settings.RESPONSE_RATE_LIMIT_PER_GUEST_WINDOW_SECONDS,
+    )
+    if not guest_allowed:
         raise HTTPException(status_code=429, detail="Too many responses. Please slow down.")
 
-    ip_rate_key = f"rate:response_ip:{request.client.host}:{slide_id}"
-    ip_count = await redis.incr(ip_rate_key)
-    if ip_count == 1:
-        await redis.expire(ip_rate_key, settings.RESPONSE_RATE_LIMIT_PER_IP_WINDOW_SECONDS)
-    if ip_count > settings.RESPONSE_RATE_LIMIT_PER_IP:
+    ip_allowed = await check_rate_limit(
+        redis,
+        f"rate:response_ip:{request.client.host}:{slide_id}",
+        settings.RESPONSE_RATE_LIMIT_PER_IP,
+        settings.RESPONSE_RATE_LIMIT_PER_IP_WINDOW_SECONDS,
+    )
+    if not ip_allowed:
         raise HTTPException(status_code=429, detail="Too many responses. Please slow down.")
 
     # Default name to "Guest" if empty or None

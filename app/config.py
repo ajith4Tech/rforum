@@ -52,24 +52,34 @@ class Settings(BaseSettings):
     MAX_PAGE_SIZE: int = 100
 
     # ── Rate limiting ─────────────────────────────────────────────────
-    # All limits below are per-client-IP, fixed-window (app/rate_limit.py).
-    # Defaults are sized for a live workshop where many legitimate
-    # participants share one venue/NAT IP — they bound scripted abuse, not
-    # organic bursts. Raise further via env for a single-IP audience larger
-    # than ~a few hundred people.
-    JOIN_RATE_LIMIT: int = 300
+    # All limits below are fixed-window (app/rate_limit.py), keyed by
+    # (client IP, session code) for join/WS-connect and by (client IP,
+    # slide ID) for responses — see app/routers/sessions.py::join_session
+    # and app/routers/ws.py::websocket_endpoint. That per-session/per-slide
+    # scoping (added alongside this round of limit increases) is what makes
+    # a generous budget safe: it bounds abuse against ONE target session/
+    # slide, rather than one shared blanket bucket for every session a given
+    # IP happens to touch.
+    #
+    # Sized for one live workshop of ~500 guests behind a single venue/NAT
+    # IP joining/connecting within roughly the same 30-60s window: 600 per
+    # 60s covers the full 500-guest burst with ~20% headroom in a single
+    # window, while still bounding a script hammering one specific session.
+    # Raise further via env for a single-IP audience larger than ~500-600.
+    JOIN_RATE_LIMIT: int = 600
     JOIN_RATE_LIMIT_WINDOW_SECONDS: int = 60
-    WS_CONNECT_RATE_LIMIT: int = 300
+    WS_CONNECT_RATE_LIMIT: int = 600
     WS_CONNECT_RATE_WINDOW_SECONDS: int = 60
     # Per-guest-identifier and per-IP caps on response submissions (guest
     # identifier is client-supplied, so the per-IP cap exists to stop
     # identifier-rotation abuse — see app/routers/responses.py). The per-IP
-    # cap in particular needs to be workshop-scale since many guests behind
-    # one shared IP submitting to the same slide is the expected case, not
-    # the abuse case.
+    # key is already scoped per slide_id (finer-grained than per-session),
+    # so this cap only needs headroom for one slide's worth of a single
+    # workshop's burst, not the whole app: ~500 responses over ~30s, same
+    # 20%-headroom sizing as above.
     RESPONSE_RATE_LIMIT_PER_GUEST: int = 10
     RESPONSE_RATE_LIMIT_PER_GUEST_WINDOW_SECONDS: int = 60
-    RESPONSE_RATE_LIMIT_PER_IP: int = 400
+    RESPONSE_RATE_LIMIT_PER_IP: int = 600
     RESPONSE_RATE_LIMIT_PER_IP_WINDOW_SECONDS: int = 60
 
     model_config = {"env_file": ".env", "extra": "ignore"}

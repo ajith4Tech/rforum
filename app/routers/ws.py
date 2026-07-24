@@ -182,9 +182,15 @@ async def websocket_endpoint(websocket: WebSocket, session_code: str):
     redis: Redis = websocket.app.state.redis
 
     client_host = websocket.client.host if websocket.client else "unknown"
+    # Scoped by (IP, session code), matching the join endpoint's rationale
+    # (app/routers/sessions.py::join_session): a shared venue/NAT IP running
+    # one large workshop gets that session's full connect-burst budget
+    # without bleeding into or being starved by an unrelated session behind
+    # the same IP. Keyed on the raw path param, before the existence check
+    # below, so this stays a cheap pre-check with no DB round-trip.
     allowed = await check_rate_limit(
         redis,
-        f"rate:ws_connect:{client_host}",
+        f"rate:ws_connect:{client_host}:{session_code}",
         settings.WS_CONNECT_RATE_LIMIT,
         settings.WS_CONNECT_RATE_WINDOW_SECONDS,
     )

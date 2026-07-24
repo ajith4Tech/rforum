@@ -61,6 +61,7 @@ class S3StorageBackend(StorageBackend):
         aws_access_key_id: str | None = None,
         aws_secret_access_key: str | None = None,
         max_retries: int = 3,
+        max_pool_connections: int = 10,
     ):
         if not bucket:
             raise ValueError("S3StorageBackend requires a non-empty bucket name")
@@ -75,6 +76,17 @@ class S3StorageBackend(StorageBackend):
                 retries={"max_attempts": 3, "mode": "standard"},
                 connect_timeout=5,
                 read_timeout=30,
+                # botocore's own default here is 10, regardless of how many
+                # threads are actually issuing concurrent requests through
+                # this one client. urllib3 doesn't block callers once that's
+                # exhausted (block=False) — it just stops reusing/pooling
+                # connections beyond this count, paying a fresh TLS
+                # handshake per "overflow" request instead. Passed in by the
+                # caller (app/storage/__init__.py::get_storage_backend) to
+                # match STORAGE_IO_CONCURRENCY, so raising the dedicated
+                # storage-I/O thread pool's size doesn't just relocate the
+                # same class of bottleneck to this pool instead.
+                max_pool_connections=max_pool_connections,
             ),
         }
         if endpoint_url:
