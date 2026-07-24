@@ -460,6 +460,25 @@ def _load_render_source(storage, presentation: Presentation) -> tuple[bytes, str
     return original_bytes, ext
 
 
+# Coalesces concurrent lazy-render requests for the same (presentation, page)
+# onto a single render instead of every simultaneously-requesting guest (e.g.
+# hundreds viewing a slide the instant it's activated) independently invoking
+# LibreOffice/PyMuPDF and re-saving the same storage key. Keyed per-process —
+# with 2 Uvicorn workers this means at most one redundant render per worker
+# instead of one per guest, without introducing cross-process coordination.
+# Never cleaned up, but the key space is bounded by total (presentation, page)
+# pairs ever viewed, which stays small for the lifetime of a process.
+_page_render_locks: dict[tuple[uuid.UUID, int, bool], asyncio.Lock] = {}
+
+
+def _get_page_render_lock(key: tuple[uuid.UUID, int, bool]) -> asyncio.Lock:
+    lock = _page_render_locks.get(key)
+    if lock is None:
+        lock = asyncio.Lock()
+        _page_render_locks[key] = lock
+    return lock
+
+
 async def _serve_page_file(presentation_id: str, page_number: int, thumbnail: bool, db: AsyncSession):
     """
     Serve a rendered page. Thumbnails are always eagerly created at upload
@@ -468,7 +487,7 @@ async def _serve_page_file(presentation_id: str, page_number: int, thumbnail: bo
     after the first is a straight cache read. The URL is not content-addressed
     and `regenerate_presentation` can replace the bytes behind it in place, so
     the response is NOT marked immutable — max-age is bounded so a client that
-    cached the pre-regenerate image picks up the new one within the hour.
+    cached the pre-regenerate image picks up the new one within a day.
     """
     try:
         pres_uuid = uuid.UUID(presentation_id)
@@ -485,45 +504,67 @@ async def _serve_page_file(presentation_id: str, page_number: int, thumbnail: bo
     if not page:
         raise HTTPException(status_code=404, detail="Page not found")
 
+    # Release the pooled connection now: FastAPI's request-scoped session
+    # otherwise keeps it checked out for the rest of this function, including
+    # the storage read/lock-wait/render below — under hundreds of concurrent
+    # requests for the same page, that would multiply Postgres connection
+    # usage far past pool_size for no reason, since nothing here needs the DB
+    # again except the rare cache-miss path (which re-acquires as needed).
+    # Safe with expire_on_commit=False (app/database.py): `page`'s already-
+    # loaded attributes stay usable after commit.
+    await db.commit()
+
     key = page.thumbnail_url if thumbnail else page.image_url
     storage = get_storage_backend()
 
-    if await asyncio.to_thread(storage.exists, key):
+    # Read directly rather than exists()-then-read(): the steady-state case
+    # (page already rendered/cached) is one storage round trip instead of
+    # two — for an S3 backend that's one GET instead of a HEAD+GET pair,
+    # which matters when hundreds of guests request the same page at once.
+    try:
         img_bytes = await asyncio.to_thread(storage.read, key)
-    else:
+    except FileNotFoundError:
         if thumbnail:
             raise HTTPException(status_code=404, detail="Thumbnail not found on disk")
 
-        presentation = await db.get(Presentation, page.presentation_id)
-        if presentation is None or not await asyncio.to_thread(
-            storage.exists, presentation.original_file_url
-        ):
-            raise HTTPException(status_code=404, detail="Original file not found on disk")
+        lock = _get_page_render_lock((pres_uuid, page_number, thumbnail))
+        async with lock:
+            # Re-check after acquiring the lock: whoever held it first may
+            # have already rendered and saved this exact page while we waited.
+            try:
+                img_bytes = await asyncio.to_thread(storage.read, key)
+            except FileNotFoundError:
+                presentation = await db.get(Presentation, page.presentation_id)
+                await db.commit()  # same reasoning as above — release before the render itself
+                if presentation is None or not await asyncio.to_thread(
+                    storage.exists, presentation.original_file_url
+                ):
+                    raise HTTPException(status_code=404, detail="Original file not found on disk")
 
-        render_source, render_ext = await asyncio.to_thread(
-            _load_render_source, storage, presentation
-        )
+                render_source, render_ext = await asyncio.to_thread(
+                    _load_render_source, storage, presentation
+                )
 
-        try:
-            img_bytes = await asyncio.to_thread(render_page, render_source, render_ext, page_number)
-        except Exception as exc:
-            logger.error(
-                "Lazy page render failed. presentation=%s page=%d error=%s",
-                presentation_id, page_number, exc, exc_info=True,
-            )
-            raise HTTPException(
-                status_code=422,
-                detail="Could not render this page. The file may be corrupted.",
-            )
+                try:
+                    img_bytes = await asyncio.to_thread(render_page, render_source, render_ext, page_number)
+                except Exception as exc:
+                    logger.error(
+                        "Lazy page render failed. presentation=%s page=%d error=%s",
+                        presentation_id, page_number, exc, exc_info=True,
+                    )
+                    raise HTTPException(
+                        status_code=422,
+                        detail="Could not render this page. The file may be corrupted.",
+                    )
 
-        await asyncio.to_thread(storage.save, key, img_bytes)
+                await asyncio.to_thread(storage.save, key, img_bytes)
 
     media_type = "image/webp" if key.endswith(".webp") else "image/png"
     return StreamingResponse(
         BytesIO(img_bytes),
         media_type=media_type,
         headers={
-            "Cache-Control": "public, max-age=3600",
+            "Cache-Control": "public, max-age=86400",
             "Content-Disposition": "inline",
         },
     )

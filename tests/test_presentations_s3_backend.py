@@ -223,7 +223,7 @@ class TestLazyRendering:
         assert img_resp.status_code == 200
         # Not "immutable": regenerate_presentation can replace the bytes behind
         # this same URL, so the response is cacheable but bounded, not permanent.
-        assert img_resp.headers["cache-control"] == "public, max-age=3600"
+        assert img_resp.headers["cache-control"] == "public, max-age=86400"
 
         keys_after = [k for k in client.storage.primary.list_keys("presentations") if "/pages/" in k]
         assert len(keys_after) == 1  # rendered and cached in S3 on first view

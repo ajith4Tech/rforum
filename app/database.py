@@ -14,6 +14,12 @@ engine = create_async_engine(
     echo=False,
     pool_size=20,
     max_overflow=10,
+    # Recycle pooled connections that have been open this long. Not a
+    # capacity change (pool_size/max_overflow are already sized correctly for
+    # 2 workers against Postgres's default max_connections=100 — see infra
+    # audit) — this only guards against a connection going stale over a
+    # multi-hour live workshop with uneven idle/burst traffic patterns.
+    pool_recycle=1800,
 )
 
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)

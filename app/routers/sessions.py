@@ -33,11 +33,6 @@ from app.services.guest_view import strip_slide_content_json
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
-# Generous per-IP limit: audience members routinely join from a shared
-# conference-WiFi/NAT IP, so this only needs to slow scripted code-guessing.
-JOIN_RATE_LIMIT = 60
-JOIN_RATE_WINDOW_SECONDS = 60
-
 
 def _generate_code() -> str:
     chars = string.ascii_uppercase + string.digits
@@ -231,8 +226,12 @@ async def delete_session(
 @router.get("/join/{code}")
 async def join_session(code: str, request: Request, db: AsyncSession = Depends(get_db)):
     redis: Redis = request.app.state.redis
+    settings = get_settings()
     allowed = await check_rate_limit(
-        redis, f"rate:join:{request.client.host}", JOIN_RATE_LIMIT, JOIN_RATE_WINDOW_SECONDS
+        redis,
+        f"rate:join:{request.client.host}",
+        settings.JOIN_RATE_LIMIT,
+        settings.JOIN_RATE_LIMIT_WINDOW_SECONDS,
     )
     if not allowed:
         raise HTTPException(status_code=429, detail="Too many attempts. Please slow down.")

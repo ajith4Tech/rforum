@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.auth import get_current_user, get_optional_user
+from app.config import get_settings
 from app.database import get_db
 from app.models import Response, Slide, User, UserRole
 from app.schemas import ResponseCreate, ResponseOut
@@ -39,22 +40,26 @@ async def submit_response(
     if not slide.session.is_live:
         raise HTTPException(status_code=403, detail="Session is not live")
 
-    # Rate limit: max 10 submissions per guest per slide per minute. guest_identifier
+    # Rate limit: per-guest cap on submissions per slide per minute. guest_identifier
     # is client-supplied, so also cap per-IP-per-slide — otherwise rotating the
     # identifier trivially bypasses the per-guest limit (ballot-stuffing on polls).
+    # The per-IP cap is deliberately much higher than the per-guest one: many
+    # legitimate guests behind one shared venue/NAT IP submitting to the same
+    # slide is the expected case at a live workshop, not the abuse case.
+    settings = get_settings()
     redis: Redis = request.app.state.redis
     rate_key = f"rate:response:{payload.guest_identifier}:{slide_id}"
     count = await redis.incr(rate_key)
     if count == 1:
-        await redis.expire(rate_key, 60)
-    if count > 10:
+        await redis.expire(rate_key, settings.RESPONSE_RATE_LIMIT_PER_GUEST_WINDOW_SECONDS)
+    if count > settings.RESPONSE_RATE_LIMIT_PER_GUEST:
         raise HTTPException(status_code=429, detail="Too many responses. Please slow down.")
 
     ip_rate_key = f"rate:response_ip:{request.client.host}:{slide_id}"
     ip_count = await redis.incr(ip_rate_key)
     if ip_count == 1:
-        await redis.expire(ip_rate_key, 60)
-    if ip_count > 20:
+        await redis.expire(ip_rate_key, settings.RESPONSE_RATE_LIMIT_PER_IP_WINDOW_SECONDS)
+    if ip_count > settings.RESPONSE_RATE_LIMIT_PER_IP:
         raise HTTPException(status_code=429, detail="Too many responses. Please slow down.")
 
     # Default name to "Guest" if empty or None

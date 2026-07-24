@@ -4,6 +4,11 @@ export type MessageHandler = (data: any) => void;
 export type ConnectionStatus = 'connected' | 'disconnected' | 'reconnecting';
 export type StatusHandler = (status: ConnectionStatus) => void;
 
+// Upper bound for the reconnect backoff (see scheduleReconnect) — caps how
+// long a client waits before retrying and, combined with full jitter, how
+// spread-out a mass-reconnect wave is after a shared disruption.
+const MAX_RECONNECT_DELAY_MS = 15000;
+
 export interface WsConnectOptions {
   /** JWT of the authenticated session owner — identifies this connection as a moderator. */
   token?: string;
@@ -123,10 +128,15 @@ export class RforumWebSocket {
 
   private scheduleReconnect() {
     if (this.reconnectTimer || this.closed) return;
-    const delay = Math.min(this.reconnectBackoff, 8000);
+    // Full jitter (0..cap) rather than a fixed delay: after a shared
+    // disruption (backend restart, network blip) hundreds of clients would
+    // otherwise retry in lockstep, creating a reconnect storm that hammers
+    // the same per-IP WS connect rate limit on every synchronized wave.
+    const cap = Math.min(this.reconnectBackoff, MAX_RECONNECT_DELAY_MS);
+    const delay = Math.random() * cap;
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
-      this.reconnectBackoff = Math.min(this.reconnectBackoff * 2, 8000);
+      this.reconnectBackoff = Math.min(this.reconnectBackoff * 2, MAX_RECONNECT_DELAY_MS);
       this.openSocket();
     }, delay);
   }

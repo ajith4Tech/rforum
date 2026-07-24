@@ -1,4 +1,6 @@
+import asyncio
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 import sys
 from pathlib import Path
@@ -43,15 +45,34 @@ def _log_startup_capabilities() -> None:
     logger.info("[startup] PyMuPDF (fitz) version: %s — PDF/PPTX/DOCX rendering available.", fitz.version[0])
 
 
+# asyncio's default executor caps at min(32, cpu_count + 4) threads — 6 on a
+# 2-vCPU host. Every storage.read()/exists()/save() call (presentation page
+# serving, uploads) runs on this executor via asyncio.to_thread, and those
+# calls block on network I/O (S3) or disk, not CPU — a blocked thread costs
+# negligible RSS beyond its stack, so raising the pool is safe on this host's
+# memory budget. Sized for "hundreds of guests requesting the same page at
+# once" without being a large/unbounded pool.
+STORAGE_IO_EXECUTOR_WORKERS = 24
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # ── Startup ───────────────────────────────────────
     _log_startup_capabilities()
+    storage_io_executor = ThreadPoolExecutor(
+        max_workers=STORAGE_IO_EXECUTOR_WORKERS, thread_name_prefix="storage-io"
+    )
+    asyncio.get_running_loop().set_default_executor(storage_io_executor)
     app.state.redis = Redis.from_url(settings.REDIS_URL, decode_responses=True)
     yield
     # ── Shutdown ──────────────────────────────────────
     await app.state.redis.close()
     await engine.dispose()
+    # wait=False: don't block process shutdown on an in-flight blocking S3/disk
+    # call — threads can't be forcibly interrupted, and systemd already expects
+    # a fast stop (Restart=always). cancel_futures drops only queued-but-not-
+    # yet-started work, not anything already running.
+    storage_io_executor.shutdown(wait=False, cancel_futures=True)
 
 
 app = FastAPI(

@@ -205,6 +205,57 @@ class TestUnrestrictedEventsUnchanged:
             assert received["event"] == "heartbeat"
 
 
+class _FakeRedis:
+    """Deterministic incr/expire counter — isolates this test from whatever
+    state a real Redis instance might already hold for this key. Also stands
+    in for the real Redis client across app lifespan shutdown (ws_client's
+    `with TestClient(app)` block closes app.state.redis on exit)."""
+
+    def __init__(self):
+        self._counts: dict[str, int] = {}
+
+    async def incr(self, key):
+        self._counts[key] = self._counts.get(key, 0) + 1
+        return self._counts[key]
+
+    async def expire(self, key, seconds):
+        pass
+
+    async def close(self):
+        pass
+
+    async def aclose(self):
+        pass
+
+
+class TestConfigurableWsConnectRateLimit:
+    """WS_CONNECT_RATE_LIMIT is a Settings field (app/config.py), not a
+    hardcoded module constant, so an operator can raise it for a workshop
+    behind a single large shared-NAT IP — verify the connect handler
+    actually reads the configured value."""
+
+    def test_custom_limit_from_settings_is_honored(self, ws_client, monkeypatch):
+        import app.routers.ws as ws_module
+
+        monkeypatch.setattr(
+            ws_module, "settings",
+            ws_module.settings.model_copy(update={"WS_CONNECT_RATE_LIMIT": 2}),
+        )
+        ws_client.app.state.redis = _FakeRedis()
+
+        for _ in range(2):
+            with pytest.raises(WebSocketDisconnect) as exc_info:
+                with ws_client.websocket_connect("/ws/RATE-LIMIT-TEST"):
+                    pass
+            # Passed the rate check; rejected only because the code doesn't exist.
+            assert exc_info.value.code == 4404
+
+        with pytest.raises(WebSocketDisconnect) as exc_info:
+            with ws_client.websocket_connect("/ws/RATE-LIMIT-TEST"):
+                pass
+        assert exc_info.value.code == 4429
+
+
 class TestPubsubSubscriptionRecovery:
     """ConnectionManager._listen owns subscribing (and re-subscribing)
     itself, so a subscribe failure — the very first attempt, or a connection

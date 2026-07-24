@@ -41,13 +41,6 @@ MODERATOR_ONLY_EVENTS = frozenset({"slide_change", "page_change", "session_updat
 # Maximum raw message size accepted from a client (64 KB)
 MAX_WS_MESSAGE_BYTES = 65_536
 
-# Connect attempts allowed per client IP per window. Generous on purpose:
-# audience members at a live event routinely join from a single shared
-# conference-WiFi/NAT IP, so this only needs to stop scripted connection
-# storms, not organic bursts of dozens of simultaneous guests.
-WS_CONNECT_RATE_LIMIT = 60
-WS_CONNECT_RATE_WINDOW_SECONDS = 60
-
 
 async def _get_session_by_code(session_code: str) -> Session | None:
     async with async_session() as db:
@@ -192,8 +185,8 @@ async def websocket_endpoint(websocket: WebSocket, session_code: str):
     allowed = await check_rate_limit(
         redis,
         f"rate:ws_connect:{client_host}",
-        WS_CONNECT_RATE_LIMIT,
-        WS_CONNECT_RATE_WINDOW_SECONDS,
+        settings.WS_CONNECT_RATE_LIMIT,
+        settings.WS_CONNECT_RATE_WINDOW_SECONDS,
     )
     if not allowed:
         await websocket.close(code=4429)

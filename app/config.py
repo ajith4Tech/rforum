@@ -51,6 +51,27 @@ class Settings(BaseSettings):
     DEFAULT_PAGE_SIZE: int = 20
     MAX_PAGE_SIZE: int = 100
 
+    # ── Rate limiting ─────────────────────────────────────────────────
+    # All limits below are per-client-IP, fixed-window (app/rate_limit.py).
+    # Defaults are sized for a live workshop where many legitimate
+    # participants share one venue/NAT IP — they bound scripted abuse, not
+    # organic bursts. Raise further via env for a single-IP audience larger
+    # than ~a few hundred people.
+    JOIN_RATE_LIMIT: int = 300
+    JOIN_RATE_LIMIT_WINDOW_SECONDS: int = 60
+    WS_CONNECT_RATE_LIMIT: int = 300
+    WS_CONNECT_RATE_WINDOW_SECONDS: int = 60
+    # Per-guest-identifier and per-IP caps on response submissions (guest
+    # identifier is client-supplied, so the per-IP cap exists to stop
+    # identifier-rotation abuse — see app/routers/responses.py). The per-IP
+    # cap in particular needs to be workshop-scale since many guests behind
+    # one shared IP submitting to the same slide is the expected case, not
+    # the abuse case.
+    RESPONSE_RATE_LIMIT_PER_GUEST: int = 10
+    RESPONSE_RATE_LIMIT_PER_GUEST_WINDOW_SECONDS: int = 60
+    RESPONSE_RATE_LIMIT_PER_IP: int = 400
+    RESPONSE_RATE_LIMIT_PER_IP_WINDOW_SECONDS: int = 60
+
     model_config = {"env_file": ".env", "extra": "ignore"}
 
 

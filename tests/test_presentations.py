@@ -266,7 +266,7 @@ class TestLazyPageRendering:
         assert img_resp.headers["content-type"] == "image/webp"
         # Not "immutable": regenerate_presentation can replace the bytes behind
         # this same URL, so the response is cacheable but bounded, not permanent.
-        assert img_resp.headers["cache-control"] == "public, max-age=3600"
+        assert img_resp.headers["cache-control"] == "public, max-age=86400"
 
         pages_files = list(tmp_path.glob(f"uploads/presentations/*/{presentation_id}/pages/*.webp"))
         assert len(pages_files) == 1
@@ -288,6 +288,61 @@ class TestLazyPageRendering:
         )
         assert thumb_resp.status_code == 200
         assert thumb_resp.headers["content-type"] == "image/webp"
+
+    async def test_missing_thumbnail_file_is_404_not_a_crash(
+        self, client, owner_session, owner_user, pdf_1_page, tmp_path
+    ):
+        """A PresentationPage row can exist with no file behind it on disk
+        (data problem) — reading directly and catching FileNotFoundError
+        (replacing the old exists()-then-read() check) must still 404
+        cleanly instead of raising."""
+        resp = await _upload(client, owner_session.id, "deck.pdf", pdf_1_page)
+        presentation_id = resp.json()["presentation"]["id"]
+
+        thumb_files = list(tmp_path.glob(f"uploads/presentations/*/{presentation_id}/thumbnails/*.webp"))
+        assert len(thumb_files) == 1
+        thumb_files[0].unlink()
+
+        thumb_resp = await client.get(
+            f"/api/presentations/{presentation_id}/pages/1/thumbnail",
+            params={"token": _token_for(owner_user)},
+        )
+        assert thumb_resp.status_code == 404
+
+    async def test_concurrent_requests_for_same_uncached_page_render_once(
+        self, client, owner_session, owner_user, pdf_3_pages, monkeypatch
+    ):
+        """500 guests requesting the same freshly-activated page must not
+        each independently invoke the renderer — concurrent cache-miss
+        requests for the same (presentation, page) coalesce onto a single
+        render via the lock in _serve_page_file."""
+        import asyncio
+
+        import app.routers.presentations as presentations_module
+
+        resp = await _upload(client, owner_session.id, "deck.pdf", pdf_3_pages)
+        presentation_id = resp.json()["presentation"]["id"]
+        auth = {"token": _token_for(owner_user)}
+
+        real_render_page = presentations_module.render_page
+        call_count = {"n": 0}
+
+        def counting_render_page(*args, **kwargs):
+            call_count["n"] += 1
+            import time
+            time.sleep(0.05)  # widen the race window so concurrency is exercised
+            return real_render_page(*args, **kwargs)
+
+        monkeypatch.setattr(presentations_module, "render_page", counting_render_page)
+
+        responses = await asyncio.gather(*[
+            client.get(f"/api/presentations/{presentation_id}/pages/2/image", params=auth)
+            for _ in range(10)
+        ])
+
+        assert all(r.status_code == 200 for r in responses)
+        assert len({r.content for r in responses}) == 1
+        assert call_count["n"] == 1
 
 
 class TestPdfConversionCaching:
