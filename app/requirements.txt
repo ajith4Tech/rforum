@@ -11,4 +11,15 @@ bcrypt>=4.0.0,<5.0.0
 redis[hiredis]==5.2.1
 python-multipart==0.0.20
 PyMuPDF==1.25.3
+# PyMuPDF's pix.pil_tobytes(format="WEBP") (app/services/file_processing.py
+# thumbnail rendering) lazily imports PIL itself — Pillow is not a hard
+# PyMuPDF dependency, so it must be listed explicitly here. Confirmed missing:
+# every fresh `pip install -r requirements.txt` (this Dockerfile included)
+# fails thumbnail rendering with ModuleNotFoundError; the current venv only
+# works because Pillow happens to be installed there already (as a
+# transitive dep of python-pptx, which nothing in app/ actually imports).
+Pillow==12.3.0
 orjson>=3.9.0
+python-magic==0.4.27
+boto3==1.43.48
+moto[s3]==5.2.2  # test-only — mocks S3 for tests/test_s3_storage_backend.py and friends

@@ -1,10 +1,11 @@
 """Session Assets router – CRUD for uploaded files with storage tracking."""
+import asyncio
+import logging
 import os
 import uuid
 from pathlib import Path
 
-import fitz  # PyMuPDF
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, status
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,19 +13,55 @@ from app.auth import get_current_user
 from app.config import get_settings
 from app.database import get_db
 from app.models import Event, Session, SessionAsset, Slide, User
+from app.rate_limit import check_rate_limit
 from app.schemas import SessionAssetOut
+from app.services.file_processing import (
+    check_content_length,
+    convert_to_pdf_if_needed,
+    extract_total_pages,
+    validate_upload,
+)
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/assets", tags=["session_assets"])
+
+UPLOAD_RATE_LIMIT = 10
+UPLOAD_RATE_WINDOW_SECONDS = 60
+
+
+async def _check_upload_rate_limit(request: Request, user: User) -> None:
+    redis = request.app.state.redis
+    allowed = await check_rate_limit(
+        redis,
+        f"rate:asset_upload:{user.id}",
+        UPLOAD_RATE_LIMIT,
+        UPLOAD_RATE_WINDOW_SECONDS,
+    )
+    if not allowed:
+        raise HTTPException(status_code=429, detail="Too many attempts. Please slow down.")
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _remove_file(file_url: str | None) -> None:
-    """Silently remove file from disk if it exists."""
+    """Silently remove file from disk if it exists.
+
+    file_url is always server-constructed today, but resolve-and-confine to
+    uploads/ anyway (matching the same defensive pattern slides.py's
+    page-serving path uses) rather than trust a DB-stored path unconditionally
+    — a stray "../" here would otherwise let this delete outside uploads/."""
     if not file_url:
         return
     path = file_url.lstrip("/")
-    if path and os.path.exists(path):
+    if not path:
+        return
+    uploads_dir = os.path.realpath("uploads")
+    resolved = os.path.realpath(path)
+    if resolved != uploads_dir and not resolved.startswith(uploads_dir + os.sep):
+        logger.warning("Refusing to remove file outside uploads/: %r", file_url)
+        return
+    if os.path.exists(path):
         try:
             os.remove(path)
         except OSError:
@@ -102,71 +139,91 @@ async def get_storage(
 async def replace_asset_file(
     asset_id: str,
     file: UploadFile,
+    request: Request,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Replace the file for an existing asset and update the linked slide if any."""
     asset = await _get_owned_asset(asset_id, user, db)
+    if asset.presentation_id is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="This asset is a Presentation's original file — use the presentation's replace endpoint instead.",
+        )
+    await _check_upload_rate_limit(request, user)
 
     settings = get_settings()
-    # Strip any directory components from the filename to prevent path traversal
+    max_bytes = settings.UPLOAD_MAX_MB * 1024 * 1024
+    try:
+        check_content_length(request.headers.get("content-length"), max_bytes)
+    except ValueError as exc:
+        raise HTTPException(status_code=413, detail=str(exc))
+
     original_name = Path(file.filename or "upload.bin").name or "upload.bin"
     ext = Path(original_name).suffix.lower()
-
-    if ext not in settings.UPLOAD_ALLOWED_EXTENSIONS:
-        allowed = ", ".join(settings.UPLOAD_ALLOWED_EXTENSIONS)
-        raise HTTPException(
-            status_code=400,
-            detail=f"File type '{ext}' not allowed. Allowed types: {allowed}",
-        )
-
     content = await file.read()
-    max_bytes = settings.UPLOAD_MAX_MB * 1024 * 1024
-    if len(content) > max_bytes:
-        raise HTTPException(
-            status_code=413,
-            detail=f"File size exceeds the {settings.UPLOAD_MAX_MB} MB limit",
+
+    # ── Validate (extension, size, MIME) ─────────────────
+    try:
+        validation = validate_upload(
+            content=content,
+            original_name=original_name,
+            allowed_extensions=settings.UPLOAD_ALLOWED_EXTENSIONS,
+            max_bytes=max_bytes,
         )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    actual_mime = validation.actual_mime
+    logger.info(
+        "Asset replace started. user=%s asset=%s filename='%s' size=%d detected_mime='%s'",
+        user.id, asset_id, original_name, len(content), actual_mime,
+    )
 
     # Remove old file from disk
-    _remove_file(asset.file_url)
+    await asyncio.to_thread(_remove_file, asset.file_url)
 
     os.makedirs("uploads", exist_ok=True)
     filename = f"{asset_id}_{original_name}"
     file_path = os.path.join("uploads", filename)
-    with open(file_path, "wb") as fh:
-        fh.write(content)
 
-    content_type = file.content_type or "application/octet-stream"
+    def _write_file():
+        with open(file_path, "wb") as fh:
+            fh.write(content)
+
+    await asyncio.to_thread(_write_file)
+
+    content_type = actual_mime
     file_url = f"/uploads/{filename}"
     file_name = original_name
 
-    # PPT → PDF conversion
-    if ext in {".ppt", ".pptx"}:
-        try:
-            import subprocess
-            subprocess.run(
-                ["libreoffice", "--headless", "--convert-to", "pdf", "--outdir", "uploads", file_path],
-                check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            )
-            pdf_name = f"{Path(file_path).stem}.pdf"
-            pdf_path = os.path.join("uploads", pdf_name)
-            if os.path.exists(pdf_path):
-                file_url = f"/uploads/{pdf_name}"
-                file_name = pdf_name
-                content_type = "application/pdf"
-        except Exception:
-            pass
+    # ── Convert PPT/PPTX → PDF ────────────────────────────
+    conversion = await asyncio.to_thread(convert_to_pdf_if_needed, file_path, ext)
+    if conversion.warnings:
+        logger.warning(
+            "Asset replace conversion warnings. asset=%s: %s",
+            asset_id, "; ".join(conversion.warnings),
+        )
 
-    total_pages = 1
+    if conversion.success and conversion.output_path:
+        pdf_basename = os.path.basename(conversion.output_path)
+        file_url = f"/uploads/{pdf_basename}"
+        file_name = pdf_basename
+        content_type = conversion.converted_type or "application/pdf"
+
+    # ── Extract page count (works for ALL fitz-supported types) ──
     final_path = file_url.lstrip("/")
-    if content_type == "application/pdf" and os.path.exists(final_path):
-        try:
-            doc = fitz.open(final_path)
-            total_pages = len(doc)
-            doc.close()
-        except Exception:
-            pass
+    total_pages, page_warnings = await asyncio.to_thread(extract_total_pages, final_path)
+    if page_warnings:
+        logger.warning(
+            "Asset replace page count warnings. asset=%s: %s",
+            asset_id, "; ".join(page_warnings),
+        )
+
+    logger.info(
+        "Asset replace complete. asset=%s file='%s' type='%s' pages=%d",
+        asset_id, file_name, content_type, total_pages,
+    )
 
     # Update linked slide content_json if any
     if asset.slide_id:
@@ -199,8 +256,13 @@ async def delete_asset(
 ):
     """Delete an asset: remove file from disk, delete linked slide, delete the record."""
     asset = await _get_owned_asset(asset_id, user, db)
+    if asset.presentation_id is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="This asset is a Presentation's original file and cannot be deleted from here.",
+        )
 
-    _remove_file(asset.file_url)
+    await asyncio.to_thread(_remove_file, asset.file_url)
 
     if asset.slide_id:
         await db.execute(delete(Slide).where(Slide.id == asset.slide_id))

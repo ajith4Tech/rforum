@@ -1,0 +1,16 @@
+{{- if .Values.storage.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "rforum.fullname" . }}-uploads
+  labels:
+    {{- include "rforum.componentLabels" (dict "root" . "component" "backend") | nindent 4 }}
+spec:
+  accessModes: [{{ .Values.storage.persistence.accessMode | quote }}]
+  {{- if .Values.storage.persistence.storageClass }}
+  storageClassName: {{ .Values.storage.persistence.storageClass }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.storage.persistence.size }}
+{{- end }}

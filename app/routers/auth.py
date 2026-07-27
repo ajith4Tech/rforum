@@ -1,5 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+import hmac
+
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
+from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -7,9 +10,20 @@ from app.auth import create_access_token, get_current_user, hash_password, verif
 from app.config import get_settings
 from app.database import get_db
 from app.models import User, UserRole
+from app.rate_limit import check_rate_limit
 from app.schemas import ChangePasswordPayload, Token, UserCreate, UserOut
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+# Generous per-IP limits: this only needs to slow down scripted credential
+# stuffing / invite-code guessing, not organic use — many real users can
+# legitimately register or log in from behind the same shared/NAT IP.
+REGISTER_RATE_LIMIT = 30
+REGISTER_RATE_WINDOW_SECONDS = 60
+LOGIN_RATE_LIMIT = 30
+LOGIN_RATE_WINDOW_SECONDS = 60
+CHANGE_PASSWORD_RATE_LIMIT = 30
+CHANGE_PASSWORD_RATE_WINDOW_SECONDS = 60
 
 
 @router.get("/me", response_model=UserOut)
@@ -18,9 +32,18 @@ async def get_me(user: User = Depends(get_current_user)):
 
 
 @router.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
-async def register(payload: UserCreate, db: AsyncSession = Depends(get_db)):
+async def register(payload: UserCreate, request: Request, db: AsyncSession = Depends(get_db)):
+    redis: Redis = request.app.state.redis
+    allowed = await check_rate_limit(
+        redis, f"rate:register:{request.client.host}", REGISTER_RATE_LIMIT, REGISTER_RATE_WINDOW_SECONDS
+    )
+    if not allowed:
+        raise HTTPException(status_code=429, detail="Too many registration attempts. Please try again later.")
+
     settings = get_settings()
-    if payload.invite_code.strip().upper() != settings.INVITE_CODE.strip().upper():
+    if not hmac.compare_digest(
+        payload.invite_code.strip().upper(), settings.INVITE_CODE.strip().upper()
+    ):
         raise HTTPException(status_code=403, detail="Invalid invite code")
 
     existing = await db.execute(select(User).where(User.email == payload.email))
@@ -43,9 +66,17 @@ async def register(payload: UserCreate, db: AsyncSession = Depends(get_db)):
 @router.post("/change-password", status_code=200)
 async def change_password(
     payload: ChangePasswordPayload,
+    request: Request,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    redis: Redis = request.app.state.redis
+    allowed = await check_rate_limit(
+        redis, f"rate:change_password:{user.id}", CHANGE_PASSWORD_RATE_LIMIT, CHANGE_PASSWORD_RATE_WINDOW_SECONDS
+    )
+    if not allowed:
+        raise HTTPException(status_code=429, detail="Too many attempts. Please try again later.")
+
     if not verify_password(payload.current_password, user.hashed_password):
         raise HTTPException(status_code=400, detail="Current password is incorrect")
     if len(payload.new_password) < 8:
@@ -57,9 +88,17 @@ async def change_password(
 
 @router.post("/login", response_model=Token)
 async def login(
+    request: Request,
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: AsyncSession = Depends(get_db),
 ):
+    redis: Redis = request.app.state.redis
+    allowed = await check_rate_limit(
+        redis, f"rate:login:{request.client.host}", LOGIN_RATE_LIMIT, LOGIN_RATE_WINDOW_SECONDS
+    )
+    if not allowed:
+        raise HTTPException(status_code=429, detail="Too many login attempts. Please try again later.")
+
     result = await db.execute(select(User).where(User.email == form_data.username))
     user = result.scalar_one_or_none()
 

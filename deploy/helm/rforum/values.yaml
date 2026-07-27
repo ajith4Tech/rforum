@@ -1,0 +1,298 @@
+# Default values for rforum — sized for a small/fresh k3s VM and zero
+# external dependencies (bundled Postgres+Redis, local disk storage,
+# self-signed-friendly ingress). See values-production.yaml for a larger-VM,
+# S3-backed overlay matching the currently-deployed rforum.t4gc.in config.
+
+nameOverride: ""
+fullnameOverride: ""
+
+imagePullSecrets: []
+
+image:
+  # Set to a registry prefix (e.g. "registry.example.com/") if pushing built
+  # images to a registry. Leave empty when images are built locally and
+  # imported directly into containerd on each k3s node (see docs/deploy.md).
+  registry: ""
+  backend:
+    repository: rforum-backend
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  frontend:
+    repository: rforum-frontend
+    tag: "latest"
+    pullPolicy: IfNotPresent
+
+# ── Backend (FastAPI/Uvicorn) ────────────────────────────────────────────
+backend:
+  # ConnectionManager (app/routers/ws.py) fans WebSocket broadcasts out via
+  # one Redis pub/sub subscription per session code per process, tagging its
+  # own publishes with a per-process SERVER_ID so a process never re-broadcasts
+  # its own message — this design DOES support >1 backend replica. The
+  # validated 500-guest load test, however, ran against exactly one process
+  # (2 uvicorn workers, matching the systemd unit already used in prod).
+  # Raise replicaCount only alongside fresh load testing at the new scale —
+  # don't raise it blindly just because the architecture allows it.
+  replicaCount: 1
+  # uvicorn --workers inside each pod — matches rforum-backend.service on the
+  # current VM (2 workers, uvloop, httptools).
+  workers: 2
+  loop: uvloop
+  httpImpl: httptools
+  backlog: 512
+  port: 8000
+
+  service:
+    port: 8000
+
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 1536Mi
+
+  probes:
+    path: /api/health
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  # Graceful shutdown: Uvicorn drains in-flight requests/WS connections on
+  # SIGTERM. Give it more room than the K8s default (30s) is already the
+  # default; kept explicit since a rolling update killing a moderator's
+  # active WS mid-session is the one thing this chart must not regress.
+  terminationGracePeriodSeconds: 30
+
+  podDisruptionBudget:
+    enabled: true
+    maxUnavailable: 1
+
+  autoscaling:
+    # Disabled by default — see the replicaCount note above. CPU-based HPA is
+    # safe to enable once you've load-tested beyond one replica, since the
+    # WS fan-out and rate limiting are both already Redis-backed (shared
+    # state), not in-process.
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 4
+    targetCPUUtilizationPercentage: 70
+
+  # Extra environment variables merged in verbatim (name/value pairs).
+  extraEnv: []
+
+# ── Frontend (static SvelteKit build served by nginx) ───────────────────
+frontend:
+  replicaCount: 2
+  service:
+    port: 8080
+  resources:
+    requests:
+      cpu: 100m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  probes:
+    path: /healthz
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+  podDisruptionBudget:
+    enabled: true
+    maxUnavailable: 1
+
+# ── Bundled PostgreSQL (StatefulSet) ─────────────────────────────────────
+# Disable and fill in `externalDatabase` to point at a managed/external
+# Postgres instead.
+postgresql:
+  enabled: true
+  image:
+    repository: postgres
+    tag: "16-alpine"
+  auth:
+    username: rforum
+    database: rforum
+    # Password is required — supply via --set postgresql.auth.password=...,
+    # via values-production.yaml, or (recommended) set auth.existingSecret to
+    # a Secret you created out-of-band containing key "postgres-password".
+    password: ""
+    existingSecret: ""
+  persistence:
+    enabled: true
+    size: 10Gi
+    storageClass: ""
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+externalDatabase:
+  host: ""
+  port: 5432
+  database: rforum
+  username: rforum
+  existingSecret: ""
+  existingSecretPasswordKey: "postgres-password"
+
+# ── Bundled Redis (pub/sub fan-out + rate-limit counters) ────────────────
+# Disable and fill in `externalRedis` to point at a managed/external Redis
+# instead. Redis holds no durable business data (WS pub/sub is transient,
+# rate-limit counters are short-TTL fixed windows — app/rate_limit.py) so
+# persistence here is a "don't reset counters/lose in-flight messages on
+# pod restart" nicety, not a correctness requirement.
+redis:
+  enabled: true
+  image:
+    repository: redis
+    tag: "7-alpine"
+  persistence:
+    enabled: true
+    size: 1Gi
+    storageClass: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+externalRedis:
+  host: ""
+  port: 6379
+  # rforum has no REDIS_PASSWORD setting today (app/config.py REDIS_URL is a
+  # single connection string) — if your external Redis requires auth, bake
+  # the credential into `externalRedis.url` instead and leave host/port unset.
+  url: ""
+
+# ── Application configuration (app/config.py Settings) ──────────────────
+app:
+  algorithm: HS256
+  accessTokenExpireMinutes: 1440
+  # Shared invite code gating registration (app/routers/auth.py). Change
+  # this — the upstream default ("RFORUM01") is public in this repo's history.
+  inviteCode: "CHANGE_ME"
+  superAdminEmail: ""
+  # Left empty by default: templates/configmap.yaml derives
+  # ["https://<ingress.host>"] automatically since frontend and backend share
+  # one Ingress host (frontend/src/lib/api.ts same-origin-guesses the API
+  # origin, exactly like the current single-nginx-host deployment) — CORS is
+  # only exercised for out-of-origin embeds/tools. Override to add more.
+  corsOrigins: []
+  uploadMaxMb: 20
+  # A YAML list, not a comma string — Settings.UPLOAD_ALLOWED_EXTENSIONS is a
+  # pydantic-settings list[str] field, which requires JSON from an env var
+  # (confirmed empirically: pydantic-settings v2 does NOT fall back to
+  # comma-splitting despite .env.example's comment implying it does — a
+  # comma-joined value crashes every uvicorn worker at startup with
+  # SettingsError). Rendered to a JSON array in templates/configmap.yaml,
+  # same as app.corsOrigins below.
+  uploadAllowedExtensions:
+    - .pdf
+    - .ppt
+    - .pptx
+    - .doc
+    - .docx
+    - .txt
+    - .odp
+    - .odt
+  presentationOrphanRetentionDays: 7
+  pagination:
+    defaultPageSize: 20
+    maxPageSize: 100
+  rateLimit:
+    joinLimit: 600
+    joinWindowSeconds: 60
+    wsConnectLimit: 600
+    wsConnectWindowSeconds: 60
+    responsePerGuest: 10
+    responsePerGuestWindowSeconds: 60
+    responsePerIp: 600
+    responsePerIpWindowSeconds: 60
+
+  # JWT signing secret (app/config.py SECRET_KEY). MUST be overridden — see
+  # README in this chart directory / NOTES.txt. Prefer `existingSecret` over
+  # setting this in plain values for anything beyond local testing.
+  secretKey: ""
+  # Name of a pre-created Secret to source SECRET_KEY (and, when S3 storage
+  # is enabled, AWS credentials) from instead of the values above. Expected
+  # keys: secret-key, aws-access-key-id, aws-secret-access-key.
+  existingSecret: ""
+
+# ── Presentation/upload storage (app/storage/) ───────────────────────────
+storage:
+  # "local" (default — zero external dependencies, backed by the PVC below)
+  # or "s3" (app/storage/s3.py; local PVC still mounted and used as a
+  # fallback read path for anything not yet in the bucket — see
+  # app/storage/fallback.py, which is exactly how the current production
+  # deployment is configured after its S3 migration).
+  backend: local
+  root: /data/uploads
+  persistence:
+    enabled: true
+    size: 20Gi
+    storageClass: ""
+    accessMode: ReadWriteOnce
+  s3:
+    bucket: ""
+    region: eu-north-1
+    endpoint: ""
+    prefix: ""
+    maxRetries: 3
+    accessKeyId: ""
+    secretAccessKey: ""
+
+# ── DB migrations (Alembic) ──────────────────────────────────────────────
+# Runs once as a Helm post-install (first install) / pre-upgrade (later upgrades) hook Job,
+# before backend pods
+# roll — never as a per-replica startup step (alembic upgrade head is not
+# safe to run concurrently from every replica).
+migrations:
+  enabled: true
+  backoffLimit: 3
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+# ── Ingress ───────────────────────────────────────────────────────────────
+ingress:
+  enabled: true
+  # "nginx" (ingress-nginx) or "traefik" (k3s's bundled controller) — picks
+  # the annotation set in templates/ingress.yaml. nginx is the default
+  # because it's a direct, well-documented translation of the hand-tuned
+  # nginx.conf already validated at 500 concurrent guests (proxy timeouts,
+  # body size, WS upgrade headers); Traefik's per-route timeout knobs aren't
+  # expressible as plain Ingress annotations. See docs/deploy.md.
+  controller: nginx
+  # Leave empty to default to `ingress.controller`'s name (the common case:
+  # ingress-nginx installs as class "nginx", k3s's bundled Traefik as class
+  # "traefik"). Set explicitly only if your controller uses a custom class name.
+  className: ""
+  host: rforum.example.com
+  annotations: {}
+  tls:
+    enabled: false
+    secretName: ""
+  # Matches the current prod nginx `client_max_body_size 25m` (app enforces
+  # UPLOAD_MAX_MB=20 itself; the proxy limit carries headroom above that).
+  maxBodySizeMb: 25
+  # Matches the current prod nginx `proxy_read_timeout 86400` on /ws/.
+  wsTimeoutSeconds: 86400
+  # Matches the current prod nginx `proxy_read_timeout`/`proxy_send_timeout`
+  # default (60s) for plain /api/ requests — much shorter than the WS timeout.
+  apiTimeoutSeconds: 60

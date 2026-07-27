@@ -44,6 +44,11 @@ lerna-debug.log*
 build/
 coverage/
 
+# Playwright
+frontend/test-results/
+frontend/playwright-report/
+frontend/blob-report/
+
 # IDE
 .vscode/*
 !.vscode/extensions.json
@@ -62,3 +67,6 @@ Thumbs.db
 uploads/
 
 .claude/
+
+rforum_500_user_load_test.js
+rforum_500_user_load_test.legacy.js

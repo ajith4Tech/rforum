@@ -76,6 +76,8 @@
         <button
           onclick={() => onDelete(event.id)}
           class="btn-danger p-2"
+          title="Delete"
+          aria-label={`Delete event ${event.title}`}
         >
           <Trash2 class="w-4 h-4" />
         </button>
@@ -85,7 +87,7 @@
 
   <!-- Sessions -->
   <div class="space-y-2">
-    <div class="text-base font-semibold text-surface-300">Sessions</div>
+    <div class="text-base font-semibold text-surface-300">Sessions ({sessions.length})</div>
     {#if sessions.length === 0}
       <p class="text-sm text-surface-400">No sessions assigned yet.</p>
     {:else}
@@ -93,6 +95,7 @@
         {#each sessions as session (session.id)}
           <SessionItem
             {session}
+            eventId={event.id}
             {saving}
             onRemove={(sid) => onRemoveSession?.(event.id, sid)}
           />

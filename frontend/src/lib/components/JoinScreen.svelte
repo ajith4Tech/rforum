@@ -75,7 +75,7 @@
       <!-- Moderator Controls -->
       {#if isModerator && onStartSession}
         <button
-          on:click={onStartSession}
+          onclick={onStartSession}
           disabled={isStarting}
           class="w-full mt-4 md:mt-6 px-6 md:px-8 py-3 md:py-4 bg-brand-500 hover:bg-brand-600 disabled:bg-brand-500/50 text-white font-semibold rounded-xl transition-all duration-200 text-base md:text-lg"
         >

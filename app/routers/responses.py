@@ -3,13 +3,15 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from redis.asyncio import Redis
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.auth import get_current_user
+from app.auth import get_current_user, get_optional_user
+from app.config import get_settings
 from app.database import get_db
-from app.models import Response, Slide, User
+from app.models import Response, Slide, User, UserRole
+from app.rate_limit import check_rate_limit
 from app.schemas import ResponseCreate, ResponseOut
 
 router = APIRouter(prefix="/api/slides/{slide_id}/responses", tags=["responses"])
@@ -36,14 +38,41 @@ async def submit_response(
         raise HTTPException(status_code=404, detail="Slide not found")
     if not slide.is_active:
         raise HTTPException(status_code=400, detail="Slide is not currently active")
+    if not slide.session.is_live:
+        raise HTTPException(status_code=403, detail="Session is not live")
 
-    # Rate limit: max 10 submissions per guest per slide per minute
+    # Rate limit: per-guest cap on submissions per slide per minute. guest_identifier
+    # is client-supplied, so also cap per-IP-per-slide — otherwise rotating the
+    # identifier trivially bypasses the per-guest limit (ballot-stuffing on polls).
+    # The per-IP cap is deliberately much higher than the per-guest one: many
+    # legitimate guests behind one shared venue/NAT IP submitting to the same
+    # slide is the expected case at a live workshop, not the abuse case.
+    #
+    # Uses the shared check_rate_limit() helper (app/rate_limit.py) rather than
+    # a hand-rolled incr/expire pair, so a transient Redis error fails OPEN
+    # here too, consistent with the join and WS-connect rate limits — this
+    # used to be its own ad-hoc incr/expire with no error handling, so a
+    # Redis blip during a live workshop would have turned every response
+    # submission into a hard 500 instead of just skipping the rate check.
+    settings = get_settings()
     redis: Redis = request.app.state.redis
-    rate_key = f"rate:response:{payload.guest_identifier}:{slide_id}"
-    count = await redis.incr(rate_key)
-    if count == 1:
-        await redis.expire(rate_key, 60)
-    if count > 10:
+
+    guest_allowed = await check_rate_limit(
+        redis,
+        f"rate:response:{payload.guest_identifier}:{slide_id}",
+        settings.RESPONSE_RATE_LIMIT_PER_GUEST,
+        settings.RESPONSE_RATE_LIMIT_PER_GUEST_WINDOW_SECONDS,
+    )
+    if not guest_allowed:
+        raise HTTPException(status_code=429, detail="Too many responses. Please slow down.")
+
+    ip_allowed = await check_rate_limit(
+        redis,
+        f"rate:response_ip:{request.client.host}:{slide_id}",
+        settings.RESPONSE_RATE_LIMIT_PER_IP,
+        settings.RESPONSE_RATE_LIMIT_PER_IP_WINDOW_SECONDS,
+    )
+    if not ip_allowed:
         raise HTTPException(status_code=429, detail="Too many responses. Please slow down.")
 
     # Default name to "Guest" if empty or None
@@ -73,13 +102,31 @@ async def submit_response(
 @router.get("/", response_model=list[ResponseOut])
 async def list_responses(
     slide_id: str,
+    user: User | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db),
 ):
     try:
         slide_uuid = uuid.UUID(slide_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid slide ID format")
-    
+
+    result = await db.execute(
+        select(Slide).where(Slide.id == slide_uuid).options(selectinload(Slide.session))
+    )
+    slide = result.scalar_one_or_none()
+    if not slide:
+        raise HTTPException(status_code=404, detail="Slide not found")
+
+    # The moderator dashboard fetches this with no live-session restriction
+    # (they must see responses while composing, before going live, and after
+    # ending). Anyone else — guests, screens — only gets results for a live
+    # session, matching the join-flow access model everywhere else.
+    is_owner_or_admin = user is not None and (
+        user.role == UserRole.SUPER_ADMIN or slide.session.owner_id == user.id
+    )
+    if not is_owner_or_admin and not slide.session.is_live:
+        raise HTTPException(status_code=403, detail="Session is not live")
+
     result = await db.execute(
         select(Response)
         .where(Response.slide_id == slide_uuid)
@@ -116,10 +163,18 @@ async def upvote_response(
     response = result.scalar_one_or_none()
     if not response:
         raise HTTPException(status_code=404, detail="Response not found")
+    if not response.slide.session.is_live:
+        raise HTTPException(status_code=403, detail="Session is not live")
 
-    response.upvotes += 1
+    # Atomic at the DB level — `response.upvotes += 1` here would read-modify-write
+    # in Python, losing an increment when two upvotes for the same response commit
+    # concurrently (a real scenario: a poll going viral gets simultaneous upvotes
+    # from different IPs, each allowed by the per-IP dedupe above).
+    await db.execute(
+        update(Response).where(Response.id == response_uuid).values(upvotes=Response.upvotes + 1)
+    )
     await db.commit()
-    await db.refresh(response)
+    await db.refresh(response, attribute_names=["upvotes"])
 
     # Publish upvote to Redis so all WS clients update the vote count live
     session_code = response.slide.session.unique_code
@@ -155,8 +210,8 @@ async def clear_responses(
     if not slide:
         raise HTTPException(status_code=404, detail="Slide not found")
     
-    # Verify user is the session owner
-    if slide.session.owner_id != user.id:
+    # Verify user is the session owner (or a super admin, consistent with every other router)
+    if user.role != UserRole.SUPER_ADMIN and slide.session.owner_id != user.id:
         raise HTTPException(status_code=403, detail="Not authorized to clear responses")
 
     # Delete all responses for this slide

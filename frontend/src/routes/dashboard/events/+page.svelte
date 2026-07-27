@@ -1,20 +1,37 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
   import {
-    listSessions,
-    listEvents,
     createEvent,
     updateEvent,
     deleteEvent,
     setEventSessions
   } from '$lib/api';
-  import { Calendar, Plus } from 'lucide-svelte';
-  import { onMount } from 'svelte';
+  import { getEvents, getSessions, invalidateEvents } from '$lib/dataCache';
+  import { Calendar, Plus, Search, X } from 'lucide-svelte';
+  import { onMount, tick } from 'svelte';
+  import { debounce } from '$lib/debounce';
+  import { cycleSearchIndex } from '$lib/search';
   import EventCard from '$lib/components/EventCard.svelte';
+  import PaginationBar from '$lib/components/PaginationBar.svelte';
+
+  const PAGE_SIZE = 20;
+  // Sessions here are only the "assign to event" dropdown source, not a
+  // paginated view — 100 is the backend's MAX_PAGE_SIZE, a bounded stand-in
+  // for "every session" that avoids ever fetching the whole table.
+  const DROPDOWN_LIMIT = 100;
 
   let sessions: any[] = $state([]);
   let events: any[] = $state([]);
+  let total = $state(0);
+  let offset = $state(0);
   let loading = $state(true);
+  let didInit = false;
+  let requestId = 0;
+  let searchQuery = $state('');
+  let debouncedQuery = $state('');
+  let activeIndex = $state(-1);
+  let highlightedEventId: string | null = $state(null);
+  const applyDebouncedQuery = debounce((value: string) => { debouncedQuery = value; activeIndex = -1; }, 250);
   let newEventTitle = $state('');
   let newEventDate = $state('');
   let newEventDescription = $state('');
@@ -30,35 +47,104 @@
   let editEventDescription = $state('');
   let savingEditEvent = $state(false);
 
+  async function loadEvents() {
+    const myRequest = ++requestId;
+    const result = await getEvents({ limit: PAGE_SIZE, offset, search: debouncedQuery || undefined });
+    if (myRequest !== requestId) return; // a newer request already landed
+    events = result.items;
+    total = result.total;
+    eventSelections = Object.fromEntries(
+      events.map((event) => [event.id, (event.sessions || []).map((s: any) => s.id)])
+    );
+  }
+
   onMount(async () => {
     try {
-      const [sessionsResult, eventsResult] = await Promise.all([
-        listSessions(),
-        listEvents()
+      const [sessionsResult] = await Promise.all([
+        getSessions({ limit: DROPDOWN_LIMIT }),
+        loadEvents()
       ]);
-      sessions = sessionsResult;
-      events = eventsResult;
-      eventSelections = Object.fromEntries(
-        events.map((event) => [event.id, (event.sessions || []).map((s: any) => s.id)])
-      );
+      sessions = sessionsResult.items;
     } catch {
       goto('/login');
     } finally {
       loading = false;
+      didInit = true;
+    }
+
+    // Deep link from global search (?event=<id>): scroll to and briefly highlight that card
+    if (typeof window !== 'undefined') {
+      const targetId = new URLSearchParams(window.location.search).get('event');
+      if (targetId) {
+        await tick();
+        const el = document.getElementById(`event-${targetId}`);
+        el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        highlightedEventId = targetId;
+        setTimeout(() => { highlightedEventId = null; }, 2000);
+      }
     }
   });
+
+  $effect(() => { applyDebouncedQuery(searchQuery); });
+
+  // Search changes reset to page 1 — the initial fetch is already handled
+  // by onMount above, so this only reacts to LATER changes to debouncedQuery.
+  $effect(() => {
+    debouncedQuery;
+    if (!didInit) return;
+    offset = 0;
+    loadEvents();
+  });
+
+  function clearSearch() {
+    searchQuery = '';
+    debouncedQuery = '';
+    activeIndex = -1;
+  }
+
+  async function goToPrevPage() {
+    if (offset <= 0) return;
+    offset = Math.max(0, offset - PAGE_SIZE);
+    await loadEvents();
+  }
+
+  async function goToNextPage() {
+    if (offset + events.length >= total) return;
+    offset = offset + PAGE_SIZE;
+    await loadEvents();
+  }
+
+  function handleSearchKeydown(e: KeyboardEvent) {
+    if (e.key === 'Escape') {
+      if (searchQuery) { e.stopPropagation(); clearSearch(); }
+      return;
+    }
+    if (!events.length) return;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      activeIndex = cycleSearchIndex(e.key, activeIndex, events.length) ?? activeIndex;
+    } else if (e.key === 'Enter' && activeIndex >= 0) {
+      e.preventDefault();
+      const target = events[activeIndex];
+      document.getElementById(`event-${target.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      highlightedEventId = target.id;
+      setTimeout(() => { highlightedEventId = null; }, 2000);
+    }
+  }
 
   async function handleCreateEvent() {
     if (!newEventTitle.trim() || !newEventDate) return;
     creatingEvent = true;
     try {
-      const event = await createEvent({
+      await createEvent({
         title: newEventTitle.trim(),
         event_date: newEventDate,
         description: newEventDescription.trim() || null
       });
-      events = [event, ...events];
-      eventSelections = { ...eventSelections, [event.id]: [] };
+      invalidateEvents();
+      // New events sort newest-first, so they land on page 1.
+      offset = 0;
+      await loadEvents();
       newEventTitle = '';
       newEventDate = '';
       newEventDescription = '';
@@ -74,11 +160,8 @@
     savingEventId = eventId;
     try {
       await setEventSessions(eventId, eventSelections[eventId] || []);
-      const refreshed = await listEvents();
-      events = refreshed;
-      eventSelections = Object.fromEntries(
-        refreshed.map((event: any) => [event.id, (event.sessions || []).map((s: any) => s.id)])
-      );
+      invalidateEvents();
+      await loadEvents();
     } catch (e: any) {
       alert(e.message);
     } finally {
@@ -107,13 +190,20 @@
   async function handleDeleteEvent(id: string) {
     if (!confirm('Delete this event?')) return;
     await deleteEvent(id);
-    events = events.filter((event) => event.id !== id);
+    invalidateEvents();
+    await loadEvents();
+    // If deleting emptied this page (and it isn't page 1), step back a page.
+    if (events.length === 0 && offset > 0) {
+      offset = Math.max(0, offset - PAGE_SIZE);
+      await loadEvents();
+    }
   }
 
   async function handleTogglePublish(eventId: string, currentStatus: boolean) {
     try {
-      const updated = await updateEvent(eventId, { is_published: !currentStatus });
-      events = events.map((event) => (event.id === eventId ? { ...event, is_published: updated.is_published } : event));
+      await updateEvent(eventId, { is_published: !currentStatus });
+      invalidateEvents();
+      await loadEvents();
     } catch (e: any) {
       alert(e.message);
     }
@@ -131,14 +221,13 @@
     if (!editingEventId || !editEventTitle.trim() || !editEventDate) return;
     savingEditEvent = true;
     try {
-      const updated = await updateEvent(editingEventId, {
+      await updateEvent(editingEventId, {
         title: editEventTitle.trim(),
         event_date: editEventDate,
         description: editEventDescription.trim() || null
       });
-      events = events.map((event) =>
-        event.id === editingEventId ? { ...event, ...updated } : event
-      );
+      invalidateEvents();
+      await loadEvents();
       showEditEvent = false;
       editingEventId = null;
     } catch (e: any) {
@@ -157,7 +246,15 @@
     const selected = new Set(eventSelections[eventId] || []);
     return sessions.filter((session) => !selected.has(session.id));
   }
+
+  function handleGlobalKeydown(e: KeyboardEvent) {
+    if (e.key !== 'Escape') return;
+    if (showCreateEvent) showCreateEvent = false;
+    else if (showEditEvent) showEditEvent = false;
+  }
 </script>
+
+<svelte:window onkeydown={handleGlobalKeydown} />
 
 <svelte:head>
   <title>Events – Rforum</title>
@@ -176,41 +273,88 @@
   </div>
 
   {#if loading}
-    <div class="text-center text-surface-400 py-16">Loading events...</div>
-  {:else if events.length === 0}
-    <div class="flex flex-col items-center justify-center text-center gap-4 py-20">
-      <div class="w-14 h-14 flex items-center justify-center rounded-2xl bg-brand-500/10">
-        <Calendar class="w-7 h-7 text-brand-500" />
-      </div>
-      <div>
-        <h3 class="text-lg font-semibold">No events yet</h3>
-        <p class="text-sm text-surface-400 mt-1">Create your first event to get started</p>
-      </div>
-      <button class="btn-primary text-sm" onclick={() => showCreateEvent = true}>Create Event</button>
-    </div>
-  {:else}
-    <div class="space-y-3">
-      {#each events as event (event.id)}
-        <EventCard
-          {event}
-          sessions={getSelectedSessions(event.id)}
-          availableSessions={getAvailableSessions(event.id)}
-          saving={savingEventId === event.id}
-          addSessionSelection={addSessionSelections[event.id] || ''}
-          onEdit={startEditEvent}
-          onTogglePublish={handleTogglePublish}
-          onDelete={handleDeleteEvent}
-          onAddSession={handleAddSession}
-          onRemoveSession={handleRemoveSession}
-          onAddSessionSelectionChange={(eid, val) => addSessionSelections = { ...addSessionSelections, [eid]: val }}
-        />
+    <div class="space-y-3" aria-hidden="true">
+      {#each Array(3) as _}
+        <div class="card p-6 space-y-3">
+          <div class="skeleton h-5 w-1/3 rounded"></div>
+          <div class="skeleton h-3 w-2/3 rounded"></div>
+          <div class="skeleton h-16 w-full rounded-lg"></div>
+        </div>
       {/each}
     </div>
+  {:else}
+    {#if total > 0 || searchQuery}
+      <div class="relative mb-5">
+        <Search class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-400" />
+        <input
+          type="search"
+          placeholder="Search events by name, description, or moderator…"
+          bind:value={searchQuery}
+          onkeydown={handleSearchKeydown}
+          class="input-field pl-9 pr-9 text-sm py-2.5 w-full"
+          aria-label="Search events"
+        />
+        {#if searchQuery}
+          <button
+            class="absolute right-3 top-1/2 -translate-y-1/2 text-surface-400 hover:text-surface-200"
+            onclick={clearSearch}
+            aria-label="Clear search"
+          >
+            <X class="w-4 h-4" />
+          </button>
+        {/if}
+      </div>
+    {/if}
+
+    {#if total === 0 && !debouncedQuery}
+      <div class="flex flex-col items-center justify-center text-center gap-4 py-20">
+        <div class="w-14 h-14 flex items-center justify-center rounded-2xl bg-brand-500/10">
+          <Calendar class="w-7 h-7 text-brand-500" />
+        </div>
+        <div>
+          <h3 class="text-lg font-semibold">No events yet</h3>
+          <p class="text-sm text-surface-400 mt-1">Create your first event to get started</p>
+        </div>
+        <button class="btn-primary text-sm" onclick={() => showCreateEvent = true}>Create Event</button>
+      </div>
+    {:else if events.length === 0}
+      <div class="flex flex-col items-center justify-center text-center gap-3 py-16">
+        <Search class="w-8 h-8 text-surface-400" />
+        <p class="text-sm text-surface-400">No events match "{searchQuery}"</p>
+        <button class="btn-secondary text-sm" onclick={clearSearch}>Clear search</button>
+      </div>
+    {:else}
+      <div class="space-y-3">
+        {#each events as event, i (event.id)}
+          <div
+            id={`event-${event.id}`}
+            class="rounded-2xl transition-shadow duration-300 {highlightedEventId === event.id ? 'ring-2 ring-brand-500' : ''} {activeIndex === i ? 'ring-2 ring-brand-400/60' : ''}"
+          >
+            <EventCard
+              {event}
+              sessions={getSelectedSessions(event.id)}
+              availableSessions={getAvailableSessions(event.id)}
+              saving={savingEventId === event.id}
+              addSessionSelection={addSessionSelections[event.id] || ''}
+              onEdit={startEditEvent}
+              onTogglePublish={handleTogglePublish}
+              onDelete={handleDeleteEvent}
+              onAddSession={handleAddSession}
+              onRemoveSession={handleRemoveSession}
+              onAddSessionSelectionChange={(eid, val) => addSessionSelections = { ...addSessionSelections, [eid]: val }}
+            />
+          </div>
+        {/each}
+      </div>
+      <PaginationBar {total} limit={PAGE_SIZE} {offset} itemCount={events.length} onPrev={goToPrevPage} onNext={goToNextPage} />
+    {/if}
   {/if}
 </main>
 
 {#if showCreateEvent}
-  <div class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center px-4 z-50">
+  <div class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center px-4 z-50"
+       onclick={(e) => { if (e.target === e.currentTarget) showCreateEvent = false; }}
+       role="dialog" aria-modal="true" aria-label="Create Event">
     <div class="card w-full max-w-lg max-h-[90vh] overflow-y-auto">
       <div class="flex items-center justify-between mb-4">
         <h2 class="text-lg font-semibold">Create Event</h2>
@@ -234,7 +378,9 @@
 {/if}
 
 {#if showEditEvent}
-  <div class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center px-4 z-50">
+  <div class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center px-4 z-50"
+       onclick={(e) => { if (e.target === e.currentTarget) showEditEvent = false; }}
+       role="dialog" aria-modal="true" aria-label="Edit Event">
     <div class="card w-full max-w-lg max-h-[90vh] overflow-y-auto">
       <div class="flex items-center justify-between mb-4">
         <h2 class="text-lg font-semibold">Edit Event</h2>

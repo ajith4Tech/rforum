@@ -1,6 +1,29 @@
 const API_PREFIX = '/api';
 const DEFAULT_API_PORT = '8000';
 
+export interface PaginatedResult<T> {
+  items: T[];
+  total: number;
+  limit: number;
+  offset: number;
+  has_more: boolean;
+}
+
+export interface ListParams {
+  limit?: number;
+  offset?: number;
+  search?: string;
+}
+
+function buildListQuery(params: ListParams = {}): string {
+  const q = new URLSearchParams();
+  if (params.limit !== undefined) q.set('limit', String(params.limit));
+  if (params.offset !== undefined) q.set('offset', String(params.offset));
+  if (params.search) q.set('search', params.search);
+  const s = q.toString();
+  return s ? `?${s}` : '';
+}
+
 const guessApiOrigin = () => {
   if (typeof window === 'undefined') return '';
   if (import.meta.env?.VITE_API_ORIGIN) return import.meta.env.VITE_API_ORIGIN as string;
@@ -110,8 +133,8 @@ export async function register(email: string, password: string, inviteCode: stri
 }
 
 // ── Sessions ─────────────────────────────────────────
-export async function listSessions() {
-  return fetchJson('/sessions', { method: 'GET' }, true);
+export async function listSessions(params: ListParams = {}): Promise<PaginatedResult<any>> {
+  return fetchJson(`/sessions${buildListQuery(params)}`, { method: 'GET' }, true);
 }
 
 export async function createSession(
@@ -151,8 +174,8 @@ export async function startSession(sessionId: string) {
 }
 
 // ── Events ───────────────────────────────────────────
-export async function listEvents() {
-  return fetchJson('/events', { method: 'GET' }, true);
+export async function listEvents(params: ListParams = {}): Promise<PaginatedResult<any>> {
+  return fetchJson(`/events${buildListQuery(params)}`, { method: 'GET' }, true);
 }
 
 export async function listPublicEvents(date?: string) {
@@ -242,7 +265,9 @@ export async function getSessionByCode(code: string) {
 }
 
 export async function listResponses(slideId: string) {
-  return fetchJson(`/slides/${slideId}/responses/`, { method: 'GET' });
+  // auth=true attaches our JWT when we have one (moderator dashboard, needs
+  // responses regardless of live status) but is a no-op for guests/screens.
+  return fetchJson(`/slides/${slideId}/responses/`, { method: 'GET' }, true);
 }
 
 export async function submitResponse(
@@ -387,6 +412,149 @@ export function resolveFileUrl(fileUrl?: string | null) {
 }
 
 /** Build the URL for a single rendered page image from the backend */
-export function getPageImageUrl(sessionId: string, slideId: string, page: number) {
-  return buildUrl(`/sessions/${sessionId}/slides/${slideId}/page/${page}`);
+export function getPageImageUrl(sessionId: string, slideId: string, page: number, sessionCode?: string) {
+  return withAssetAuth(buildUrl(`/sessions/${sessionId}/slides/${slideId}/page/${page}`), sessionCode);
+}
+
+// ── Presentations / Timeline ──────────────────────────
+// Presentation-first sessions (session.presentation_id set) are managed through
+// these endpoints instead of the legacy Slide CRUD above.
+
+async function uploadPresentationFile(path: string, file: File): Promise<any> {
+  const form = new FormData();
+  form.append('file', file);
+  const token = getToken();
+  const res = await withTimeout(fetch(buildUrl(path), {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: form,
+  }), 60000);
+  if (!res.ok) throw new Error(await extractError(res));
+  return res.json();
+}
+
+export async function getSessionPresentation(sessionId: string): Promise<any> {
+  return fetchJson(`/sessions/${sessionId}/presentation`, { method: 'GET' }, true);
+}
+
+export async function uploadPresentation(sessionId: string, file: File): Promise<any> {
+  return uploadPresentationFile(`/sessions/${sessionId}/presentation/upload`, file);
+}
+
+export async function replacePresentation(sessionId: string, file: File): Promise<any> {
+  return uploadPresentationFile(`/sessions/${sessionId}/presentation/replace`, file);
+}
+
+export async function regeneratePresentation(sessionId: string): Promise<any> {
+  return fetchJson(`/sessions/${sessionId}/presentation/regenerate`, { method: 'POST' }, true);
+}
+
+export async function insertTimelineItem(
+  sessionId: string,
+  itemType: 'POLL' | 'QNA' | 'WORD_CLOUD' | 'FEEDBACK' | 'RATING',
+  position: number,
+  contentJson: Record<string, unknown> = {}
+): Promise<any> {
+  return fetchJson(`/sessions/${sessionId}/presentation/timeline/items`, {
+    method: 'POST',
+    body: JSON.stringify({ item_type: itemType, position, content_json: contentJson })
+  }, true);
+}
+
+export async function updateTimelineItem(
+  sessionId: string,
+  itemId: string,
+  contentJson: Record<string, unknown>
+): Promise<any> {
+  return fetchJson(`/sessions/${sessionId}/presentation/timeline/items/${itemId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ content_json: contentJson })
+  }, true);
+}
+
+export async function deleteTimelineItem(sessionId: string, itemId: string): Promise<void> {
+  await fetchJson(`/sessions/${sessionId}/presentation/timeline/items/${itemId}`, { method: 'DELETE' }, true);
+}
+
+export async function reorderTimelineItems(sessionId: string, itemIds: string[]): Promise<any> {
+  return fetchJson(`/sessions/${sessionId}/presentation/timeline/items/reorder`, {
+    method: 'POST',
+    body: JSON.stringify({ item_ids: itemIds })
+  }, true);
+}
+
+export async function activateTimelineItem(sessionId: string, itemId: string): Promise<any> {
+  return fetchJson(`/sessions/${sessionId}/presentation/timeline/activate/${itemId}`, { method: 'POST' }, true);
+}
+
+/**
+ * Appends whatever access proof is available for an otherwise-unauthenticated
+ * asset URL: our own JWT if we're logged in (moderator previewing their own
+ * library), otherwise the session's join code if the caller has one (guest/
+ * screen viewing a live session's attached presentation).
+ */
+const withAssetAuth = (url: string, sessionCode?: string) => {
+  const params = new URLSearchParams();
+  const token = getToken();
+  if (token) params.set('token', token);
+  else if (sessionCode) params.set('code', sessionCode);
+  const qs = params.toString();
+  return qs ? `${url}?${qs}` : url;
+};
+
+/** Build the URL for a full-resolution rendered presentation page. */
+export function getPresentationPageImageUrl(presentationId: string, pageNumber: number, sessionCode?: string) {
+  return withAssetAuth(buildUrl(`/presentations/${presentationId}/pages/${pageNumber}/image`), sessionCode);
+}
+
+/** Build the URL for a small pre-rendered presentation page thumbnail. */
+export function getPresentationPageThumbnailUrl(presentationId: string, pageNumber: number, sessionCode?: string) {
+  return withAssetAuth(buildUrl(`/presentations/${presentationId}/pages/${pageNumber}/thumbnail`), sessionCode);
+}
+
+// ── Reusable-presentation lifecycle: details, picker, attach/detach, delete ──
+
+export async function getPresentationDetails(presentationId: string): Promise<any> {
+  return fetchJson(`/presentations/${presentationId}/details`, { method: 'GET' }, true);
+}
+
+export async function listPresentations(
+  opts: { eventId?: string; search?: string; sort?: 'recent' | 'last_used' | 'name' } = {}
+): Promise<any[]> {
+  const params = new URLSearchParams();
+  if (opts.eventId) params.set('event_id', opts.eventId);
+  if (opts.search) params.set('search', opts.search);
+  if (opts.sort) params.set('sort', opts.sort);
+  const qs = params.toString();
+  return fetchJson(`/presentations${qs ? `?${qs}` : ''}`, { method: 'GET' }, true);
+}
+
+export async function attachPresentation(sessionId: string, presentationId: string): Promise<any> {
+  return fetchJson(`/sessions/${sessionId}/presentation/attach/${presentationId}`, { method: 'POST' }, true);
+}
+
+export async function detachPresentation(sessionId: string): Promise<void> {
+  await fetchJson(`/sessions/${sessionId}/presentation/detach`, { method: 'POST' }, true);
+}
+
+export async function deletePresentation(presentationId: string): Promise<void> {
+  await fetchJson(`/presentations/${presentationId}`, { method: 'DELETE' }, true);
+}
+
+export async function downloadPresentationOriginal(presentationId: string, fileName: string): Promise<void> {
+  const token = getToken();
+  const res = await withTimeout(fetch(buildUrl(`/presentations/${presentationId}/download`), {
+    method: 'GET',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  }));
+  if (!res.ok) throw new Error(await extractError(res));
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
