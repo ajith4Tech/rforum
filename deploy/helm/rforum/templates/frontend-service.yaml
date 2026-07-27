@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "rforum.frontend.fullname" . }}
+  labels:
+    {{- include "rforum.componentLabels" (dict "root" . "component" "frontend") | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "rforum.componentSelectorLabels" (dict "root" . "component" "frontend") | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.frontend.service.port }}
+      targetPort: http

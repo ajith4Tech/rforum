@@ -1,0 +1,13 @@
+{{- if .Values.frontend.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "rforum.frontend.fullname" . }}
+  labels:
+    {{- include "rforum.componentLabels" (dict "root" . "component" "frontend") | nindent 4 }}
+spec:
+  maxUnavailable: {{ .Values.frontend.podDisruptionBudget.maxUnavailable }}
+  selector:
+    matchLabels:
+      {{- include "rforum.componentSelectorLabels" (dict "root" . "component" "frontend") | nindent 6 }}
+{{- end }}

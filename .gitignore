@@ -69,3 +69,4 @@ uploads/
 .claude/
 
 rforum_500_user_load_test.js
+rforum_500_user_load_test.legacy.js

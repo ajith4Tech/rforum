@@ -1,0 +1,86 @@
+{{- if .Values.migrations.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "rforum.fullname" . }}-migrate-{{ .Release.Revision }}
+  labels:
+    {{- include "rforum.componentLabels" (dict "root" . "component" "migrate") | nindent 4 }}
+  annotations:
+    # post-install (not pre-install!) on first install: when postgresql.enabled,
+    # the Postgres StatefulSet is a normal chart resource, not a hook — it
+    # doesn't exist yet during a pre-install hook, so a pre-install migration
+    # Job can never resolve its Service DNS on a truly fresh install (verified:
+    # this failed outright in local testing). post-install runs after normal
+    # resources are submitted, so the StatefulSet/Service at least exist by
+    # then (the wait-for-postgres initContainer below covers the remaining
+    # few seconds until Postgres itself is ready to accept connections).
+    # pre-upgrade is still correct for upgrades — Postgres from the previous
+    # release is already up and ready by then.
+    # Runs once per install/upgrade, before backend Deployments are touched
+    # — alembic upgrade head is not safe to run concurrently from every
+    # replica, so this must never become a per-pod startup step.
+    "helm.sh/hook": post-install,pre-upgrade
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ .Values.migrations.backoffLimit }}
+  template:
+    metadata:
+      labels:
+        {{- include "rforum.componentLabels" (dict "root" . "component" "migrate") | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ include "rforum.serviceAccountName" . }}
+      securityContext:
+        runAsNonRoot: true
+      initContainers:
+        - name: wait-for-postgres
+          image: {{ include "rforum.backend.image" . }}
+          imagePullPolicy: {{ .Values.image.backend.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          envFrom:
+            - configMapRef:
+                name: {{ include "rforum.fullname" . }}-config
+          command: ["python3", "-c"]
+          args:
+            - |
+              import os, socket, sys, time
+              host, port = os.environ["DB_HOST"], int(os.environ["DB_PORT"])
+              deadline = time.time() + 120
+              while time.time() < deadline:
+                  try:
+                      socket.create_connection((host, port), timeout=3).close()
+                      sys.exit(0)
+                  except OSError:
+                      time.sleep(2)
+              print(f"Timed out waiting for {host}:{port}", file=sys.stderr)
+              sys.exit(1)
+      containers:
+        - name: migrate
+          image: {{ include "rforum.backend.image" . }}
+          imagePullPolicy: {{ .Values.image.backend.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              export DATABASE_URL="postgresql+asyncpg://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}"
+              cd db && alembic upgrade head
+          envFrom:
+            - configMapRef:
+                name: {{ include "rforum.fullname" . }}-config
+          env:
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "rforum.db.secretName" . }}
+                  key: {{ include "rforum.db.secretKey" . }}
+          resources:
+            {{- toYaml .Values.migrations.resources | nindent 12 }}
+{{- end }}

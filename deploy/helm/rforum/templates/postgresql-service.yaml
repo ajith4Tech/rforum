@@ -1,0 +1,16 @@
+{{- if .Values.postgresql.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "rforum.postgresql.fullname" . }}
+  labels:
+    {{- include "rforum.componentLabels" (dict "root" . "component" "postgresql") | nindent 4 }}
+spec:
+  clusterIP: None
+  selector:
+    {{- include "rforum.componentSelectorLabels" (dict "root" . "component" "postgresql") | nindent 4 }}
+  ports:
+    - name: postgresql
+      port: 5432
+      targetPort: postgresql
+{{- end }}

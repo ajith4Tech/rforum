@@ -1,0 +1,46 @@
+Rforum ({{ .Chart.Name }} {{ .Chart.AppVersion }}) has been deployed as release "{{ .Release.Name }}" in namespace "{{ .Release.Namespace }}".
+
+1) Check rollout status:
+   kubectl -n {{ .Release.Namespace }} get pods
+   kubectl -n {{ .Release.Namespace }} get jobs -l app.kubernetes.io/component=migrate
+   kubectl -n {{ .Release.Namespace }} logs job/{{ include "rforum.fullname" . }}-migrate-{{ .Release.Revision }}
+
+2) Application URL:
+{{- if .Values.ingress.enabled }}
+   http{{ if .Values.ingress.tls.enabled }}s{{ end }}://{{ .Values.ingress.host }}
+   {{- if eq .Values.ingress.host "rforum.example.com" }}
+
+   WARNING: ingress.host is still the placeholder "rforum.example.com" —
+   point DNS at this cluster's ingress and set ingress.host to your real
+   hostname before relying on this for anything real.
+   {{- end }}
+{{- else }}
+   ingress.enabled=false — reach the frontend/backend Services directly, e.g.:
+   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "rforum.frontend.fullname" . }} 8080:{{ .Values.frontend.service.port }}
+   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "rforum.backend.fullname" . }} 8000:{{ .Values.backend.service.port }}
+{{- end }}
+
+3) Backend health check:
+   kubectl -n {{ .Release.Namespace }} exec deploy/{{ include "rforum.backend.fullname" . }} -- wget -qO- http://localhost:{{ .Values.backend.port }}/api/health
+
+{{- if eq .Values.app.inviteCode "CHANGE_ME" }}
+
+WARNING: app.inviteCode is still the chart default "CHANGE_ME". Set a real
+value (--set app.inviteCode=...) — this code is all that gates new account
+registration (app/routers/auth.py).
+{{- end }}
+
+4) Notes on this deployment's shape:
+   - Backend replicas: {{ .Values.backend.replicaCount }} (each running {{ .Values.backend.workers }} uvicorn workers).
+     WebSocket broadcast fan-out is Redis pub/sub-backed and DOES support
+     >1 replica (app/routers/ws.py), but the 500-guest load test was only
+     validated at replicaCount=1 — raise it alongside fresh load testing,
+     not blindly.
+   - Presentation/upload storage backend: {{ .Values.storage.backend }}
+     {{- if eq .Values.storage.backend "local" }} (PVC-backed, {{ .Values.storage.persistence.size }}).{{ else }} (S3 bucket "{{ .Values.storage.s3.bucket }}", with the local PVC kept as a read fallback for anything not yet migrated — app/storage/fallback.py).{{ end }}
+   - Database migrations run once per install/upgrade via a post-install
+     (first install) / pre-upgrade (later upgrades) Helm hook Job
+     (alembic upgrade head) — never per backend replica.
+
+5) To upgrade after changing images/config:
+   helm upgrade {{ .Release.Name }} deploy/helm/rforum -n {{ .Release.Namespace }} -f <your-values>.yaml

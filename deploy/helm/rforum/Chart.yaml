@@ -1,0 +1,14 @@
+apiVersion: v2
+name: rforum
+description: Real-time audience engagement platform (FastAPI + SvelteKit + Postgres + Redis)
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - rforum
+  - websocket
+  - fastapi
+  - sveltekit
+home: https://rforum.t4gc.in
+maintainers:
+  - name: ajith4Tech

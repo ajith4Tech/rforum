@@ -1,0 +1,176 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "rforum.backend.fullname" . }}
+  labels:
+    {{- include "rforum.componentLabels" (dict "root" . "component" "backend") | nindent 4 }}
+spec:
+  replicas: {{ .Values.backend.replicaCount }}
+  strategy:
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      {{- include "rforum.componentSelectorLabels" (dict "root" . "component" "backend") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "rforum.componentLabels" (dict "root" . "component" "backend") | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "rforum.serviceAccountName" . }}
+      # Long enough to let Uvicorn drain in-flight requests and open
+      # WebSocket connections on SIGTERM (see the preStop hook below, which
+      # gives the Service/Endpoints controller a moment to stop routing new
+      # traffic here before the drain begins) without regressing the
+      # zero-unexpected-disconnect result from the 500-guest load test.
+      terminationGracePeriodSeconds: {{ .Values.backend.terminationGracePeriodSeconds }}
+      securityContext:
+        runAsNonRoot: true
+      initContainers:
+        # Backend pods and the migration Job are both normal/hook resources
+        # submitted around the same time as the bundled Postgres StatefulSet
+        # on a fresh install — nothing guarantees Postgres is actually
+        # accepting connections yet by the time this pod starts. Readiness
+        # here only means "process is up" (GET /api/health doesn't touch the
+        # DB), so without this wait, early requests on a brand-new install
+        # could 500 with connection-refused until Postgres catches up. This
+        # does NOT wait for migrations to finish (see migration-job.yaml) —
+        # SQLAlchemy's async engine connects lazily, so a request landing
+        # before migrations complete can still fail; that window is brief
+        # and self-healing (no crash-loop) since nothing here is stateful.
+        - name: wait-for-postgres
+          image: {{ include "rforum.backend.image" . }}
+          imagePullPolicy: {{ .Values.image.backend.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          envFrom:
+            - configMapRef:
+                name: {{ include "rforum.fullname" . }}-config
+          command: ["python3", "-c"]
+          args:
+            - |
+              import os, socket, sys, time
+              host, port = os.environ["DB_HOST"], int(os.environ["DB_PORT"])
+              deadline = time.time() + 60
+              while time.time() < deadline:
+                  try:
+                      socket.create_connection((host, port), timeout=3).close()
+                      sys.exit(0)
+                  except OSError:
+                      time.sleep(2)
+              print(f"Timed out waiting for {host}:{port}", file=sys.stderr)
+              sys.exit(1)
+      containers:
+        - name: backend
+          image: {{ include "rforum.backend.image" . }}
+          imagePullPolicy: {{ .Values.image.backend.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              export DATABASE_URL="postgresql+asyncpg://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}"
+              exec uvicorn app.main:app \
+                --host 0.0.0.0 \
+                --port {{ .Values.backend.port }} \
+                --workers {{ .Values.backend.workers }} \
+                --loop {{ .Values.backend.loop }} \
+                --http {{ .Values.backend.httpImpl }} \
+                --backlog {{ .Values.backend.backlog }}
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", "5"]
+          ports:
+            - name: http
+              containerPort: {{ .Values.backend.port }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "rforum.fullname" . }}-config
+          env:
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "rforum.db.secretName" . }}
+                  key: {{ include "rforum.db.secretKey" . }}
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "rforum.app.secretName" . }}
+                  key: secret-key
+            {{- if eq .Values.storage.backend "s3" }}
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "rforum.app.secretName" . }}
+                  key: aws-access-key-id
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "rforum.app.secretName" . }}
+                  key: aws-secret-access-key
+            {{- end }}
+            {{- if .Values.redis.enabled }}
+            - name: REDIS_URL
+              value: {{ printf "redis://%s:6379/0" (include "rforum.redis.host" .) | quote }}
+            {{- else if .Values.externalRedis.url }}
+            - name: REDIS_URL
+              value: {{ .Values.externalRedis.url | quote }}
+            {{- else }}
+            - name: REDIS_URL
+              value: {{ printf "redis://%s:%v/0" .Values.externalRedis.host .Values.externalRedis.port | quote }}
+            {{- end }}
+            {{- range .Values.backend.extraEnv }}
+            - name: {{ .name }}
+              value: {{ .value | quote }}
+            {{- end }}
+          volumeMounts:
+            - name: uploads
+              mountPath: {{ .Values.storage.root }}
+            - name: tmp
+              mountPath: /tmp
+            - name: home
+              mountPath: /home/rforum
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.backend.probes.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.backend.probes.initialDelaySeconds }}
+            periodSeconds: {{ .Values.backend.probes.periodSeconds }}
+            timeoutSeconds: {{ .Values.backend.probes.timeoutSeconds }}
+            failureThreshold: {{ .Values.backend.probes.failureThreshold }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.backend.probes.path }}
+              port: http
+            initialDelaySeconds: {{ add .Values.backend.probes.initialDelaySeconds 10 }}
+            periodSeconds: {{ .Values.backend.probes.periodSeconds }}
+            timeoutSeconds: {{ .Values.backend.probes.timeoutSeconds }}
+            failureThreshold: {{ .Values.backend.probes.failureThreshold }}
+          resources:
+            {{- toYaml .Values.backend.resources | nindent 12 }}
+      volumes:
+        - name: uploads
+          {{- if .Values.storage.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "rforum.fullname" . }}-uploads
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        - name: tmp
+          emptyDir: {}
+        - name: home
+          emptyDir: {}

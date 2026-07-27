@@ -18,6 +18,12 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
+# Let DATABASE_URL override alembic.ini's hardcoded sqlalchemy.url — the ini
+# value is a localhost dev default and containers/k8s Jobs need to point at
+# whatever host the environment actually provides.
+if os.environ.get("DATABASE_URL"):
+    config.set_main_option("sqlalchemy.url", os.environ["DATABASE_URL"])
+
 target_metadata = Base.metadata
 
 
