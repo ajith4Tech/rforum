@@ -12,6 +12,7 @@
   import { rgbToHex, generateHighResPieChart, generateHighResWordCloud } from '$lib/pdf/charts';
   import { loadMascot } from '$lib/pdf/mascot';
   import { BRAND, CHART_PALETTE, FOOTER_TEXT } from '$lib/pdf/constants';
+  import { orgSettings } from '$lib/stores';
   import CountUp from '$lib/components/CountUp.svelte';
 
   const eventId   = $derived($page.params.eventId);
@@ -338,7 +339,7 @@
         return curY;
       }
 
-      const mascotUri = await loadMascot();
+      const mascotUri = await loadMascot($orgSettings.logo_url);
 
       // Cover Page (White Theme)
       doc.setFillColor(255, 255, 255); doc.rect(0, 0, pw, ph, 'F');
@@ -359,7 +360,7 @@
       
       doc.setTextColor(...BRAND.text);
       doc.setFontSize(24); doc.setFont('helvetica', 'bold');
-      doc.text('Rforum', logoX + 18, logoY + 11);
+      doc.text($orgSettings.display_name, logoX + 18, logoY + 11);
 
       doc.setFontSize(28); doc.setTextColor(...BRAND.purple);
       doc.text(sessionTitle, 20, 75);
@@ -695,7 +696,7 @@
           doc.setFont('helvetica', 'bold');
           doc.setFontSize(10);
           doc.setTextColor(...BRAND.purple);
-          doc.text('Rforum', 23, 16.5);
+          doc.text($orgSettings.display_name, 23, 16.5);
           
           doc.setFont('helvetica', 'normal');
           doc.setFontSize(8.5);
@@ -729,7 +730,7 @@
 </script>
 
 <svelte:head>
-  <title>{sessionTitle || 'Session Analytics'} – Rforum</title>
+  <title>{sessionTitle || 'Session Analytics'} – {$orgSettings.display_name}</title>
 </svelte:head>
 
 <main class="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8">

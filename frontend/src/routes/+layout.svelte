@@ -3,6 +3,8 @@
   import { theme, toggleTheme } from '$lib/theme';
   import { Moon, Sun } from 'lucide-svelte';
   import { onMount } from 'svelte';
+  import { getOrgSettings } from '$lib/api';
+  import { orgSettings } from '$lib/stores';
 
   let mounted = $state(false);
 
@@ -12,6 +14,20 @@
       document.documentElement.classList.toggle('dark', $theme === 'dark');
     }
     mounted = true;
+
+    // Public, unauthenticated — every guest-facing page needs the org's
+    // favicon/name before any login happens. Swaps the static default
+    // <link> hrefs in place; never triggers a reload.
+    getOrgSettings().then((settings) => {
+      orgSettings.set(settings);
+      if (typeof document !== 'undefined') {
+        document.querySelectorAll('link[rel="icon"], link[rel="alternate icon"]').forEach((link) => {
+          link.setAttribute('href', settings.favicon_url);
+        });
+      }
+    }).catch(() => {
+      // Non-critical — keep the bundled default favicon/name.
+    });
   });
 
   // Keep the dark class in sync with theme changes

@@ -11,9 +11,10 @@ from fastapi.responses import ORJSONResponse
 from redis.asyncio import Redis
 
 from app.config import get_settings
-from app.database import engine
+from app.database import async_session, engine
+from app.models import DEFAULT_ORG_DISPLAY_NAME, OrgSettings
 from app.routers import auth, responses, sessions, slides, ws, events, analytics
-from app.routers import admin, session_assets, presentations
+from app.routers import admin, session_assets, presentations, org_settings
 
 # Ensure the 'rforum' directory is in PYTHONPATH
 sys.path.append(str(Path(__file__).resolve().parent.parent))
@@ -55,6 +56,20 @@ def _log_startup_capabilities() -> None:
 STORAGE_IO_EXECUTOR_WORKERS = 24
 
 
+async def _bootstrap_org_display_name() -> None:
+    """One-time seed of the org_settings singleton's display_name from the
+    Helm-provided ORG_DISPLAY_NAME env var — only while the DB row still
+    holds the migration-seeded default, so an admin's later edit via the
+    Admin page is never overwritten by a subsequent restart/redeploy."""
+    if not settings.ORG_DISPLAY_NAME:
+        return
+    async with async_session() as session:
+        row = await session.get(OrgSettings, 1)
+        if row is not None and row.display_name == DEFAULT_ORG_DISPLAY_NAME:
+            row.display_name = settings.ORG_DISPLAY_NAME
+            await session.commit()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # ── Startup ───────────────────────────────────────
@@ -64,6 +79,7 @@ async def lifespan(app: FastAPI):
     )
     asyncio.get_running_loop().set_default_executor(storage_io_executor)
     app.state.redis = Redis.from_url(settings.REDIS_URL, decode_responses=True)
+    await _bootstrap_org_display_name()
     yield
     # ── Shutdown ──────────────────────────────────────
     await app.state.redis.close()
@@ -107,6 +123,7 @@ app.include_router(ws.router)
 app.include_router(admin.router)
 app.include_router(session_assets.router)
 app.include_router(presentations.router)
+app.include_router(org_settings.router)
 
 
 @app.get("/api/health")

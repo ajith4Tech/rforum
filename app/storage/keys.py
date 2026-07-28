@@ -68,6 +68,15 @@ def page_key(email: str, user_id, presentation_id, page_number: int) -> str:
     return f"{presentation_dir(email, user_id, presentation_id)}/pages/page_{page_number:03d}.webp"
 
 
+def branding_logo_key(extension: str) -> str:
+    """extension includes the leading dot, e.g. '.png'."""
+    return f"branding/logo{extension}"
+
+
+def branding_favicon_key(extension: str) -> str:
+    return f"branding/favicon{extension}"
+
+
 def dir_prefix_from_known_key(key: str, presentation_id) -> str:
     """Given any literal key already stored in the DB for a presentation
     (original_file_url, or a page's image_url/thumbnail_url) plus that

@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import BigInteger, Boolean, Date, DateTime, Enum, Float, ForeignKey, Index, Integer, String, Text, func
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, Date, DateTime, Enum, Float, ForeignKey, Index, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSON, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -441,3 +441,40 @@ class PresentationTimelineItem(Base):
     )
     page: Mapped["PresentationPage | None"] = relationship(foreign_keys=[presentation_page_id])
     slide: Mapped["Slide | None"] = relationship(foreign_keys=[slide_id])
+
+
+DEFAULT_ORG_DISPLAY_NAME = "Your Organization"
+
+
+class OrgSettings(Base):
+    """
+    Singleton row (id is always 1) holding this Rforum instance's organization
+    identity — display name, logo, favicon. This is a one-instance-per-org
+    deployment (see deploy/helm/rforum), so there is exactly one organization
+    per database and this table never grows past one row (enforced by the
+    id=1 check constraint, not just application logic).
+    """
+    __tablename__ = "org_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    display_name: Mapped[str] = mapped_column(
+        String(120), nullable=False, default=DEFAULT_ORG_DISPLAY_NAME
+    )
+    # Storage keys (see app/storage/keys.py::branding_logo_key/branding_favicon_key),
+    # not raw URLs — resolved through the storage abstraction the same way
+    # Presentation assets are. NULL means "no custom asset uploaded; serve
+    # the bundled default".
+    logo_key: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    logo_content_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    favicon_key: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    favicon_content_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    updated_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+
+    __table_args__ = (
+        CheckConstraint("id = 1", name="org_settings_singleton"),
+    )
