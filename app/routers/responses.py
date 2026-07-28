@@ -1,8 +1,10 @@
 import json
+import logging
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from redis.asyncio import Redis
+from redis.exceptions import RedisError
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -14,7 +16,22 @@ from app.models import Response, Slide, User, UserRole
 from app.rate_limit import check_rate_limit
 from app.schemas import ResponseCreate, ResponseOut
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/api/slides/{slide_id}/responses", tags=["responses"])
+
+
+async def _publish_safe(redis: Redis, channel: str, message: str) -> None:
+    """Best-effort Redis publish for live WS updates — always called AFTER
+    the DB write it announces has already committed, so a transient Redis
+    failure here must not turn an already-successful mutation into a
+    client-visible error. Same fail-open policy as check_rate_limit
+    (app/rate_limit.py); clients just miss one live update instead of
+    getting a false 500 for a response/upvote/clear that actually succeeded."""
+    try:
+        await redis.publish(channel, message)
+    except RedisError:
+        logger.warning("redis_publish_failed channel=%s", channel, exc_info=True)
 
 
 @router.post("/", response_model=ResponseOut, status_code=201)
@@ -86,12 +103,17 @@ async def submit_response(
     db.add(response)
     await db.flush()
     await db.commit()
-    await db.refresh(response)
+    # No db.refresh() needed here: expire_on_commit=False (app/database.py)
+    # keeps flush()'s already-populated values (id/upvotes are Python-side
+    # defaults; created_at is filled in via Postgres RETURNING on flush)
+    # valid across the commit — a refresh would just be a redundant SELECT
+    # on the highest-frequency guest write path in the app.
 
     # Publish to Redis so all WS clients (including moderator) receive this live
     session_code = slide.session.unique_code
     out = ResponseOut.model_validate(response)
-    await redis.publish(
+    await _publish_safe(
+        redis,
         f"session:{session_code}",
         json.dumps({"event": "new_response", "data": out.model_dump(mode="json")}),
     )
@@ -148,12 +170,23 @@ async def upvote_response(
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid ID format")
 
-    # Rate-limit: one upvote per IP per response (stored in Redis)
+    # Rate-limit: one upvote per IP per response (stored in Redis). Fails
+    # open on a Redis error, same policy as check_rate_limit
+    # (app/rate_limit.py) — a transient Redis blip shouldn't turn into a
+    # hard failure on every upvote attempt.
     redis: Redis = request.app.state.redis
     rate_key = f"upvote:{response_id}:{request.client.host}"
-    if await redis.exists(rate_key):
+    try:
+        already_upvoted = await redis.exists(rate_key)
+    except RedisError:
+        logger.warning("upvote_dedupe_check_failed key=%s — failing open", rate_key, exc_info=True)
+        already_upvoted = False
+    if already_upvoted:
         raise HTTPException(status_code=429, detail="Already upvoted")
-    await redis.setex(rate_key, 86400, "1")  # 24-hour window
+    try:
+        await redis.setex(rate_key, 86400, "1")  # 24-hour window
+    except RedisError:
+        logger.warning("upvote_dedupe_write_failed key=%s", rate_key, exc_info=True)
 
     result = await db.execute(
         select(Response)
@@ -179,7 +212,8 @@ async def upvote_response(
     # Publish upvote to Redis so all WS clients update the vote count live
     session_code = response.slide.session.unique_code
     out = ResponseOut.model_validate(response)
-    await redis.publish(
+    await _publish_safe(
+        redis,
         f"session:{session_code}",
         json.dumps({"event": "upvote", "data": out.model_dump(mode="json")}),
     )
@@ -221,7 +255,8 @@ async def clear_responses(
     # Broadcast clear event to all WS clients
     redis: Redis = request.app.state.redis
     session_code = slide.session.unique_code
-    await redis.publish(
+    await _publish_safe(
+        redis,
         f"session:{session_code}",
         json.dumps({"event": "clear_responses", "data": {"slide_id": str(slide_uuid)}}),
     )

@@ -5,6 +5,7 @@ import uuid
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from jose import JWTError, jwt
 from redis.asyncio import Redis
+from redis.exceptions import RedisError
 from sqlalchemy import select
 
 from app.config import get_settings
@@ -252,7 +253,19 @@ async def websocket_endpoint(websocket: WebSocket, session_code: str):
                     continue
                 message.setdefault("origin", SERVER_ID)
                 await manager.broadcast(session_code, message)
-                await redis.publish(f"session:{session_code}", json.dumps(message))
+                # Local sockets already got the broadcast above — a Redis
+                # publish failure here only means OTHER app processes miss
+                # this relay, not that this connection is broken. Fails open
+                # (logged, not re-raised) so a transient Redis blip doesn't
+                # trip the broad `except Exception` below and drop this
+                # client's entire WebSocket connection over one lost relay.
+                try:
+                    await redis.publish(f"session:{session_code}", json.dumps(message))
+                except RedisError:
+                    logger.warning(
+                        "ws_relay_publish_failed session=%s event=%s",
+                        session_code, event, exc_info=True,
+                    )
             except WebSocketDisconnect:
                 break
             except Exception:

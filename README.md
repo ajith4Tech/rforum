@@ -113,10 +113,15 @@ Ensure you have these installed:
 - Node.js 18+
 - PostgreSQL 13+
 - Redis 6+
-- Docker & Docker Compose (optional, recommended)
+- Docker (optional — see below)
 - Git
 
-### Quick Start with Docker Compose (Recommended)
+### Quick Start (Local Development)
+
+`docker-compose.yml` in this repo only runs Postgres and Redis as containers
+— the backend and frontend are not part of it and run directly on the host
+(see "Manual Installation" below). This is the fastest way to get the two
+stateful dependencies running without installing them natively:
 
 1. **Clone the repository:**
    ```bash
@@ -129,19 +134,12 @@ Ensure you have these installed:
    cp .env.example .env
    ```
 
-3. **Start all services:**
+3. **Start Postgres and Redis:**
    ```bash
    docker compose up -d
    ```
 
-4. **Run database migrations:**
-   ```bash
-   docker compose exec app alembic upgrade head
-   ```
-
-5. **Access the application:**
-   - Frontend: http://localhost:5173 (development) or http://localhost (production)
-   - Backend API: http://localhost:8000/docs (if enabled)
+4. **Continue with the backend and frontend setup below.**
 
 ### Manual Installation
 
@@ -232,27 +230,23 @@ Ensure you have these installed:
 
 ## Production Deployment
 
-### Using Docker Compose
+Rforum supports two production deployment methods — there is no full
+Docker Compose stack for backend/frontend (`docker-compose.yml` only runs
+Postgres/Redis as containers; see "Quick Start" above):
 
-The easiest way to deploy Rforum is with Docker Compose:
+**1. k3s / Helm (recommended for new deployments)** — a full chart bundling
+backend, frontend, Postgres, Redis, ingress, and migrations. See
+[`docs/k3s-deploy.md`](./docs/k3s-deploy.md) for the exact command sequence
+and [`deploy/helm/rforum/`](./deploy/helm/rforum/) for every configurable
+value.
 
-1. **Build images:**
-   ```bash
-   docker compose build
-   ```
-
-2. **Start services:**
-   ```bash
-   docker compose up -d
-   ```
-
-3. **Run migrations:**
-   ```bash
-   docker compose exec app alembic upgrade head
-   ```
-
-4. **Access application:**
-   - Visit `http://your-server-ip` (configured via Nginx reverse proxy)
+**2. Bare-metal** — Uvicorn running directly on the host (per "Manual
+Installation" above) behind your own reverse proxy. See
+[`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) §9 for the exact proxy
+behavior this configuration needs (WebSocket upgrade headers, an 86400s
+read timeout on `/ws/`, a 25MB body limit, and serving `frontend/build` as
+static files) and "Nginx Configuration" below for where to base your own
+config on.
 
 ### Environment Configuration for Production
 
@@ -280,7 +274,19 @@ SUPER_ADMIN_EMAIL=admin@yourdomain.com
 
 ### Nginx Configuration
 
-The project includes Nginx configuration for reverse proxy setup. Edit `nginx/nginx.conf/` to match your domain and SSL certificate paths.
+There is no bare-metal reverse-proxy `nginx.conf` checked into this repo —
+build your own from the behavior documented in
+[`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) §9 (TLS termination,
+`/api/`+`/ws/` proxying with WebSocket upgrade headers and an 86400s read
+timeout, and serving `frontend/build` as static files).
+
+[`frontend/nginx.conf`](./frontend/nginx.conf) is a different, narrower
+config: it's baked into the frontend's Docker image (see
+`frontend/Dockerfile`) to serve the built static site on its own — used by
+the k3s/Helm deployment path, not a reverse proxy for the whole app. If
+you're deploying to k3s, use [`docs/k3s-deploy.md`](./docs/k3s-deploy.md)
+instead, which configures ingress-nginx via Helm chart annotations rather
+than a hand-written nginx.conf.
 
 ## Workflow Guides
 
@@ -313,16 +319,19 @@ The project includes Nginx configuration for reverse proxy setup. Edit `nginx/ng
 
 | Variable | Type | Description | Default |
 |----------|------|-------------|---------|
-| `DATABASE_URL` | String | PostgreSQL connection string | `postgresql+asyncpg://rforum:rforum@db:5432/rforum` |
+| `DATABASE_URL` | String | PostgreSQL connection string | **required** — no default |
 | `REDIS_URL` | String | Redis connection string | `redis://redis:6379/0` |
-| `SECRET_KEY` | String | JWT signing secret (min 32 chars) | `change-me-in-production` |
+| `SECRET_KEY` | String | JWT signing secret (min 32 chars) | **required** — no default |
 | `ALGORITHM` | String | JWT algorithm | `HS256` |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | Integer | Token expiration time | `1440` (24 hours) |
-| `INVITE_CODE` | String | Registration invite code | `RFORUM01` |
-| `SUPER_ADMIN_EMAIL` | String | Auto-promote email to super admin | `` (empty) |
-| `CORS_ORIGINS` | JSON Array | Allowed CORS origins | `["http://localhost:5173"]` |
+| `INVITE_CODE` | String | Registration invite code | **required** — no default |
+| `SUPER_ADMIN_EMAIL` | String | Auto-promote email to super admin on registration | `` (empty — disabled) |
+| `SUPER_ADMIN_BOOTSTRAP_TOKEN` | String | Secret also required to auto-promote `SUPER_ADMIN_EMAIL` | `` (empty — disabled) |
+| `CORS_ORIGINS` | JSON Array | Allowed CORS origins | **required** — no default |
 | `UPLOAD_MAX_MB` | Integer | Max file upload size | `20` |
-| `UPLOAD_ALLOWED_EXTENSIONS` | String | Allowed file types (CSV) | `.pdf,.ppt,.pptx,.doc,.docx,.txt,.odp,.odt` |
+| `UPLOAD_ALLOWED_EXTENSIONS` | JSON Array or CSV | Allowed file types — accepts either format | `.pdf,.ppt,.pptx,.doc,.docx,.txt,.odp,.odt` |
+
+The app fails to start with a clear error naming any required variable that's missing — see `.env.example` for a working starting point and the "Environment Configuration for Production" section above for production values.
 
 
 
@@ -341,8 +350,9 @@ rforum/
 ├── app/              # FastAPI backend (models, routers, auth)
 ├── frontend/         # SvelteKit frontend (routes, components)
 ├── db/               # Database migrations (Alembic)
-├── nginx/            # Reverse proxy configuration
-├── docker-compose.yml
+├── deploy/helm/      # k3s/Helm production deployment chart
+├── docs/             # Architecture reference and deploy guide
+├── docker-compose.yml  # Local dev Postgres + Redis only
 └── README.md
 ```
 

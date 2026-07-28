@@ -14,6 +14,22 @@ import csv
 
 router = APIRouter(prefix="/api/analytics", tags=["analytics"])
 
+# Characters that spreadsheet apps (Excel, Google Sheets, LibreOffice Calc)
+# treat as a formula prefix when a cell is opened — a guest-supplied poll/
+# Q&A/word-cloud value or display name starting with one of these could
+# execute arbitrary formulas (including calling out to external commands) in
+# a moderator's spreadsheet the moment they open an exported CSV.
+_CSV_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _csv_safe(value):
+    """Neutralize CSV/spreadsheet formula injection in guest-controlled text
+    (OWASP-recommended mitigation: prefix with a single quote so spreadsheet
+    apps render the cell as literal text instead of evaluating it)."""
+    if isinstance(value, str) and value.startswith(_CSV_FORMULA_PREFIXES):
+        return "'" + value
+    return value
+
 
 @router.get("/")
 async def get_analytics(
@@ -374,7 +390,11 @@ async def download_event_analytics(
         writer.writerow(['Responses'])
         writer.writerow(['response_id', 'slide_id', 'value', 'guest_identifier', 'name', 'rating', 'created_at'])
         for r in (sess.get('responses') or []):
-            writer.writerow([r.get('response_id'), r.get('slide_id'), r.get('value'), r.get('guest_identifier'), r.get('name') or '', r.get('rating') or '', r.get('created_at')])
+            writer.writerow([
+                r.get('response_id'), r.get('slide_id'),
+                _csv_safe(r.get('value')), _csv_safe(r.get('guest_identifier')), _csv_safe(r.get('name')) or '',
+                r.get('rating') or '', r.get('created_at'),
+            ])
 
     buf.seek(0)
     headers = {
@@ -468,7 +488,11 @@ async def download_session_analytics(
     writer.writerow(['Responses'])
     writer.writerow(['response_id', 'slide_id', 'value', 'guest_identifier', 'name', 'rating', 'created_at'])
     for r in data['responses']:
-        writer.writerow([r['response_id'], r['slide_id'], r['value'], r['guest_identifier'], r['name'] or '', r['rating'] or '', r['created_at']])
+        writer.writerow([
+            r['response_id'], r['slide_id'],
+            _csv_safe(r['value']), _csv_safe(r['guest_identifier']), _csv_safe(r['name']) or '',
+            r['rating'] or '', r['created_at'],
+        ])
 
     buf.seek(0)
     headers = {'Content-Disposition': f'attachment; filename="analytics_session_{session_id}.csv"'}

@@ -378,6 +378,36 @@ def extract_total_pages(file_path: str) -> tuple[int, list[str]]:
     return 1, warnings
 
 
+def check_render_limits(
+    page_count: int,
+    page_width: float,
+    page_height: float,
+    max_pages: int,
+    max_dimension_pt: float,
+) -> None:
+    """
+    Reject an oversized/oddly-dimensioned deck before any page is rendered.
+
+    Called after the cheap extract_page_count_and_size() pass (which opens
+    the document but never rasterizes a page) and before render_all_thumbnails()/
+    render_all_pages() (which rasterize every page) — so a deck that fails
+    this check never reaches the expensive rendering step.
+
+    Raises ValueError with a human-readable message, same contract as
+    validate_upload, so callers can share the same try/except ValueError ->
+    HTTPException translation.
+    """
+    if page_count > max_pages:
+        raise ValueError(
+            f"Presentation has {page_count} pages, exceeding the {max_pages}-page limit."
+        )
+    if page_width > max_dimension_pt or page_height > max_dimension_pt:
+        raise ValueError(
+            f"Presentation page size ({page_width:.0f}x{page_height:.0f}pt) exceeds "
+            f"the {max_dimension_pt:.0f}pt-per-side limit."
+        )
+
+
 def render_all_pages(file_path: str, output_dir: str, basename: str) -> tuple[list[tuple[str, str]], list[str]]:
     """
     Render every page of `file_path` to a full-res PNG and a thumbnail PNG,

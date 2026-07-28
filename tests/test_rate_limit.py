@@ -98,7 +98,15 @@ class TestConfigurableJoinRateLimit:
         monkeypatch.setattr(
             sessions_module,
             "get_settings",
-            lambda: Settings(_env_file=None, JOIN_RATE_LIMIT=2, JOIN_RATE_LIMIT_WINDOW_SECONDS=60),
+            lambda: Settings(
+                _env_file=None,
+                DATABASE_URL="postgresql+asyncpg://test:test@localhost/test",
+                SECRET_KEY="test-secret-key",
+                INVITE_CODE="TEST-CODE",
+                CORS_ORIGINS=["http://testserver"],
+                JOIN_RATE_LIMIT=2,
+                JOIN_RATE_LIMIT_WINDOW_SECONDS=60,
+            ),
         )
         app.state.redis = _FakeRedis()
 

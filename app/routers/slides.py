@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, stat
 from fastapi.responses import StreamingResponse
 from jose import JWTError, jwt
 from redis.asyncio import Redis
+from redis.exceptions import RedisError
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -34,6 +35,18 @@ router = APIRouter(prefix="/api/sessions/{session_id}/slides", tags=["slides"])
 
 UPLOAD_RATE_LIMIT = 10
 UPLOAD_RATE_WINDOW_SECONDS = 60
+
+
+async def _publish_safe(redis: Redis, channel: str, message: str) -> None:
+    """Best-effort Redis publish for live WS updates, called after the DB
+    write it announces has already committed — same fail-open policy as
+    check_rate_limit (app/rate_limit.py) and app/routers/responses.py, so a
+    transient Redis blip doesn't turn an already-successful mutation into a
+    client-visible 500."""
+    try:
+        await redis.publish(channel, message)
+    except RedisError:
+        logger.warning("redis_publish_failed channel=%s", channel, exc_info=True)
 
 
 async def _check_upload_rate_limit(request: Request, user: User) -> None:
@@ -173,11 +186,12 @@ async def update_slide(
                 "activation": True
             }
         }
-        await redis.publish(
+        await _publish_safe(
+            redis,
             f"session:{session_code}",
             json.dumps(payload_data)
         )
-    
+
     return slide
 
 
@@ -423,13 +437,22 @@ async def get_page_image(
     if not file_url:
         raise HTTPException(status_code=404, detail="No file attached")
 
-    # Resolve to local path and confine to the uploads/ directory
-    file_path = file_url.lstrip("/")
-    uploads_dir = os.path.realpath("uploads")
-    resolved = os.path.realpath(file_path)
-    if not resolved.startswith(uploads_dir + os.sep) and resolved != uploads_dir:
+    # Resolve to local path and confine to the uploads/ directory. Guests hit
+    # this endpoint with no login required, so a live session can see the
+    # same page requested by many guests at once — run the realpath/exists
+    # syscalls off the event loop, same as the fitz calls just below.
+    def _resolve_path():
+        candidate = file_url.lstrip("/")
+        uploads_dir = os.path.realpath("uploads")
+        resolved = os.path.realpath(candidate)
+        confined = resolved.startswith(uploads_dir + os.sep) or resolved == uploads_dir
+        exists = os.path.exists(candidate) if confined else False
+        return candidate, confined, exists
+
+    file_path, confined, exists = await asyncio.to_thread(_resolve_path)
+    if not confined:
         raise HTTPException(status_code=400, detail="Invalid file path")
-    if not os.path.exists(file_path):
+    if not exists:
         raise HTTPException(status_code=404, detail="File not found on disk")
 
     try:

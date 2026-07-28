@@ -14,9 +14,10 @@
     adminDeleteOrgFavicon,
     formatBytes,
     isAuthenticated,
+    getMe,
     type OrgSettingsAdmin
   } from '$lib/api';
-  import { isSuperAdmin, orgSettings } from '$lib/stores';
+  import { currentUser, orgSettings } from '$lib/stores';
   import { onMount } from 'svelte';
   import { Shield, User, Trash2, ToggleLeft, ToggleRight, ChevronDown, Search, RefreshCw, AlertTriangle, HardDrive, Building2, Upload, X, Check } from 'lucide-svelte';
 
@@ -210,7 +211,20 @@
 
   onMount(async () => {
     if (!isAuthenticated()) { goto('/login'); return; }
-    if (!$isSuperAdmin) { goto('/dashboard'); return; }
+    // Fetch the current user directly instead of reading the `currentUser`
+    // store — the parent dashboard layout populates that store via its own
+    // async getMe() call, which may not have resolved yet by the time this
+    // page mounts, so relying on it here could wrongly redirect a real
+    // Super Admin away before their role has loaded.
+    let me;
+    try {
+      me = await getMe();
+      currentUser.set(me);
+    } catch {
+      goto('/login');
+      return;
+    }
+    if (me.role !== 'SUPER_ADMIN') { goto('/dashboard'); return; }
     await Promise.all([load(), loadStorage(), loadOrgSettings()]);
   });
 
@@ -587,7 +601,7 @@
               <p class="text-xs text-surface-500">
                 {orgAdmin.has_custom_logo ? 'Custom logo configured' : 'Using default Rforum logo'}
               </p>
-              <p class="text-xs text-surface-400 mt-0.5">PNG, JPEG, SVG, or WebP · up to 2 MB</p>
+              <p class="text-xs text-surface-400 mt-0.5">PNG, JPEG, or WebP · up to 2 MB</p>
             </div>
           </div>
           {#if logoError}
@@ -597,7 +611,7 @@
             <input
               bind:this={logoFileInput}
               type="file"
-              accept=".png,.jpg,.jpeg,.svg,.webp,image/png,image/jpeg,image/svg+xml,image/webp"
+              accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp"
               class="hidden"
               onchange={handleLogoFileChange}
             />
@@ -637,7 +651,7 @@
               <p class="text-xs text-surface-500">
                 {orgAdmin.has_custom_favicon ? 'Custom favicon configured' : 'Using default Rforum favicon'}
               </p>
-              <p class="text-xs text-surface-400 mt-0.5">ICO, PNG, or SVG · up to 256 KB</p>
+              <p class="text-xs text-surface-400 mt-0.5">ICO or PNG · up to 256 KB</p>
             </div>
           </div>
           {#if faviconError}
@@ -647,7 +661,7 @@
             <input
               bind:this={faviconFileInput}
               type="file"
-              accept=".ico,.png,.svg,image/x-icon,image/png,image/svg+xml"
+              accept=".ico,.png,image/x-icon,image/png"
               class="hidden"
               onchange={handleFaviconFileChange}
             />

@@ -17,6 +17,7 @@ data:
   ACCESS_TOKEN_EXPIRE_MINUTES: {{ .Values.app.accessTokenExpireMinutes | quote }}
   INVITE_CODE: {{ .Values.app.inviteCode | quote }}
   SUPER_ADMIN_EMAIL: {{ .Values.app.superAdminEmail | quote }}
+  ORG_DISPLAY_NAME: {{ .Values.app.orgDisplayName | quote }}
   {{- $origins := .Values.app.corsOrigins }}
   {{- if not $origins }}
   {{- $scheme := ternary "https" "http" .Values.ingress.tls.enabled }}

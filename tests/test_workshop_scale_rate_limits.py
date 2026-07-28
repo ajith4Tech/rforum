@@ -37,6 +37,16 @@ os.environ.setdefault("STORAGE_BACKEND", "local")
 
 TEST_DATABASE_URL = "postgresql+asyncpg://rforum:rforum@localhost:5433/rforum_test"
 
+# DATABASE_URL/SECRET_KEY/INVITE_CODE/CORS_ORIGINS have no insecure default
+# (app/config.py) and must be supplied explicitly whenever a test builds a
+# Settings() with _env_file=None.
+_REQUIRED_SETTINGS = dict(
+    DATABASE_URL=TEST_DATABASE_URL,
+    SECRET_KEY="test-secret-key",
+    INVITE_CODE="TEST-CODE",
+    CORS_ORIGINS=["http://testserver"],
+)
+
 
 def _require_test_postgres():
     import subprocess
@@ -256,7 +266,7 @@ class TestJoinRateLimitIsSessionScoped:
 
         monkeypatch.setattr(
             sessions_module, "get_settings",
-            lambda: Settings(_env_file=None, JOIN_RATE_LIMIT=3, JOIN_RATE_LIMIT_WINDOW_SECONDS=60),
+            lambda: Settings(_env_file=None, **_REQUIRED_SETTINGS, JOIN_RATE_LIMIT=3, JOIN_RATE_LIMIT_WINDOW_SECONDS=60),
         )
 
         # Exhaust session A's budget (3 allowed, 4th rejected).
@@ -276,7 +286,7 @@ class TestJoinRateLimitIsSessionScoped:
 
         monkeypatch.setattr(
             sessions_module, "get_settings",
-            lambda: Settings(_env_file=None, JOIN_RATE_LIMIT=5, JOIN_RATE_LIMIT_WINDOW_SECONDS=60),
+            lambda: Settings(_env_file=None, **_REQUIRED_SETTINGS, JOIN_RATE_LIMIT=5, JOIN_RATE_LIMIT_WINDOW_SECONDS=60),
         )
         for _ in range(5):
             resp = await client.get(f"/api/sessions/join/{live_session.unique_code}")
@@ -322,6 +332,7 @@ class TestResponseRateLimitStillBlocksAbuse:
             responses_module, "get_settings",
             lambda: Settings(
                 _env_file=None,
+                **_REQUIRED_SETTINGS,
                 RESPONSE_RATE_LIMIT_PER_IP=5, RESPONSE_RATE_LIMIT_PER_IP_WINDOW_SECONDS=60,
                 RESPONSE_RATE_LIMIT_PER_GUEST=100, RESPONSE_RATE_LIMIT_PER_GUEST_WINDOW_SECONDS=60,
             ),
@@ -348,6 +359,7 @@ class TestResponseRateLimitStillBlocksAbuse:
             responses_module, "get_settings",
             lambda: Settings(
                 _env_file=None,
+                **_REQUIRED_SETTINGS,
                 RESPONSE_RATE_LIMIT_PER_GUEST=3, RESPONSE_RATE_LIMIT_PER_GUEST_WINDOW_SECONDS=60,
                 RESPONSE_RATE_LIMIT_PER_IP=1000, RESPONSE_RATE_LIMIT_PER_IP_WINDOW_SECONDS=60,
             ),

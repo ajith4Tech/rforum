@@ -179,6 +179,19 @@ app:
   # this — the upstream default ("RFORUM01") is public in this repo's history.
   inviteCode: "CHANGE_ME"
   superAdminEmail: ""
+  # Bootstrap secret required (alongside superAdminEmail matching) to
+  # auto-promote on registration — see app/routers/auth.py::register and
+  # app/config.py::SUPER_ADMIN_BOOTSTRAP_TOKEN. Leave empty (default) to
+  # disable auto-promotion even when superAdminEmail is set. Prefer
+  # app.existingSecret (key super-admin-bootstrap-token) over setting this
+  # in plain values for anything beyond local testing.
+  superAdminBootstrapToken: ""
+  # One-time seed for the org_settings singleton's display_name (app/models.py
+  # ::OrgSettings, app/config.py::ORG_DISPLAY_NAME) — only applied while the
+  # DB row still holds the seeded default, so a later admin edit via the
+  # Admin page is never overwritten by a subsequent restart/upgrade. Leave
+  # empty (default) to keep the built-in default name.
+  orgDisplayName: ""
   # Left empty by default: templates/configmap.yaml derives
   # ["https://<ingress.host>"] automatically since frontend and backend share
   # one Ingress host (frontend/src/lib/api.ts same-origin-guesses the API
@@ -222,7 +235,9 @@ app:
   secretKey: ""
   # Name of a pre-created Secret to source SECRET_KEY (and, when S3 storage
   # is enabled, AWS credentials) from instead of the values above. Expected
-  # keys: secret-key, aws-access-key-id, aws-secret-access-key.
+  # keys: secret-key, aws-access-key-id, aws-secret-access-key. The
+  # super-admin-bootstrap-token key is optional — omit it to leave
+  # SUPER_ADMIN_EMAIL auto-promotion disabled.
   existingSecret: ""
 
 # ── Presentation/upload storage (app/storage/) ───────────────────────────

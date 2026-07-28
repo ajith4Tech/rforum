@@ -5,6 +5,13 @@ metadata:
   name: {{ include "rforum.fullname" . }}-uploads
   labels:
     {{- include "rforum.componentLabels" (dict "root" . "component" "backend") | nindent 4 }}
+  annotations:
+    # Keep uploaded presentations/assets on `helm uninstall` — this PVC (unlike
+    # Postgres's StatefulSet-managed volumeClaimTemplate, which Kubernetes
+    # already leaves orphaned rather than deleting) is a plain Helm-owned
+    # resource and would otherwise be deleted along with the release,
+    # permanently losing every uploaded deck backed by local storage.
+    helm.sh/resource-policy: keep
 spec:
   accessModes: [{{ .Values.storage.persistence.accessMode | quote }}]
   {{- if .Values.storage.persistence.storageClass }}

@@ -35,14 +35,18 @@ _LOGO_CONTENT_TYPES = {
     ".png": "image/png",
     ".jpg": "image/jpeg",
     ".jpeg": "image/jpeg",
-    ".svg": "image/svg+xml",
     ".webp": "image/webp",
 }
 _FAVICON_CONTENT_TYPES = {
     ".ico": "image/x-icon",
     ".png": "image/png",
-    ".svg": "image/svg+xml",
 }
+# SVG is deliberately not accepted: /api/branding/logo|favicon are public,
+# unauthenticated endpoints served with the uploaded file's own content type
+# (see _serve_branding_asset). A crafted SVG with an inline <script> executes
+# if a browser ever navigates to that URL directly (not just via <img src>),
+# which would run in this origin with access to the JWT in localStorage —
+# a stored-XSS path even though the upload itself requires SUPER_ADMIN.
 
 # Bundled default assets already shipped in frontend/static/ — branding
 # endpoints redirect here rather than duplicating the bytes server-side.

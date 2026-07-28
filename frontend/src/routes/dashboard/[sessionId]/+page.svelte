@@ -3,7 +3,7 @@
     getSession, updateSession, createSlide, updateSlide, deleteSlide, listResponses, getPageImageUrl,
     getSessionPresentation, uploadPresentation, replacePresentation, regeneratePresentation,
     insertTimelineItem, updateTimelineItem, deleteTimelineItem, reorderTimelineItems, activateTimelineItem,
-    attachPresentation, detachPresentation, deletePresentation
+    attachPresentation, detachPresentation, deletePresentation, uploadSlideFile
   } from '$lib/api';
   import { RforumWebSocket } from '$lib/ws';
   import type { ConnectionStatus as WsStatus } from '$lib/ws';
@@ -641,19 +641,13 @@
   async function uploadContentFile() {
     const active = getActiveSlide();
     if (!active || !contentFile || contentFile.length === 0) return;
-    const token = typeof localStorage !== 'undefined' ? localStorage.getItem('rforum_token') : null;
-    const formData = new FormData();
-    formData.append('file', contentFile[0]);
-    const response = await fetch(`/api/sessions/${sessionId}/slides/${active.id}/upload`, {
-      method: 'POST',
-      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-      body: formData
-    });
-    if (!response.ok) {
+    let updated;
+    try {
+      updated = await uploadSlideFile(sessionId, active.id, contentFile[0]);
+    } catch {
       alert('Failed to upload file');
       return;
     }
-    const updated = await response.json();
     slides = slides.map((s) => (s.id === active.id ? updated : s));
     contentFile = null;
     ws?.send('slide_change', { slide_id: active.id, slide: updated, activation: false });

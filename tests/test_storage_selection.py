@@ -11,6 +11,17 @@ from app.storage.fallback import FallbackStorageBackend
 from app.storage.local import LocalFilesystemBackend
 from app.storage.s3 import S3StorageBackend
 
+# DATABASE_URL/SECRET_KEY/INVITE_CODE/CORS_ORIGINS have no insecure default
+# (app/config.py) and must be supplied explicitly whenever a test builds a
+# Settings() with _env_file=None — these values are never used for anything
+# beyond satisfying that requirement in these storage-selection tests.
+_REQUIRED_SETTINGS = dict(
+    DATABASE_URL="postgresql+asyncpg://test:test@localhost/test",
+    SECRET_KEY="test-secret-key",
+    INVITE_CODE="TEST-CODE",
+    CORS_ORIGINS=["http://testserver"],
+)
+
 
 @pytest.fixture(autouse=True)
 def _clear_cache(monkeypatch):
@@ -40,13 +51,13 @@ def _patch_settings(monkeypatch, settings):
 class TestLocalBackendSelection:
 
     def test_default_settings_select_local_backend(self, monkeypatch, tmp_path):
-        settings = Settings(_env_file=None, STORAGE_ROOT=str(tmp_path / "uploads"))
+        settings = Settings(_env_file=None, **_REQUIRED_SETTINGS, STORAGE_ROOT=str(tmp_path / "uploads"))
         _patch_settings(monkeypatch, settings)
         backend = get_storage_backend()
         assert isinstance(backend, LocalFilesystemBackend)
 
     def test_storage_backend_local_case_insensitive(self, monkeypatch, tmp_path):
-        settings = Settings(_env_file=None, STORAGE_BACKEND="LOCAL", STORAGE_ROOT=str(tmp_path / "uploads"))
+        settings = Settings(_env_file=None, **_REQUIRED_SETTINGS, STORAGE_BACKEND="LOCAL", STORAGE_ROOT=str(tmp_path / "uploads"))
         _patch_settings(monkeypatch, settings)
         assert isinstance(get_storage_backend(), LocalFilesystemBackend)
 
@@ -63,6 +74,7 @@ class TestS3BackendSelection:
             )
             settings = Settings(
                 _env_file=None,
+                **_REQUIRED_SETTINGS,
                 STORAGE_BACKEND="s3",
                 STORAGE_ROOT=str(tmp_path / "uploads"),
                 S3_BUCKET="rforum-uploads-test",
@@ -80,14 +92,14 @@ class TestS3BackendSelection:
     def test_env_var_storage_provider_binds_to_storage_backend_field(self, monkeypatch):
         monkeypatch.setenv("STORAGE_PROVIDER", "s3")
         monkeypatch.delenv("STORAGE_BACKEND", raising=False)
-        settings = Settings(_env_file=None)
+        settings = Settings(_env_file=None, **_REQUIRED_SETTINGS)
         assert settings.STORAGE_BACKEND == "s3"
 
 
 class TestUnknownBackend:
 
     def test_unknown_backend_raises_not_implemented(self, monkeypatch, tmp_path):
-        settings = Settings(_env_file=None, STORAGE_BACKEND="azure", STORAGE_ROOT=str(tmp_path / "uploads"))
+        settings = Settings(_env_file=None, **_REQUIRED_SETTINGS, STORAGE_BACKEND="azure", STORAGE_ROOT=str(tmp_path / "uploads"))
         _patch_settings(monkeypatch, settings)
         with pytest.raises(NotImplementedError):
             get_storage_backend()

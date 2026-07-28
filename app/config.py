@@ -1,20 +1,34 @@
-from pydantic import AliasChoices, Field
-from pydantic_settings import BaseSettings
+import json
 from functools import lru_cache
+from typing import Annotated
+
+from pydantic import AliasChoices, Field, ValidationError, field_validator
+from pydantic_settings import BaseSettings, NoDecode
 
 
 class Settings(BaseSettings):
-    DATABASE_URL: str = "postgresql+asyncpg://rforum:rforum@db:5433/rforum"
+    # Security/environment-sensitive settings have no insecure fallback —
+    # a missing value must fail startup loudly (see get_settings() below)
+    # rather than silently run with a well-known default that's public in
+    # this repo's history.
+    DATABASE_URL: str
     REDIS_URL: str = "redis://redis:6379/0"
-    SECRET_KEY: str = "change-me-in-production-use-a-real-secret"
+    SECRET_KEY: str
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 24 hours
-    INVITE_CODE: str = "RFORUM01"  # Override via INVITE_CODE env var
-    CORS_ORIGINS: list[str] = [
-    "https://rforum.t4gc.in",
-    ]
-    # Super admin: set this env var to auto-promote a user on registration
+    INVITE_CODE: str
+    CORS_ORIGINS: list[str]
+    # Super admin: set this env var to auto-promote a user on registration.
+    # Auto-promotion also requires SUPER_ADMIN_BOOTSTRAP_TOKEN below to be
+    # set and supplied by the registering client — see app/routers/auth.py.
     SUPER_ADMIN_EMAIL: str = ""
+    # One-time bootstrap secret gating SUPER_ADMIN_EMAIL auto-promotion.
+    # Without this, whoever registers first with SUPER_ADMIN_EMAIL's exact
+    # address wins the role — a race anyone holding the (often widely-shared)
+    # INVITE_CODE could win by beating the real admin to it. Requiring a
+    # second, separately-distributed secret (never shared with the invite
+    # code) closes that race. Leave empty to disable auto-promotion entirely.
+    SUPER_ADMIN_BOOTSTRAP_TOKEN: str = ""
     # Optional one-time bootstrap value for the org_settings singleton's
     # display_name (app/models.py::OrgSettings, app/routers/org_settings.py).
     # Applied only while the DB row still holds the seeded default — once an
@@ -23,9 +37,25 @@ class Settings(BaseSettings):
     ORG_DISPLAY_NAME: str = ""
     # Upload settings
     UPLOAD_MAX_MB: int = 20  # Maximum upload file size in MB
-    UPLOAD_ALLOWED_EXTENSIONS: list[str] = [
+    # Accepts either a JSON array (`[".pdf", ".doc"]`) or a comma-separated
+    # string (`.pdf,.doc`) via UPLOAD_ALLOWED_EXTENSIONS — see the validator
+    # below. NoDecode opts this field out of pydantic-settings' default
+    # JSON-only env parsing for list fields, which otherwise raises
+    # SettingsError on a plain comma-separated value.
+    UPLOAD_ALLOWED_EXTENSIONS: Annotated[list[str], NoDecode] = [
         ".pdf", ".ppt", ".pptx", ".doc", ".docx", ".txt", ".odp", ".odt"
     ]
+
+    @field_validator("UPLOAD_ALLOWED_EXTENSIONS", mode="before")
+    @classmethod
+    def _parse_upload_allowed_extensions(cls, value):
+        if isinstance(value, str):
+            stripped = value.strip()
+            if stripped.startswith("["):
+                return json.loads(stripped)
+            return [ext.strip() for ext in stripped.split(",") if ext.strip()]
+        return value
+
     # Presentation storage
     # "local" or "s3"; also settable via STORAGE_PROVIDER (S3 rollout convention) —
     # both env var names bind to this one field, STORAGE_PROVIDER takes priority
@@ -57,6 +87,15 @@ class Settings(BaseSettings):
     S3_MAX_RETRIES: int = 3
     USE_PRESIGNED_URLS: bool = False  # reserved — not yet implemented, backend still proxies bytes
     PRESENTATION_ORPHAN_RETENTION_DAYS: int = 7
+    # Resource limits enforced before rendering an uploaded deck (see
+    # app/services/file_processing.py::check_render_limits) — reject
+    # oversized/oddly-dimensioned decks up front rather than spending
+    # LibreOffice/PyMuPDF CPU and memory rendering every page of them.
+    PRESENTATION_MAX_PAGES: int = 300
+    # Page dimensions in PDF points (1/72 inch). 20000pt ≈ 278in per side —
+    # generous enough for any real-world slide deck or poster, but bounds a
+    # pathological/malicious PDF's MediaBox from blowing up render memory.
+    PRESENTATION_MAX_PAGE_DIMENSION_PT: float = 20000.0
     # Pagination defaults for list endpoints (Events, Sessions)
     DEFAULT_PAGE_SIZE: int = 20
     MAX_PAGE_SIZE: int = 100
@@ -97,4 +136,14 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    try:
+        return Settings()
+    except ValidationError as exc:
+        missing = [str(err["loc"][0]) for err in exc.errors() if err["type"] == "missing"]
+        if missing:
+            raise RuntimeError(
+                "Missing required environment variable(s): " + ", ".join(missing) + ". "
+                "Copy .env.example to .env and set them (see README's "
+                "'Environment Configuration for Production' section) before starting the app."
+            ) from exc
+        raise

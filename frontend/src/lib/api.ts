@@ -1,3 +1,5 @@
+import { token as tokenStore } from './stores';
+
 const API_PREFIX = '/api';
 const DEFAULT_API_PORT = '8000';
 
@@ -95,6 +97,7 @@ export const logout = () => {
   if (typeof localStorage !== 'undefined') {
     localStorage.removeItem('rforum_token');
   }
+  tokenStore.set(null);
 };
 
 export async function changePassword(currentPassword: string, newPassword: string) {
@@ -119,8 +122,11 @@ export async function login(email: string, password: string) {
   }
 
   const data = await res.json();
-  if (data?.access_token && typeof localStorage !== 'undefined') {
-    localStorage.setItem('rforum_token', data.access_token);
+  if (data?.access_token) {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('rforum_token', data.access_token);
+    }
+    tokenStore.set(data.access_token);
   }
   return data;
 }

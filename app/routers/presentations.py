@@ -22,6 +22,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, stat
 from fastapi.responses import StreamingResponse
 from jose import JWTError, jwt
 from redis.asyncio import Redis
+from redis.exceptions import RedisError
 from sqlalchemy import delete, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -64,6 +65,7 @@ from app.schemas import (
 )
 from app.services.file_processing import (
     check_content_length,
+    check_render_limits,
     compute_checksum,
     convert_to_pdf_bytes,
     extract_page_count_and_size,
@@ -221,7 +223,7 @@ async def _process_upload(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
-    checksum = compute_checksum(content)
+    checksum = await asyncio.to_thread(compute_checksum, content)
     dup_result = await db.execute(
         select(Presentation)
         .where(
@@ -257,6 +259,15 @@ async def _process_upload(
         extract_page_count_and_size, render_source, render_ext
     )
     conversion_warnings.extend(count_warnings)
+
+    try:
+        check_render_limits(
+            page_count, page_width, page_height,
+            max_pages=settings.PRESENTATION_MAX_PAGES,
+            max_dimension_pt=settings.PRESENTATION_MAX_PAGE_DIMENSION_PT,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
 
     thumbs, thumb_warnings = await asyncio.to_thread(render_all_thumbnails, render_source, render_ext)
     conversion_warnings.extend(thumb_warnings)
@@ -343,6 +354,18 @@ async def _build_timeline_for_presentation(
     presentation.last_used_at = datetime.now(timezone.utc)
     await db.flush()
     return timeline
+
+
+async def _publish_safe(redis: Redis, channel: str, message: str) -> None:
+    """Best-effort Redis publish for live WS updates, called after the DB
+    write it announces has already committed — same fail-open policy as
+    check_rate_limit (app/rate_limit.py) and app/routers/responses.py, so a
+    transient Redis blip doesn't turn an already-successful mutation into a
+    client-visible 500."""
+    try:
+        await redis.publish(channel, message)
+    except RedisError:
+        logger.warning("redis_publish_failed channel=%s", channel, exc_info=True)
 
 
 async def _check_presentation_write_rate_limit(request: Request, user: User) -> None:
@@ -1282,9 +1305,13 @@ async def reorder_timeline_items(
     timeline = await _get_timeline_for_session(db, session.id)
 
     by_id = {item.id: item for item in timeline.items}
-    if set(payload.item_ids) != set(by_id.keys()):
+    if (
+        len(payload.item_ids) != len(set(payload.item_ids))
+        or set(payload.item_ids) != set(by_id.keys())
+    ):
         raise HTTPException(
-            status_code=400, detail="item_ids must be exactly the session's current timeline items"
+            status_code=400,
+            detail="item_ids must be exactly the session's current timeline items, with no duplicates",
         )
 
     # Pages are read-only and must keep their original document order —
@@ -1328,7 +1355,8 @@ async def activate_timeline_item(
 
     out = TimelineItemOut.model_validate(item)
     redis: Redis = request.app.state.redis
-    await redis.publish(
+    await _publish_safe(
+        redis,
         f"session:{session.unique_code}",
         json.dumps(
             {

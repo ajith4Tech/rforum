@@ -111,6 +111,16 @@ spec:
                 secretKeyRef:
                   name: {{ include "rforum.app.secretName" . }}
                   key: secret-key
+            - name: SUPER_ADMIN_BOOTSTRAP_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "rforum.app.secretName" . }}
+                  key: super-admin-bootstrap-token
+                  # Optional: a pre-existing app.existingSecret from before this
+                  # key existed shouldn't break — SUPER_ADMIN_EMAIL auto-promotion
+                  # just stays disabled (app/config.py default) until this key
+                  # is added.
+                  optional: true
             {{- if eq .Values.storage.backend "s3" }}
             - name: AWS_ACCESS_KEY_ID
               valueFrom:

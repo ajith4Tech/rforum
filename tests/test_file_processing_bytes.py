@@ -88,6 +88,35 @@ class TestRenderAllThumbnails:
         assert len(warnings) >= 1
 
 
+class TestCheckRenderLimits:
+    """check_render_limits() — added to reject an oversized/oddly-dimensioned
+    deck (app/routers/presentations.py::_process_upload) before the
+    expensive render_all_thumbnails() pass runs."""
+
+    def test_within_limits_does_not_raise(self):
+        from app.services.file_processing import check_render_limits
+        check_render_limits(10, 612.0, 792.0, max_pages=300, max_dimension_pt=20000.0)
+
+    def test_page_count_over_limit_raises(self):
+        from app.services.file_processing import check_render_limits
+        with pytest.raises(ValueError, match="pages"):
+            check_render_limits(301, 612.0, 792.0, max_pages=300, max_dimension_pt=20000.0)
+
+    def test_page_count_at_limit_does_not_raise(self):
+        from app.services.file_processing import check_render_limits
+        check_render_limits(300, 612.0, 792.0, max_pages=300, max_dimension_pt=20000.0)
+
+    def test_width_over_limit_raises(self):
+        from app.services.file_processing import check_render_limits
+        with pytest.raises(ValueError, match="page size"):
+            check_render_limits(1, 20001.0, 792.0, max_pages=300, max_dimension_pt=20000.0)
+
+    def test_height_over_limit_raises(self):
+        from app.services.file_processing import check_render_limits
+        with pytest.raises(ValueError, match="page size"):
+            check_render_limits(1, 612.0, 20001.0, max_pages=300, max_dimension_pt=20000.0)
+
+
 class TestConvertToPdfBytes:
 
     def test_non_pptx_not_attempted(self, pdf_1_page):

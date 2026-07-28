@@ -29,6 +29,9 @@ class UserCreate(BaseModel):
     email: EmailStr
     password: str
     invite_code: str
+    # Only required to claim SUPER_ADMIN via the SUPER_ADMIN_EMAIL bootstrap
+    # (app/routers/auth.py::register) — ignored for ordinary registrations.
+    super_admin_bootstrap_token: str | None = None
 
     @field_validator('password')
     @classmethod

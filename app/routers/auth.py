@@ -51,8 +51,23 @@ async def register(payload: UserCreate, request: Request, db: AsyncSession = Dep
         raise HTTPException(status_code=400, detail="Email already registered")
 
     role = UserRole.USER
-    if settings.SUPER_ADMIN_EMAIL and payload.email.strip().lower() == settings.SUPER_ADMIN_EMAIL.strip().lower():
-        role = UserRole.SUPER_ADMIN
+    if settings.SUPER_ADMIN_EMAIL and settings.SUPER_ADMIN_BOOTSTRAP_TOKEN and (
+        payload.email.strip().lower() == settings.SUPER_ADMIN_EMAIL.strip().lower()
+    ):
+        # Require the separate bootstrap secret (never shared with INVITE_CODE)
+        # so knowing/guessing SUPER_ADMIN_EMAIL alone can't win the role by
+        # registering first. Also require no SUPER_ADMIN to exist yet, so this
+        # bootstrap path only ever fires once, same one-time-seed pattern as
+        # ORG_DISPLAY_NAME (see app/main.py::_bootstrap_org_display_name).
+        token_ok = bool(payload.super_admin_bootstrap_token) and hmac.compare_digest(
+            payload.super_admin_bootstrap_token, settings.SUPER_ADMIN_BOOTSTRAP_TOKEN
+        )
+        if token_ok:
+            existing_admin = await db.execute(
+                select(User).where(User.role == UserRole.SUPER_ADMIN).limit(1)
+            )
+            if existing_admin.scalar_one_or_none() is None:
+                role = UserRole.SUPER_ADMIN
 
     user = User(email=payload.email, hashed_password=hash_password(payload.password), role=role)
     db.add(user)

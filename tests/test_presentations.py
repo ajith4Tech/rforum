@@ -773,3 +773,56 @@ class TestDownload:
         app.dependency_overrides[get_current_user] = lambda: other_user
         resp = await client.get(f"/api/presentations/{presentation_id}/download")
         assert resp.status_code == 404
+
+
+class TestReorderDuplicateValidation:
+    """reorder_timeline_items must reject a payload with a repeated item id
+    even when the (deduped) set of ids still matches the timeline's full set
+    — a bare set-equality check misses this because a duplicate id doesn't
+    enlarge the set beyond what's already there. Uses an inserted interaction
+    item (not a page) so the duplicate doesn't also get caught by the
+    separate "pages must keep their original order" check."""
+
+    async def test_duplicate_interaction_id_is_rejected(self, client, owner_session, pdf_3_pages):
+        upload_resp = await _upload(client, owner_session.id, "deck.pdf", pdf_3_pages)
+        timeline = upload_resp.json()["timeline"]
+        page_ids = [item["id"] for item in timeline["items"]]
+        assert len(page_ids) == 3
+
+        insert_resp = await client.post(
+            f"/api/sessions/{owner_session.id}/presentation/timeline/items",
+            json={"item_type": "POLL", "position": 3, "content_json": {}},
+        )
+        assert insert_resp.status_code == 201
+        interaction_id = insert_resp.json()["id"]
+
+        # Valid ids overall (nothing missing, nothing foreign), but the
+        # interaction id is repeated — length (5) no longer matches the
+        # timeline's actual item count (4), even though the *set* of ids
+        # still does.
+        malformed_ids = page_ids + [interaction_id, interaction_id]
+        resp = await client.post(
+            f"/api/sessions/{owner_session.id}/presentation/timeline/items/reorder",
+            json={"item_ids": malformed_ids},
+        )
+        assert resp.status_code == 400
+        assert "duplicate" in resp.json()["detail"].lower()
+
+    async def test_valid_reorder_with_no_duplicates_still_succeeds(self, client, owner_session, pdf_3_pages):
+        upload_resp = await _upload(client, owner_session.id, "deck.pdf", pdf_3_pages)
+        timeline = upload_resp.json()["timeline"]
+        page_ids = [item["id"] for item in timeline["items"]]
+
+        insert_resp = await client.post(
+            f"/api/sessions/{owner_session.id}/presentation/timeline/items",
+            json={"item_type": "POLL", "position": 3, "content_json": {}},
+        )
+        interaction_id = insert_resp.json()["id"]
+
+        # Move the interaction to the front — pages must stay in original
+        # order, but the interaction may move freely.
+        resp = await client.post(
+            f"/api/sessions/{owner_session.id}/presentation/timeline/items/reorder",
+            json={"item_ids": [interaction_id] + page_ids},
+        )
+        assert resp.status_code == 200
