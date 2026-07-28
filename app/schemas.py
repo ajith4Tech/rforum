@@ -475,6 +475,35 @@ class SessionAssetOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+# ── Organization Settings / Branding ──────────────────
+class OrgSettingsPublicOut(BaseModel):
+    """Safe, unauthenticated-readable branding info — never includes storage
+    keys, credentials, or any other internal detail."""
+    display_name: str
+    logo_url: str
+    favicon_url: str
+    updated_at: datetime
+
+
+class OrgSettingsAdminOut(OrgSettingsPublicOut):
+    """Same public shape, plus whether a custom asset is currently set — lets
+    the Admin page show a "Remove" action without exposing the storage key."""
+    has_custom_logo: bool
+    has_custom_favicon: bool
+
+
+class OrgDisplayNameUpdate(BaseModel):
+    display_name: str = Field(..., min_length=1, max_length=120)
+
+    @field_validator("display_name")
+    @classmethod
+    def trim_and_require_nonempty(cls, v: str) -> str:
+        cleaned = v.strip()
+        if not cleaned:
+            raise ValueError("Organization name cannot be empty")
+        return cleaned
+
+
 # ── WebSocket Messages ───────────────────────────────
 class WSMessage(BaseModel):
     event: str

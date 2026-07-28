@@ -395,6 +395,74 @@ export async function adminGetStorage(): Promise<{
   return fetchJson('/admin/storage', { method: 'GET' }, true) as any;
 }
 
+// ── Organization Settings / Branding ───────────────────
+export interface OrgSettingsAdmin {
+  display_name: string;
+  logo_url: string;
+  favicon_url: string;
+  updated_at: string;
+  has_custom_logo: boolean;
+  has_custom_favicon: boolean;
+}
+
+// logo_url/favicon_url come back as backend-relative paths (e.g.
+// "/api/branding/logo") — resolveFileUrl (defined below) makes them
+// absolute against API_ORIGIN, same as every other asset URL in this file,
+// so they resolve correctly even when the frontend dev server runs on a
+// different port than the backend.
+function withAbsoluteBrandingUrls<T extends { logo_url: string; favicon_url: string }>(data: T): T {
+  return { ...data, logo_url: resolveFileUrl(data.logo_url), favicon_url: resolveFileUrl(data.favicon_url) };
+}
+
+export async function getOrgSettings(): Promise<import('./stores').OrgSettingsPublic> {
+  const data = await fetchJson<import('./stores').OrgSettingsPublic>('/settings/org', { method: 'GET' });
+  return withAbsoluteBrandingUrls(data);
+}
+
+export async function adminGetOrgSettings(): Promise<OrgSettingsAdmin> {
+  const data = await fetchJson<OrgSettingsAdmin>('/admin/settings/org', { method: 'GET' }, true);
+  return withAbsoluteBrandingUrls(data);
+}
+
+export async function adminUpdateOrgDisplayName(displayName: string): Promise<OrgSettingsAdmin> {
+  const data = await fetchJson<OrgSettingsAdmin>('/admin/settings/org', {
+    method: 'PATCH',
+    body: JSON.stringify({ display_name: displayName })
+  }, true);
+  return withAbsoluteBrandingUrls(data);
+}
+
+async function uploadOrgBrandingFile(path: string, file: File): Promise<OrgSettingsAdmin> {
+  const form = new FormData();
+  form.append('file', file);
+  const token = getToken();
+  const res = await withTimeout(fetch(buildUrl(path), {
+    method: 'PUT',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: form,
+  }));
+  if (!res.ok) throw new Error(await extractError(res));
+  return withAbsoluteBrandingUrls(await res.json());
+}
+
+export async function adminUploadOrgLogo(file: File): Promise<OrgSettingsAdmin> {
+  return uploadOrgBrandingFile('/admin/settings/org/logo', file);
+}
+
+export async function adminDeleteOrgLogo(): Promise<OrgSettingsAdmin> {
+  const data = await fetchJson<OrgSettingsAdmin>('/admin/settings/org/logo', { method: 'DELETE' }, true);
+  return withAbsoluteBrandingUrls(data);
+}
+
+export async function adminUploadOrgFavicon(file: File): Promise<OrgSettingsAdmin> {
+  return uploadOrgBrandingFile('/admin/settings/org/favicon', file);
+}
+
+export async function adminDeleteOrgFavicon(): Promise<OrgSettingsAdmin> {
+  const data = await fetchJson<OrgSettingsAdmin>('/admin/settings/org/favicon', { method: 'DELETE' }, true);
+  return withAbsoluteBrandingUrls(data);
+}
+
 // ── Utilities ─────────────────────────────────────────
 export function formatBytes(bytes: number): string {
   if (bytes <= 0) return '0 B';

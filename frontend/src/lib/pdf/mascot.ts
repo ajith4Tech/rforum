@@ -1,10 +1,13 @@
 import { MASCOT_URL } from './constants';
 
-/** Loads the Rforum mascot into a data URI suitable for jsPDF's addImage. Resolves to '' on failure so callers can skip drawing it rather than throw. */
-export function loadMascot(): Promise<string> {
+/** Loads a logo image into a data URI suitable for jsPDF's addImage. Defaults
+ * to the bundled Rforum mascot; pass the org's branding logo URL to use the
+ * configured organization logo instead. Resolves to '' on failure so callers
+ * can skip drawing it rather than throw. */
+export function loadMascot(url: string = MASCOT_URL): Promise<string> {
   return new Promise<string>((resolve) => {
     const img = new Image();
-    img.src = MASCOT_URL;
+    img.src = url;
     img.onload = () => {
       const canvas = document.createElement('canvas');
       canvas.width = img.width;

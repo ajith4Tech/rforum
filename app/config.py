@@ -15,6 +15,12 @@ class Settings(BaseSettings):
     ]
     # Super admin: set this env var to auto-promote a user on registration
     SUPER_ADMIN_EMAIL: str = ""
+    # Optional one-time bootstrap value for the org_settings singleton's
+    # display_name (app/models.py::OrgSettings, app/routers/org_settings.py).
+    # Applied only while the DB row still holds the seeded default — once an
+    # admin edits it from the Admin page, this env var is never consulted
+    # again, so a later restart/redeploy never overwrites their change.
+    ORG_DISPLAY_NAME: str = ""
     # Upload settings
     UPLOAD_MAX_MB: int = 20  # Maximum upload file size in MB
     UPLOAD_ALLOWED_EXTENSIONS: list[str] = [
@@ -37,10 +43,14 @@ class Settings(BaseSettings):
     S3_REGION: str = "eu-north-1"
     S3_ENDPOINT: str = ""  # optional override, e.g. for MinIO/R2; empty = AWS default
     # Bucket-level namespace root, analogous to STORAGE_ROOT. Defaults empty —
-    # every key the app builds already starts with "presentations/" (see
-    # app/storage/keys.py), so a non-empty default here would double it up
-    # into s3://bucket/presentations/presentations/... Only set this to add an
-    # *additional* segment above that (e.g. a per-environment namespace).
+    # every key the app builds already starts with "presentations/" or
+    # "branding/" (see app/storage/keys.py), so a non-empty default here
+    # would double it up into s3://bucket/presentations/presentations/...
+    # In the one-instance-per-organization deployment model, this is also
+    # the per-organization namespace segment for the shared S3 bucket — set
+    # it to e.g. "rforum/{org_slug}" per Helm release so every key (including
+    # the org's own logo/favicon under "branding/") lands under
+    # s3://bucket/rforum/{org_slug}/... with no separate ORG_PREFIX needed.
     S3_PREFIX: str = ""
     AWS_ACCESS_KEY_ID: str = ""  # empty = fall back to boto3's default credential chain
     AWS_SECRET_ACCESS_KEY: str = ""

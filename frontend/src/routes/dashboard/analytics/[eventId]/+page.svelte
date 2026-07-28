@@ -8,6 +8,7 @@
   import { rgbToHex, generateHighResPieChart } from '$lib/pdf/charts';
   import { loadMascot } from '$lib/pdf/mascot';
   import { BRAND, CHART_PALETTE, FOOTER_TEXT } from '$lib/pdf/constants';
+  import { orgSettings } from '$lib/stores';
   import CountUp from '$lib/components/CountUp.svelte';
 
   const eventId = $derived($page.params.eventId);
@@ -227,7 +228,7 @@
         pdfDoc.setFont('helvetica', 'bold');
         pdfDoc.setFontSize(10);
         pdfDoc.setTextColor(...brand.purple);
-        pdfDoc.text('Rforum', 24, 12.5);
+        pdfDoc.text($orgSettings.display_name, 24, 12.5);
         pdfDoc.setFont('helvetica', 'normal');
         pdfDoc.setFontSize(8.5);
         pdfDoc.setTextColor(...brand.muted);
@@ -326,7 +327,7 @@
         return curY;
       }
 
-      const mascotUri = await loadMascot();
+      const mascotUri = await loadMascot($orgSettings.logo_url);
 
       // Cover Page
       doc.setFillColor(255, 255, 255); doc.rect(0, 0, pw, ph, 'F');
@@ -338,7 +339,7 @@
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(10.5);
       doc.setTextColor(...brand.purple);
-      doc.text('Rforum Analytics', 30, 23.5);
+      doc.text(`${$orgSettings.display_name} Analytics`, 30, 23.5);
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(8.5);
       doc.setTextColor(...brand.muted);
@@ -770,7 +771,7 @@
   function ratingStars(n: number | null) { return n === null ? null : '★'.repeat(Math.round(n)) + '☆'.repeat(5 - Math.round(n)); }
 </script>
 
-<svelte:head><title>{eventTitle || 'Event'} – Analytics – Rforum</title></svelte:head>
+<svelte:head><title>{eventTitle || 'Event'} – Analytics – {$orgSettings.display_name}</title></svelte:head>
 
 <main class="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8">
   <!-- Breadcrumb -->

@@ -6,12 +6,19 @@
     adminUpdateUserRole,
     adminToggleUserActive,
     adminGetStorage,
+    adminGetOrgSettings,
+    adminUpdateOrgDisplayName,
+    adminUploadOrgLogo,
+    adminDeleteOrgLogo,
+    adminUploadOrgFavicon,
+    adminDeleteOrgFavicon,
     formatBytes,
-    isAuthenticated
+    isAuthenticated,
+    type OrgSettingsAdmin
   } from '$lib/api';
-  import { isSuperAdmin } from '$lib/stores';
+  import { isSuperAdmin, orgSettings } from '$lib/stores';
   import { onMount } from 'svelte';
-  import { Shield, User, Trash2, ToggleLeft, ToggleRight, ChevronDown, Search, RefreshCw, AlertTriangle, HardDrive } from 'lucide-svelte';
+  import { Shield, User, Trash2, ToggleLeft, ToggleRight, ChevronDown, Search, RefreshCw, AlertTriangle, HardDrive, Building2, Upload, X, Check } from 'lucide-svelte';
 
   type UserRecord = {
     id: string;
@@ -46,6 +53,135 @@
   let promotingId = $state<string | null>(null);
   let actionError = $state('');
 
+  // Organization Settings
+  let orgAdmin = $state<OrgSettingsAdmin | null>(null);
+  let orgSettingsLoading = $state(true);
+  let orgSettingsLoadError = $state('');
+
+  let orgNameInput = $state('');
+  let orgNameSaving = $state(false);
+  let orgNameError = $state('');
+  let orgNameSaved = $state(false);
+
+  let logoUploading = $state(false);
+  let logoDeleting = $state(false);
+  let logoError = $state('');
+  let logoCacheBust = $state(0);
+  let logoFileInput: HTMLInputElement | undefined = $state();
+
+  let faviconUploading = $state(false);
+  let faviconDeleting = $state(false);
+  let faviconError = $state('');
+  let faviconCacheBust = $state(0);
+  let faviconFileInput: HTMLInputElement | undefined = $state();
+
+  function applyOrgUpdate(updated: OrgSettingsAdmin) {
+    orgAdmin = updated;
+    orgSettings.set({
+      display_name: updated.display_name,
+      logo_url: updated.logo_url,
+      favicon_url: updated.favicon_url,
+      updated_at: updated.updated_at
+    });
+  }
+
+  async function loadOrgSettings() {
+    orgSettingsLoading = true;
+    orgSettingsLoadError = '';
+    try {
+      const s = await adminGetOrgSettings();
+      orgAdmin = s;
+      orgNameInput = s.display_name;
+    } catch (e: any) {
+      orgSettingsLoadError = e?.message || 'Failed to load organization settings';
+    } finally {
+      orgSettingsLoading = false;
+    }
+  }
+
+  async function saveOrgName() {
+    orgNameError = '';
+    orgNameSaved = false;
+    const trimmed = orgNameInput.trim();
+    if (!trimmed) {
+      orgNameError = 'Organization name cannot be empty';
+      return;
+    }
+    orgNameSaving = true;
+    try {
+      const updated = await adminUpdateOrgDisplayName(trimmed);
+      applyOrgUpdate(updated);
+      orgNameInput = updated.display_name;
+      orgNameSaved = true;
+      setTimeout(() => { orgNameSaved = false; }, 2500);
+    } catch (e: any) {
+      orgNameError = e?.message || 'Failed to update organization name';
+    } finally {
+      orgNameSaving = false;
+    }
+  }
+
+  async function handleLogoFileChange(e: Event) {
+    const file = (e.target as HTMLInputElement).files?.[0];
+    if (!file) return;
+    logoError = '';
+    logoUploading = true;
+    try {
+      applyOrgUpdate(await adminUploadOrgLogo(file));
+      logoCacheBust++;
+    } catch (e2: any) {
+      logoError = e2?.message || 'Failed to upload logo';
+    } finally {
+      logoUploading = false;
+      if (logoFileInput) logoFileInput.value = '';
+    }
+  }
+
+  async function removeLogo() {
+    logoError = '';
+    logoDeleting = true;
+    try {
+      applyOrgUpdate(await adminDeleteOrgLogo());
+      logoCacheBust++;
+    } catch (e: any) {
+      logoError = e?.message || 'Failed to remove logo';
+    } finally {
+      logoDeleting = false;
+    }
+  }
+
+  async function handleFaviconFileChange(e: Event) {
+    const file = (e.target as HTMLInputElement).files?.[0];
+    if (!file) return;
+    faviconError = '';
+    faviconUploading = true;
+    try {
+      applyOrgUpdate(await adminUploadOrgFavicon(file));
+      faviconCacheBust++;
+    } catch (e2: any) {
+      faviconError = e2?.message || 'Failed to upload favicon';
+    } finally {
+      faviconUploading = false;
+      if (faviconFileInput) faviconFileInput.value = '';
+    }
+  }
+
+  async function removeFavicon() {
+    faviconError = '';
+    faviconDeleting = true;
+    try {
+      applyOrgUpdate(await adminDeleteOrgFavicon());
+      faviconCacheBust++;
+    } catch (e: any) {
+      faviconError = e?.message || 'Failed to remove favicon';
+    } finally {
+      faviconDeleting = false;
+    }
+  }
+
+  let logoPreviewSrc = $derived(orgAdmin ? `${orgAdmin.logo_url}?v=${logoCacheBust}` : '');
+  let faviconPreviewSrc = $derived(orgAdmin ? `${orgAdmin.favicon_url}?v=${faviconCacheBust}` : '');
+
   async function load() {
     loading = true;
     error = '';
@@ -75,7 +211,7 @@
   onMount(async () => {
     if (!isAuthenticated()) { goto('/login'); return; }
     if (!$isSuperAdmin) { goto('/dashboard'); return; }
-    await Promise.all([load(), loadStorage()]);
+    await Promise.all([load(), loadStorage(), loadOrgSettings()]);
   });
 
   let filteredUsers = $derived(users.filter(u => {
@@ -381,6 +517,163 @@
             </tbody>
           </table>
         </div>
+      </div>
+    {/if}
+  </div>
+
+  <!-- ── Organization Settings section ───────────────────────────────── -->
+  <div class="mt-10">
+    <div class="flex items-center gap-3 mb-5">
+      <div class="w-10 h-10 flex items-center justify-center rounded-xl bg-brand-500/10">
+        <Building2 class="w-5 h-5 text-brand-500" />
+      </div>
+      <div>
+        <h2 class="text-xl font-heading font-bold tracking-wide text-surface-900 dark:text-surface-100">Organization Settings</h2>
+        <p class="text-sm text-surface-500">Name, logo, and favicon for this deployment — no redeploy needed</p>
+      </div>
+    </div>
+
+    {#if orgSettingsLoading}
+      <div class="flex justify-center py-12"><RefreshCw class="w-6 h-6 text-surface-400 animate-spin" /></div>
+    {:else if orgSettingsLoadError}
+      <div class="card text-center py-10 text-rose-500 text-sm">{orgSettingsLoadError}</div>
+    {:else if orgAdmin}
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+
+        <!-- Organization Name -->
+        <div class="card">
+          <h3 class="text-xs font-semibold text-surface-500 uppercase tracking-widest mb-3">Organization Name</h3>
+          <input
+            type="text"
+            bind:value={orgNameInput}
+            maxlength="120"
+            placeholder="Your Organization"
+            class="input-field text-sm mb-3"
+            disabled={orgNameSaving}
+          />
+          {#if orgNameError}
+            <p class="text-xs text-rose-500 mb-2">{orgNameError}</p>
+          {/if}
+          <div class="flex items-center gap-3">
+            <button
+              onclick={saveOrgName}
+              disabled={orgNameSaving || !orgNameInput.trim() || orgNameInput.trim() === orgAdmin.display_name}
+              class="btn-primary text-sm flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {#if orgNameSaving}
+                <RefreshCw class="w-3.5 h-3.5 animate-spin" /> Saving…
+              {:else}
+                Save Changes
+              {/if}
+            </button>
+            {#if orgNameSaved}
+              <span class="text-xs text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                <Check class="w-3.5 h-3.5" /> Saved
+              </span>
+            {/if}
+          </div>
+        </div>
+
+        <!-- Organization Logo -->
+        <div class="card">
+          <h3 class="text-xs font-semibold text-surface-500 uppercase tracking-widest mb-3">Organization Logo</h3>
+          <div class="flex items-center gap-4 mb-3">
+            <div class="w-16 h-16 rounded-xl bg-surface-50 dark:bg-surface-800/60 border border-surface-200 dark:border-surface-800 flex items-center justify-center overflow-hidden flex-shrink-0">
+              {#key logoPreviewSrc}
+                <img src={logoPreviewSrc} alt="Organization logo" class="max-w-full max-h-full object-contain" />
+              {/key}
+            </div>
+            <div class="flex-1 min-w-0">
+              <p class="text-xs text-surface-500">
+                {orgAdmin.has_custom_logo ? 'Custom logo configured' : 'Using default Rforum logo'}
+              </p>
+              <p class="text-xs text-surface-400 mt-0.5">PNG, JPEG, SVG, or WebP · up to 2 MB</p>
+            </div>
+          </div>
+          {#if logoError}
+            <p class="text-xs text-rose-500 mb-2">{logoError}</p>
+          {/if}
+          <div class="flex items-center gap-2">
+            <input
+              bind:this={logoFileInput}
+              type="file"
+              accept=".png,.jpg,.jpeg,.svg,.webp,image/png,image/jpeg,image/svg+xml,image/webp"
+              class="hidden"
+              onchange={handleLogoFileChange}
+            />
+            <button
+              onclick={() => logoFileInput?.click()}
+              disabled={logoUploading || logoDeleting}
+              class="btn-secondary text-sm flex items-center gap-2 disabled:opacity-50"
+            >
+              {#if logoUploading}
+                <RefreshCw class="w-3.5 h-3.5 animate-spin" /> Uploading…
+              {:else}
+                <Upload class="w-3.5 h-3.5" /> Upload New Logo
+              {/if}
+            </button>
+            {#if orgAdmin.has_custom_logo}
+              <button
+                onclick={removeLogo}
+                disabled={logoUploading || logoDeleting}
+                class="text-xs font-semibold text-surface-500 hover:text-rose-500 transition disabled:opacity-50 flex items-center gap-1"
+              >
+                <X class="w-3.5 h-3.5" /> {logoDeleting ? 'Removing…' : 'Remove'}
+              </button>
+            {/if}
+          </div>
+        </div>
+
+        <!-- Favicon -->
+        <div class="card">
+          <h3 class="text-xs font-semibold text-surface-500 uppercase tracking-widest mb-3">Favicon</h3>
+          <div class="flex items-center gap-4 mb-3">
+            <div class="w-16 h-16 rounded-xl bg-surface-50 dark:bg-surface-800/60 border border-surface-200 dark:border-surface-800 flex items-center justify-center overflow-hidden flex-shrink-0">
+              {#key faviconPreviewSrc}
+                <img src={faviconPreviewSrc} alt="Favicon" class="max-w-8 max-h-8 object-contain" />
+              {/key}
+            </div>
+            <div class="flex-1 min-w-0">
+              <p class="text-xs text-surface-500">
+                {orgAdmin.has_custom_favicon ? 'Custom favicon configured' : 'Using default Rforum favicon'}
+              </p>
+              <p class="text-xs text-surface-400 mt-0.5">ICO, PNG, or SVG · up to 256 KB</p>
+            </div>
+          </div>
+          {#if faviconError}
+            <p class="text-xs text-rose-500 mb-2">{faviconError}</p>
+          {/if}
+          <div class="flex items-center gap-2">
+            <input
+              bind:this={faviconFileInput}
+              type="file"
+              accept=".ico,.png,.svg,image/x-icon,image/png,image/svg+xml"
+              class="hidden"
+              onchange={handleFaviconFileChange}
+            />
+            <button
+              onclick={() => faviconFileInput?.click()}
+              disabled={faviconUploading || faviconDeleting}
+              class="btn-secondary text-sm flex items-center gap-2 disabled:opacity-50"
+            >
+              {#if faviconUploading}
+                <RefreshCw class="w-3.5 h-3.5 animate-spin" /> Uploading…
+              {:else}
+                <Upload class="w-3.5 h-3.5" /> Upload New Favicon
+              {/if}
+            </button>
+            {#if orgAdmin.has_custom_favicon}
+              <button
+                onclick={removeFavicon}
+                disabled={faviconUploading || faviconDeleting}
+                class="text-xs font-semibold text-surface-500 hover:text-rose-500 transition disabled:opacity-50 flex items-center gap-1"
+              >
+                <X class="w-3.5 h-3.5" /> {faviconDeleting ? 'Removing…' : 'Remove'}
+              </button>
+            {/if}
+          </div>
+        </div>
+
       </div>
     {/if}
   </div>
