@@ -1,8 +1,6 @@
 import { token as tokenStore } from './stores';
 
 const API_PREFIX = '/api';
-const DEFAULT_API_PORT = '8000';
-
 export interface PaginatedResult<T> {
   items: T[];
   total: number;
@@ -29,10 +27,8 @@ function buildListQuery(params: ListParams = {}): string {
 const guessApiOrigin = () => {
   if (typeof window === 'undefined') return '';
   if (import.meta.env?.VITE_API_ORIGIN) return import.meta.env.VITE_API_ORIGIN as string;
-  // In dev/prod when frontend runs on a different port, assume backend is same host on 8000
-  if (window.location.port && window.location.port !== DEFAULT_API_PORT) {
-    return `${window.location.protocol}//${window.location.hostname}:${DEFAULT_API_PORT}`;
-  }
+  // Keep API calls same-origin by default. Vite proxies /api in development,
+  // and production deployments can override this with VITE_API_ORIGIN.
   return window.location.origin;
 };
 
@@ -177,6 +173,17 @@ export async function updateSession(sessionId: string, payload: Record<string, u
 
 export async function startSession(sessionId: string) {
   return updateSession(sessionId, { is_live: true });
+}
+
+export async function sendScreenControl(sessionId: string, action: "refresh" | "toggle_qr", commandId: string) {
+  return fetchJson("/sessions/" + sessionId + "/screen-control", {
+    method: "POST",
+    body: JSON.stringify({ action, command_id: commandId })
+  }, true);
+}
+
+export async function getScreenControl(code: string) {
+  return fetchJson("/sessions/join/" + encodeURIComponent(code) + "/screen-control");
 }
 
 // ── Events ───────────────────────────────────────────

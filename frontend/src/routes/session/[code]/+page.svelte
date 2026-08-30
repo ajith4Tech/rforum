@@ -635,7 +635,9 @@
           <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 text-center animate-fade-in">
             <FileText class="w-10 h-10 text-purple-600 mx-auto mb-4" />
             <h1 class="text-2xl font-bold text-slate-900 dark:text-white mb-4">{activeSlide.content_json?.title}</h1>
-            <p class="text-slate-600 dark:text-slate-300 leading-relaxed">{activeSlide.content_json?.body}</p>
+            <div class="text-slate-600 dark:text-slate-300 leading-relaxed prose dark:prose-invert max-w-none text-left my-4">
+              {@html activeSlide.content_json?.body || ''}
+            </div>
               {#if (activeSlide.content_json?.file_url || activeSlide.content_json?.has_file) && session?.id}
                 <div style="-webkit-touch-callout: none; -webkit-user-select: none;">
                   <PageImageViewer

@@ -56,6 +56,25 @@
       : 'Feedback'
   );
   const promptText = $derived(slide?.type === 'POLL' ? slide?.content_json?.question : slide?.content_json?.prompt);
+  function plainText(value: string): string {
+    return (value || '').replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+  const displayPrompt = $derived(plainText(promptText || ''));
+
+  function getFitTitleStyle(text: string, type: 'title' | 'question' = 'title'): string {
+    const len = (text || '').trim().length;
+    if (!len) return '';
+    if (type === 'question') {
+      if (len < 30) return 'font-size: clamp(1.35rem, 3vw, 2.2rem); line-height: 1.15; word-break: break-word; overflow-wrap: anywhere;';
+      if (len < 70) return 'font-size: clamp(1.1rem, 2.4vw, 1.8rem); line-height: 1.18; word-break: break-word; overflow-wrap: anywhere;';
+      if (len < 120) return 'font-size: clamp(0.95rem, 1.9vw, 1.4rem); line-height: 1.24; word-break: break-word; overflow-wrap: anywhere;';
+      return 'font-size: clamp(0.82rem, 1.55vw, 1.1rem); line-height: 1.28; word-break: break-word; overflow-wrap: anywhere;';
+    }
+    if (len < 24) return 'font-size: clamp(1.8rem, 4vw, 3rem); line-height: 1.1; word-break: break-word; overflow-wrap: anywhere;';
+    if (len < 56) return 'font-size: clamp(1.35rem, 2.9vw, 2.2rem); line-height: 1.15; word-break: break-word; overflow-wrap: anywhere;';
+    if (len < 110) return 'font-size: clamp(1.05rem, 2vw, 1.55rem); line-height: 1.22; word-break: break-word; overflow-wrap: anywhere;';
+    return 'font-size: clamp(0.85rem, 1.55vw, 1.1rem); line-height: 1.28; word-break: break-word; overflow-wrap: anywhere;';
+  }
 
   // ── Guest submission state ──────────────────────────
   // "Already responded" is persisted per-guest so a page refresh doesn't
@@ -253,7 +272,7 @@
 {#if variant === 'guest'}
   <div class="text-center mb-4">
     <svelte:component this={typeIcon} class="w-10 h-10 text-purple-600 mx-auto mb-2" />
-    <h1 class="text-2xl font-bold text-slate-900 dark:text-white">{promptText}</h1>
+    <h1 class="text-2xl font-bold text-slate-900 dark:text-white">{displayPrompt}</h1>
   </div>
 
   {#if slide.type === 'POLL'}
@@ -360,45 +379,45 @@
 
 {:else if variant === 'screen'}
   <div class="flex flex-col gap-4 w-full">
-    <div class="text-center">
-      <div class="inline-flex items-center gap-2 bg-white/10 text-white/80 text-xs font-bold uppercase tracking-widest px-3 py-1 rounded-full mb-3">
+    <div class="text-center space-y-1">
+      <div class="inline-flex items-center gap-2 bg-purple-500/10 text-purple-600 dark:text-purple-400 text-xs font-bold uppercase tracking-widest px-3 py-1 rounded-full border border-purple-500/20">
         <svelte:component this={typeIcon} class="w-3.5 h-3.5" /> {typeLabel}
       </div>
-      <h1 class="text-4xl font-heading font-bold text-white leading-snug">{promptText}</h1>
-      <p class="text-white/40 mt-1 text-sm">{responses.length} response{responses.length === 1 ? '' : 's'}</p>
+      <h1 class="font-heading font-bold text-slate-900 dark:text-slate-100 leading-snug" style={getFitTitleStyle(displayPrompt, 'question')}>{displayPrompt}</h1>
+      <p class="text-slate-400 text-xs">{responses.length} response{responses.length === 1 ? '' : 's'}</p>
     </div>
 
     {#if slide.type === 'POLL'}
-      <div class="space-y-3 max-w-xl mx-auto w-full">
+      <div class="space-y-3 max-w-xl mx-auto w-full my-auto">
         {#each pollResults() as row, i}
-          {@const hues = ['bg-brand-500', 'bg-cyan-500', 'bg-emerald-500', 'bg-amber-500', 'bg-rose-500', 'bg-violet-500']}
+          {@const hues = ['bg-purple-600', 'bg-emerald-500', 'bg-cyan-500', 'bg-amber-500', 'bg-rose-500']}
           <div class="space-y-1">
-            <div class="flex items-center justify-between text-sm">
-              <span class="font-semibold text-white/80 text-lg">{row.label}</span>
-              <span class="font-mono font-bold text-white text-xl">{row.percent}%</span>
+            <div class="flex items-center justify-between text-sm sm:text-base">
+              <span class="font-semibold text-slate-800 dark:text-slate-200">{row.label}</span>
+              <span class="font-mono font-bold text-purple-600 dark:text-purple-400">{row.percent}%</span>
             </div>
-            <div class="relative h-10 bg-white/5 rounded-xl overflow-hidden">
+            <div class="relative h-9 bg-slate-100 dark:bg-slate-950 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800">
               <div class="absolute inset-y-0 left-0 rounded-xl transition-all duration-700 {hues[i % hues.length]}"
                 style={`width: ${row.percent}%; min-width: ${row.percent > 0 ? '12px' : '0'}`}></div>
-              <span class="absolute inset-y-0 right-3 flex items-center text-white/50 text-sm font-mono">{row.count}</span>
+              <span class="absolute inset-y-0 right-3 flex items-center text-slate-500 dark:text-slate-400 text-xs font-mono">{row.count}</span>
             </div>
           </div>
         {/each}
       </div>
     {:else if slide.type === 'QNA'}
       {#if responses.length === 0}
-        <div class="text-center text-white/30 text-lg py-8">No questions yet…</div>
+        <div class="text-center text-slate-400 text-base py-8">No questions submitted yet…</div>
       {:else}
-        <div class="max-h-[60vh] overflow-y-auto space-y-3 pr-1">
+        <div class="max-h-[60vh] overflow-y-auto space-y-3 pr-1 my-auto">
           {#each [...responses].sort((a, b) => (b.upvotes ?? 0) - (a.upvotes ?? 0)) as response (response.id)}
-            <div class="flex items-start gap-4 bg-white/5 border border-white/10 rounded-2xl px-5 py-4">
-              <div class="flex flex-col items-center gap-0.5 flex-shrink-0 min-w-[2.5rem]">
-                <span class="text-2xl font-bold text-brand-400">{response.upvotes ?? 0}</span>
-                <span class="text-[10px] text-white/30 uppercase tracking-wide">votes</span>
+            <div class="flex items-start gap-4 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl p-4">
+              <div class="flex flex-col items-center justify-center shrink-0 px-3 py-1.5 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400 font-bold">
+                <span class="text-xl font-bold">{response.upvotes ?? 0}</span>
+                <span class="text-[9px] uppercase tracking-wider">votes</span>
               </div>
-              <div class="flex-1">
-                <p class="text-white text-lg font-medium leading-snug">{response.value}</p>
-                <p class="text-white/30 text-xs mt-1">{response.name || response.guest_identifier}</p>
+              <div class="flex-1 min-w-0">
+                <p class="text-slate-800 dark:text-slate-200 text-base font-medium leading-relaxed">{response.value}</p>
+                <p class="text-slate-400 text-xs mt-1">{response.name || response.guest_identifier || 'Anonymous'}</p>
               </div>
             </div>
           {/each}
@@ -406,37 +425,37 @@
       {/if}
     {:else if slide.type === 'WORD_CLOUD'}
       {#if responses.length === 0}
-        <div class="text-center text-white/30 text-lg py-12">Waiting for responses…</div>
+        <div class="text-center text-slate-400 text-base py-8">Waiting for audience words…</div>
       {:else}
-        {@const palette = ['text-brand-400', 'text-cyan-400', 'text-emerald-400', 'text-amber-400', 'text-rose-400', 'text-violet-400']}
-        <div class="flex flex-wrap items-center justify-center gap-x-6 gap-y-3 max-h-[60vh] overflow-y-auto p-4">
+        {@const palette = ['text-purple-600 dark:text-purple-400', 'text-cyan-600 dark:text-cyan-400', 'text-emerald-600 dark:text-emerald-400', 'text-amber-600 dark:text-amber-400', 'text-rose-600 dark:text-rose-400']}
+        <div class="flex flex-wrap items-center justify-center gap-x-6 gap-y-4 max-h-[60vh] overflow-y-auto p-4 my-auto">
           {#each wordCloudData() as item, i}
-            <span class="font-heading font-bold transition-all duration-500 {palette[i % palette.length]}"
-              style={`font-size: ${item.size}rem; opacity: ${0.55 + (item.count / (responses.length || 1)) * 0.45}`}>{item.word}</span>
+            <span class="font-heading font-extrabold transition-all duration-500 {palette[i % palette.length]}"
+              style={`font-size: ${item.size * 1.2}rem; opacity: ${0.6 + (item.count / (responses.length || 1)) * 0.4}`}>{item.word}</span>
           {/each}
         </div>
       {/if}
     {:else if slide.type === 'FEEDBACK' && isRatingOnly}
-      <div class="text-center py-6">
-        <div class="text-6xl font-heading font-bold text-amber-400">{averageRating().toFixed(1)}</div>
+      <div class="text-center py-6 my-auto">
+        <div class="text-6xl font-heading font-bold text-amber-500">{averageRating().toFixed(1)}</div>
         <div class="flex items-center justify-center gap-1 mt-2">
           {#each [1, 2, 3, 4, 5] as n}
-            <Star class="w-6 h-6 {n <= Math.round(averageRating()) ? 'text-amber-400 fill-amber-400' : 'text-white/20'}" />
+            <Star class="w-6 h-6 {n <= Math.round(averageRating()) ? 'text-amber-400 fill-amber-400' : 'text-slate-300 dark:text-slate-700'}" />
           {/each}
         </div>
       </div>
     {:else if slide.type === 'FEEDBACK'}
       {#if responses.length === 0}
-        <div class="text-center text-white/30 text-lg py-8">No feedback yet…</div>
+        <div class="text-center text-slate-400 text-base py-8">No feedback responses yet…</div>
       {:else}
-        <div class="max-h-[60vh] overflow-y-auto space-y-3 pr-1">
+        <div class="max-h-[60vh] overflow-y-auto space-y-3 pr-1 my-auto">
           {#each responses as response (response.id)}
-            <div class="bg-white/5 border border-white/10 rounded-2xl px-5 py-4">
-              <div class="flex items-center justify-between mb-2">
-                <span class="text-white/30 text-xs">{response.name || response.guest_identifier}</span>
-                {#if response.rating}<span class="text-amber-400 text-sm font-bold">{'★'.repeat(response.rating)}{'☆'.repeat(5 - response.rating)}</span>{/if}
+            <div class="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl p-4">
+              <div class="flex items-center justify-between mb-1 text-xs text-slate-400">
+                <span>{response.name || response.guest_identifier || 'Anonymous'}</span>
+                {#if response.rating}<span class="text-amber-400 font-bold">{'★'.repeat(response.rating)}{'☆'.repeat(5 - response.rating)}</span>{/if}
               </div>
-              <p class="text-white text-lg leading-snug">{response.value}</p>
+              <p class="text-slate-800 dark:text-slate-200 text-base">{response.value}</p>
             </div>
           {/each}
         </div>
@@ -453,7 +472,7 @@
     </div>
 
     {#if !editing}
-      <p class="text-base font-medium text-surface-200">{promptText}</p>
+      <p class="text-base font-medium text-surface-200">{displayPrompt}</p>
     {:else if slide.type === 'POLL'}
       <input class="input-field" type="text" bind:value={editQuestion} placeholder="Poll question" />
       <div class="space-y-2">

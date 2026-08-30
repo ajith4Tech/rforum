@@ -202,3 +202,67 @@
     @apply text-surface-700;
   }
 }
+
+/* ── Presentation content-slide editor shell ──────────────────────────── */
+@layer components {
+  .pres-editor-shell {
+    @apply rounded-2xl overflow-hidden flex flex-col;
+    border: 1px solid;
+  }
+
+  [data-theme="dark"] .pres-editor-shell {
+    @apply border-surface-800 bg-surface-900;
+  }
+  [data-theme="light"] .pres-editor-shell {
+    @apply border-surface-200 bg-white;
+  }
+
+  /* Title bar */
+  .pres-title-bar {
+    @apply flex items-center gap-3 px-4 py-3;
+    border-bottom: 1px solid;
+  }
+  [data-theme="dark"] .pres-title-bar { @apply border-surface-800 bg-surface-950/60; }
+  [data-theme="light"] .pres-title-bar { @apply border-surface-200 bg-surface-50; }
+
+  .pres-title-input {
+    @apply flex-1 bg-transparent border-none outline-none text-xl font-heading font-bold
+           placeholder-surface-500 focus:ring-0 focus:outline-none;
+    min-width: 0;
+    letter-spacing: 0.02em;
+  }
+  [data-theme="dark"] .pres-title-input { @apply text-surface-100; }
+  [data-theme="light"] .pres-title-input { @apply text-surface-950; }
+
+  .pres-title-actions {
+    @apply flex items-center gap-2 flex-shrink-0;
+  }
+
+  .pres-save-status {
+    @apply text-xs font-medium;
+    transition: opacity 0.3s;
+  }
+  .pres-save-status.saving { @apply text-surface-400; }
+  .pres-save-status.saved  { @apply text-emerald-500; }
+
+  /* RCE wrapper fills the shell */
+  .pres-rce {
+    @apply flex-1;
+    min-height: 340px;
+    /* override internal border/radius since the shell provides them */
+    border: none !important;
+    border-radius: 0 !important;
+  }
+
+  /* File row */
+  .pres-file-row {
+    @apply px-4 py-3;
+    border-top: 1px solid;
+  }
+  [data-theme="dark"] .pres-file-row { @apply border-surface-800; }
+  [data-theme="light"] .pres-file-row { @apply border-surface-200; }
+
+  .pres-upload-label {
+    @apply inline-flex items-center;
+  }
+}

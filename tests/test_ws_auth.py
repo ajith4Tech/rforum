@@ -169,11 +169,11 @@ class TestModeratorOnlyEvents:
                 assert received["event"] == "slide_change"
                 assert received["data"]["slide_id"] == "abc"
 
-    def test_moderator_can_send_all_three_control_events(self, ws_client, seeded):
+    def test_moderator_can_send_all_control_events(self, ws_client, seeded):
         ids, code = seeded
         with ws_client.websocket_connect(f"/ws/{code}") as guest_ws:
             with ws_client.websocket_connect(f"/ws/{code}?token={_owner_token(ids)}") as moderator_ws:
-                for event in ("slide_change", "page_change", "session_update"):
+                for event in ("slide_change", "page_change", "session_update", "screen_control"):
                     moderator_ws.send_json({"event": event, "data": {}})
                     received = guest_ws.receive_json()
                     assert received["event"] == event

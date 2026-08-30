@@ -113,6 +113,7 @@ class SessionCreate(BaseModel):
 class SessionUpdate(BaseModel):
     title: str | None = Field(None, min_length=1, max_length=255)
     is_live: bool | None = None
+    qr_visible: bool | None = None
     moderator_name: str | None = Field(None, max_length=255)
     speaker_names: list[str] | None = None
 
@@ -143,6 +144,11 @@ class SessionUpdate(BaseModel):
         return cleaned or None
 
 
+class ScreenControl(BaseModel):
+    action: Literal["refresh", "maximize_qr", "toggle_qr"]
+    command_id: str | None = Field(None, min_length=1, max_length=100)
+
+
 class SessionOut(BaseModel):
     id: uuid.UUID
     owner_id: uuid.UUID
@@ -152,6 +158,7 @@ class SessionOut(BaseModel):
     moderator_name: str | None = None
     speaker_names: list[str] = Field(default_factory=list)
     is_live: bool
+    qr_visible: bool = True
     presentation_id: uuid.UUID | None = None
     created_at: datetime
 

@@ -32,12 +32,12 @@ SERVER_ID = str(uuid.uuid4())
 # appears live to the moderator and every other viewer without ever hitting
 # the DB, rate limits, or validation.
 ALLOWED_WS_EVENTS = frozenset({
-    "slide_change", "page_change", "session_update", "heartbeat",
+    "slide_change", "page_change", "session_update", "screen_control", "heartbeat",
 })
 
 # Control events that only an authenticated session owner (or admin) may relay.
 # Everyone else connecting to a session code is a guest or a read-only screen.
-MODERATOR_ONLY_EVENTS = frozenset({"slide_change", "page_change", "session_update"})
+MODERATOR_ONLY_EVENTS = frozenset({"slide_change", "page_change", "session_update", "screen_control"})
 
 # Maximum raw message size accepted from a client (64 KB)
 MAX_WS_MESSAGE_BYTES = 65_536
@@ -252,6 +252,7 @@ async def websocket_endpoint(websocket: WebSocket, session_code: str):
                     }))
                     continue
                 message.setdefault("origin", SERVER_ID)
+                logger.info("ws_relay session=%s role=%s event=%s", session_code, role, event)
                 await manager.broadcast(session_code, message)
                 # Local sockets already got the broadcast above — a Redis
                 # publish failure here only means OTHER app processes miss

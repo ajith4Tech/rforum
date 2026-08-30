@@ -111,6 +111,7 @@ class Session(Base):
     moderator_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     speaker_names: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     is_live: Mapped[bool] = mapped_column(Boolean, default=False)
+    qr_visible: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true", nullable=False)
     # Optional link to a Presentation. NULL for every legacy session — the sole flag
     # the backend/frontend use to pick between the legacy slide-list flow and the
     # new Presentation Timeline flow.

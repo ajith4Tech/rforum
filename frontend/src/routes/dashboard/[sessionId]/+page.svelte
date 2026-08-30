@@ -1,16 +1,18 @@
 <script lang="ts">
   import {
-    getSession, updateSession, createSlide, updateSlide, deleteSlide, listResponses, getPageImageUrl,
+    getSession, updateSession, sendScreenControl, createSlide, updateSlide, deleteSlide, listResponses, getPageImageUrl,
     getSessionPresentation, uploadPresentation, replacePresentation, regeneratePresentation,
     insertTimelineItem, updateTimelineItem, deleteTimelineItem, reorderTimelineItems, activateTimelineItem,
     attachPresentation, detachPresentation, deletePresentation, uploadSlideFile
   } from '$lib/api';
+  import { page } from '$app/stores';
   import { RforumWebSocket } from '$lib/ws';
   import type { ConnectionStatus as WsStatus } from '$lib/ws';
   import { token } from '$lib/stores';
   import { get } from 'svelte/store';
   import { onMount, onDestroy } from 'svelte';
-  import { beforeNavigate } from '$app/navigation';
+  import { beforeNavigate, goto } from '$app/navigation';
+  import Modal from '$lib/components/Modal.svelte';
   import {
     BarChart3,
     MessageSquare,
@@ -25,10 +27,13 @@
   import ZoomableImageViewer from '$lib/components/ZoomableImageViewer.svelte';
   import PresentationWorkspace from '$lib/components/timeline/PresentationWorkspace.svelte';
   import PresentationEmptyState from '$lib/components/timeline/PresentationEmptyState.svelte';
+  import RichContentEditor from '$lib/components/RichContentEditor.svelte';
+  import DeckEditor from '$lib/components/DeckEditor.svelte';
+  import DeckView from '$lib/components/DeckView.svelte';
   import { upsertTimelineItemFromWs } from '$lib/timelineTypes';
   import { UndoManager, type IdBox } from '$lib/undoManager';
 
-  let sessionId = $state('');
+  const sessionId = $derived($page.params.sessionId);
 
   let session: any = $state(null);
   let slides: any[] = $state([]);
@@ -37,6 +42,7 @@
   let ws: RforumWebSocket | null = $state(null);
   let wsStatus: WsStatus = $state('disconnected');
   let loading = $state(true);
+  const editorMode = $derived($page.url.searchParams.get('mode') === 'editor');
   let errorMessage = $state('');
   let contentTitle = $state('');
   let contentBody = $state('');
@@ -54,6 +60,15 @@
   let savingModeratorSetup = $state(false);
   let notesSavedFlash = $state(false);
   let notesSaveTimer: ReturnType<typeof setTimeout> | null = null;
+  let screenCommandFlash = $state('');
+  let screenCommandTimer: ReturnType<typeof setTimeout> | null = null;
+  let deckEditorDirty = $state(false);
+  let deckEditorSave: null | (() => Promise<void>) = null;
+  let leavePromptOpen = $state(false);
+  let leavePromptTitle = $state('');
+  let leavePromptDescription = $state('');
+  let pendingLeaveUrl = $state('');
+  let bypassLeaveGuard = false;
   const activeSlide = $derived(getActiveSlide());
   const activeType = $derived(activeSlide?.type?.toUpperCase());
 
@@ -147,12 +162,17 @@
         return false;
     }
   });
-  const hasUnsavedChanges = $derived(legacyFormDirty || timelineFormDirty);
+  const hasUnsavedChanges = $derived(deckEditorDirty || legacyFormDirty);
   let saveError = $state('');
   let saveErrorTimeout: ReturnType<typeof setTimeout> | null = null;
 
   beforeNavigate((nav) => {
-    if (hasUnsavedChanges && !confirm('You have unsaved changes. Leave this page anyway?')) {
+    if (bypassLeaveGuard) return;
+    if (hasUnsavedChanges && nav.to?.url) {
+      pendingLeaveUrl = nav.to.url.pathname + nav.to.url.search + nav.to.url.hash;
+      leavePromptTitle = 'Unsaved changes';
+      leavePromptDescription = 'Save your changes before leaving Edit Deck?';
+      leavePromptOpen = true;
       nav.cancel();
     }
   });
@@ -218,12 +238,10 @@
 
   onMount(async () => {
     try {
-      sessionId = typeof window !== 'undefined'
-        ? window.location.pathname.split('/').pop() || ''
-        : '';
       session = await getSession(sessionId);
 
       slides = session.slides || [];
+      session.qr_visible = session.qr_visible ?? true;
       moderatorName = session.moderator_name || '';
       speakerNames = Array.isArray(session.speaker_names) ? [...session.speaker_names] : [];
 
@@ -245,8 +263,8 @@
       // session's moderator (required to send slide_change/page_change/session_update)
       ws = new RforumWebSocket(session.unique_code, { token: get(token) || undefined });
       ws.onStatusChange((s) => { wsStatus = s; });
-      ws.connect();
       ws.onMessage(handleWsMessage);
+      ws.connect();
     } catch (error) {
       errorMessage = error?.message || 'Failed to load session. Please try again later.';
     } finally {
@@ -258,6 +276,7 @@
     if (notesSaveTimer) clearTimeout(notesSaveTimer);
     if (saveStateTimeout) clearTimeout(saveStateTimeout);
     if (saveErrorTimeout) clearTimeout(saveErrorTimeout);
+    if (screenCommandTimer) clearTimeout(screenCommandTimer);
     ws?.disconnect();
   });
 
@@ -319,6 +338,68 @@
       if (session && msg.data?.is_live !== undefined) {
         session = { ...session, is_live: msg.data.is_live };
       }
+      if (session && msg.data?.qr_visible !== undefined) {
+        session = { ...session, qr_visible: msg.data.qr_visible };
+      }
+    }
+  }
+
+  async function saveDeckEditor() {
+    if (deckEditorSave) {
+      await deckEditorSave();
+    }
+  }
+
+  function requestNavigation(url: string) {
+    if (hasUnsavedChanges) {
+      pendingLeaveUrl = url;
+      leavePromptTitle = 'Unsaved changes';
+      leavePromptDescription = 'Save your changes before leaving Edit Deck?';
+      leavePromptOpen = true;
+      return;
+    }
+    goto(url);
+  }
+
+  async function handleLeavePromptDiscard() {
+    if (!pendingLeaveUrl) {
+      leavePromptOpen = false;
+      return;
+    }
+    bypassLeaveGuard = true;
+    leavePromptOpen = false;
+    const target = pendingLeaveUrl;
+    pendingLeaveUrl = '';
+    try {
+      await goto(target);
+    } finally {
+      bypassLeaveGuard = false;
+    }
+  }
+
+  function handleLeavePromptCancel() {
+    leavePromptOpen = false;
+    pendingLeaveUrl = '';
+  }
+
+  async function handleLeavePromptSave() {
+    if (!pendingLeaveUrl) {
+      leavePromptOpen = false;
+      return;
+    }
+    try {
+      await saveDeckEditor();
+    } catch {
+      return;
+    }
+    bypassLeaveGuard = true;
+    leavePromptOpen = false;
+    const target = pendingLeaveUrl;
+    pendingLeaveUrl = '';
+    try {
+      await goto(target);
+    } finally {
+      bypassLeaveGuard = false;
     }
   }
 
@@ -326,9 +407,72 @@
     slideResponses = await listResponses(slideId);
   }
 
+  async function inspectDeckItem(itemId: string) {
+    if (session?.presentation_id) {
+      await activatePresentationItem(itemId);
+      return;
+    }
+    await activateSlide(itemId);
+  }
+
+  function openPresentation() {
+    if (session?.unique_code) window.open('/screen/' + session.unique_code, '_blank', 'noopener,noreferrer');
+  }
+
+  async function startPresentation() {
+    openPresentation();
+    if (!session?.is_live) {
+      await toggleLive();
+    }
+  }
+
   async function toggleLive() {
     session = await updateSession(sessionId, { is_live: !session.is_live });
     ws?.send('session_update', { is_live: session.is_live });
+  }
+
+  function notifyLocalPresentationScreen(action: "refresh" | "toggle_qr", commandId: string) {
+    if (!session?.unique_code) return;
+    try {
+      localStorage.setItem(
+        "rforum_screen_control_" + session.unique_code,
+        JSON.stringify({ action, command_id: commandId, sentAt: Date.now() })
+      );
+    } catch {
+      // The authenticated API delivery below remains available when storage is blocked.
+    }
+  }
+
+  async function refreshPresentationScreen() {
+    if (!session?.unique_code) return;
+    console.log('[dashboard] sending screen_control refresh', { session: session.unique_code });
+    screenCommandFlash = 'Refreshing screen';
+    if (screenCommandTimer) clearTimeout(screenCommandTimer);
+    const commandId = crypto.randomUUID();
+    notifyLocalPresentationScreen("refresh", commandId);
+    try {
+      await sendScreenControl(sessionId, "refresh", commandId);
+    } catch (error) {
+      console.warn("[dashboard] HTTP screen refresh failed; falling back to WebSocket", error);
+      ws?.send("screen_control", { action: "refresh", command_id: commandId });
+    }
+    screenCommandTimer = setTimeout(() => { screenCommandFlash = ''; }, 1500);
+  }
+
+  async function maximizePresentationQr() {
+    if (!session?.unique_code) return;
+    console.log('[dashboard] sending screen_control toggle_qr', { session: session.unique_code });
+    screenCommandFlash = 'Maximizing QR';
+    if (screenCommandTimer) clearTimeout(screenCommandTimer);
+    const commandId = crypto.randomUUID();
+    notifyLocalPresentationScreen("toggle_qr", commandId);
+    try {
+      await sendScreenControl(sessionId, "toggle_qr", commandId);
+    } catch (error) {
+      console.warn("[dashboard] HTTP QR toggle failed; falling back to WebSocket", error);
+      ws?.send("screen_control", { action: "toggle_qr", command_id: commandId });
+    }
+    screenCommandTimer = setTimeout(() => { screenCommandFlash = ''; }, 1500);
   }
 
   function addSpeakerName() {
@@ -454,7 +598,7 @@
       case 'FEEDBACK':
         return { prompt: 'Share your thoughts...' };
       case 'CONTENT':
-        return { title: 'Slide Title', body: 'Slide content goes here.' };
+        return { title: 'New Slide', body: '<p>Start typing your content here.</p>' };
       case 'WORD_CLOUD':
         return { prompt: 'What comes to mind?' };
       default:
@@ -467,8 +611,7 @@
     await updateSlide(sessionId, slideId, { is_active: true });
     slides = slides.map((s) => ({ ...s, is_active: s.id === slideId }));
     activeSlideId = slideId;
-    await loadResponses(slideId);
-    ws?.send('slide_change', { slide_id: slideId, slide: slides.find((s) => s.id === slideId), activation: true });
+    void loadResponses(slideId);
   }
 
   function startEditing(slideId: string) {
@@ -632,11 +775,15 @@
     if (!active) return;
     const prevContentJson = { ...active.content_json };
     const nextContentJson = { ...active.content_json, title: contentTitle, body: contentBody };
-    const updated = await updateSlide(sessionId, active.id, { content_json: nextContentJson });
-    slides = slides.map((s) => (s.id === active.id ? updated : s));
-    ws?.send('slide_change', { slide_id: active.id, slide: updated, activation: false });
+    await withSaveState(async () => {
+      const updated = await updateSlide(sessionId, active.id, { content_json: nextContentJson });
+      slides = slides.map((s) => (s.id === active.id ? updated : s));
+      ws?.send('slide_change', { slide_id: active.id, slide: updated, activation: false });
+    });
     pushSlideContentUndo(active.id, prevContentJson, nextContentJson, 'Edit content slide');
+    stopEditing();
   }
+
 
   async function uploadContentFile() {
     const active = getActiveSlide();
@@ -1017,11 +1164,8 @@
 <div>
   <!-- Sub-header with session actions -->
   <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5 px-4 sm:px-6 lg:px-8 py-2.5 border-b border-surface-200 backdrop-blur-sm">
-    <button
-      onclick={() => {
-        if (hasUnsavedChanges && !confirm('You have unsaved changes. Leave this page anyway?')) return;
-        window.location.href = '/dashboard';
-      }}
+      <button
+        onclick={() => requestNavigation('/dashboard')}
       class="text-sm font-medium text-surface-500 hover:text-surface-100 transition"
     >&larr; Back to dashboard</button>
     <div class="flex items-center justify-between sm:justify-end gap-3 w-full sm:w-auto">
@@ -1047,9 +1191,7 @@
           >↷ Redo</button>
         </div>
       {/if}
-      {#if session?.unique_code}
-        <a class="btn-secondary" href={`/screen/${session.unique_code}`} target="_blank" rel="noreferrer">Open screen</a>
-      {/if}
+      {#if editorMode}<button class="btn-secondary" onclick={() => requestNavigation(`/dashboard/${sessionId}`)}>Back to deck</button>{/if}
       <span class="text-sm text-surface-400 font-mono">{session?.unique_code}</span>
     </div>
   </div>
@@ -1075,6 +1217,23 @@
       </div>
     {:else if errorMessage}
       <div class="card text-center text-red-500 py-10 px-6">{errorMessage}</div>
+    {:else if !editorMode}
+      <DeckView
+        {session}
+        {presentation}
+        {timeline}
+        {slides}
+        {activeSlideId}
+        responses={session?.presentation_id ? timelineResponses : slideResponses}
+        {wsStatus}
+        onAddSlide={addSlide}
+        onSelect={inspectDeckItem}
+        onEdit={() => requestNavigation(`/dashboard/${sessionId}?mode=editor`)}
+        onPresent={startPresentation}
+        onToggleLive={toggleLive}
+        onRefreshPresentation={refreshPresentationScreen}
+        onMaximizeQr={maximizePresentationQr}
+      />
     {:else}
       {#if !session?.presentation_id}
         <PresentationEmptyState
@@ -1092,6 +1251,7 @@
           {timeline}
           responses={timelineResponses}
           {wsStatus}
+        onAddSlide={addSlide}
           {saveState}
           {canUndo}
           {canRedo}
@@ -1113,195 +1273,86 @@
           onRedo={performRedo}
         />
       {:else}
-      <div class="grid grid-cols-12 gap-5">
-        <Sidebar
-          {session}
-          {slides}
-          {activeSlideId}
-          {slideIcons}
-          {slideLabels}
-          {wsStatus}
-          onToggleLive={toggleLive}
-          onAddSlide={addSlide}
-          onActivateSlide={activateSlide}
-          onStartEditing={startEditing}
-          onRemoveSlide={removeSlide}
-          onDuplicateSlide={duplicateSlide}
-          onMoveSlide={moveSlide}
-          onReorder={reorderSlides}
-        />
-
-        <section class="col-span-12 lg:col-span-9 order-1 lg:order-2">
-          {#if !activeSlide}
-            <div class="card text-center text-surface-400 py-20">Select a slide to get started.</div>
-          {:else}
-            {#if activeType === 'POLL'}
-              <div class="card p-4 sm:p-5 space-y-3">
-                <div class="text-lg font-semibold">Poll</div>
-                {#if activeSlide.content_json?.question && editingSlideId !== activeSlideId}
-                  <p class="text-base font-medium text-surface-200">{activeSlide.content_json.question}</p>
-                {/if}
-                {#if editingSlideId === activeSlideId}
-                  <input class="input-field" type="text" bind:value={pollQuestion} placeholder="Poll question" />
-                  <div class="space-y-2">
-                    {#each pollOptions as option, index (index)}
-                      <div class="flex items-center gap-2">
-                        <input
-                          class="input-field flex-1"
-                          type="text"
-                          value={option}
-                          oninput={(event) => updatePollOption(index, event.currentTarget.value)}
-                          placeholder={`Option ${index + 1}`}
-                        />
-                        <button onclick={() => removePollOption(index)} class="btn-danger text-xs px-3 py-1.5">Remove</button>
-                      </div>
-                    {/each}
-                  </div>
-                  <div class="flex items-center gap-2">
-                    <button onclick={addPollOption} class="btn-secondary">Add option</button>
-                    <button onclick={savePollSlide} class="btn-primary text-sm">Save</button>
-                    <button onclick={stopEditing} class="btn-secondary">Done</button>
-                  </div>
-                {/if}
-                <div class="border border-surface-200 rounded-xl p-4">
-                  <div class="text-sm font-semibold mb-3">Live results</div>
-                  <div class="flex items-end gap-4">
-                    {#each getPollResults(activeSlide) as row}
-                      <div class="flex flex-col items-center gap-2 flex-1">
-                        <div class="relative w-full h-28 bg-surface-100 rounded-lg overflow-hidden">
-                          <div
-                            class="absolute bottom-0 left-0 right-0 bg-brand-500 rounded-lg transition-all duration-500"
-                            style={`height: ${row.percent}%; min-height: ${row.percent > 0 ? '6px' : '0px'}`}
-                          ></div>
-                        </div>
-                        <div class="text-xs text-surface-500">{row.label}</div>
-                        <div class="text-xs text-surface-400">{row.percent}%</div>
-                      </div>
-                    {/each}
-                  </div>
-                </div>
-              </div>
-            {:else if activeType === 'QNA'}
-              <div class="card p-4 sm:p-5 space-y-3">
-                <div class="text-lg font-semibold">Questions</div>
-                {#if editingSlideId === activeSlideId}
-                  <input class="input-field" type="text" bind:value={qnaPrompt} placeholder="Prompt" />
-                  <div class="flex items-center gap-2">
-                    <button onclick={saveQnaSlide} class="btn-primary text-sm">Save prompt</button>
-                    <button onclick={stopEditing} class="btn-secondary">Done</button>
-                  </div>
-                {/if}
-                {#if slideResponses.length === 0}
-                  <div class="text-sm text-surface-400">No questions yet.</div>
-                {:else}
-                  <div class="space-y-3">
-                    {#each slideResponses as response (response.id)}
-                      <div class="p-3 rounded-xl border border-surface-200">
-                        <div class="text-xs text-surface-500 mb-1">{response.name || response.guest_identifier}</div>
-                        <div class="text-sm">{response.value}</div>
-                      </div>
-                    {/each}
-                  </div>
-                {/if}
-              </div>
-            {:else if activeType === 'FEEDBACK'}
-              <div class="card p-4 sm:p-5 space-y-3">
-                <div class="text-lg font-semibold">Feedback</div>
-                {#if editingSlideId === activeSlideId}
-                  <input class="input-field" type="text" bind:value={feedbackPrompt} placeholder="Prompt" />
-                  <div class="flex items-center gap-2">
-                    <button onclick={saveFeedbackSlide} class="btn-primary text-sm">Save prompt</button>
-                    <button onclick={stopEditing} class="btn-secondary">Done</button>
-                  </div>
-                {/if}
-                {#if slideResponses.length === 0}
-                  <div class="text-sm text-surface-400">No feedback yet.</div>
-                {:else}
-                  <div class="space-y-3">
-                    {#each slideResponses as response (response.id)}
-                      <div class="p-3 rounded-xl border border-surface-200">
-                        <div class="flex items-center justify-between text-xs text-surface-500 mb-1">
-                          <span>{response.name || response.guest_identifier}</span>
-                          {#if response.rating}
-                            <span class="font-medium">Rating: {response.rating}</span>
-                          {/if}
-                        </div>
-                        <div class="text-sm">{response.value}</div>
-                      </div>
-                    {/each}
-                  </div>
-                {/if}
-              </div>
-            {:else if activeType === 'CONTENT'}
-              <div class="card p-4 sm:p-5 space-y-3">
-                <div class="text-lg font-semibold">Content slide</div>
-                {#if editingSlideId === activeSlideId}
-                  <input class="input-field" type="text" bind:value={contentTitle} placeholder="Slide title" />
-                  <textarea class="input-field" rows="6" bind:value={contentBody} placeholder="Slide content"></textarea>
-                  <div class="flex items-center gap-2">
-                    <button onclick={saveContentSlide} class="btn-primary text-sm">Save</button>
-                    <button onclick={stopEditing} class="btn-secondary">Done</button>
-                  </div>
-                  <div class="flex items-center gap-3">
-                    <input type="file" bind:files={contentFile} accept=".pdf,.ppt,.pptx" class="input-field" />
-                    <button onclick={uploadContentFile} class="btn-secondary">Upload file</button>
-                  </div>
-                {/if}
-                <div class="flex items-center gap-2">
-                  <button onclick={() => goToContentSlide('prev')} class="btn-secondary">Previous</button>
-                  <button onclick={() => goToContentSlide('next')} class="btn-secondary">Next</button>
-                </div>
-                {#if activeSlide.content_json?.file_url}
-                    <div class="flex items-center gap-2">
-                      <button onclick={() => changeContentPage(-1)} class="btn-secondary" disabled={(activeSlide.content_json?.file_page || 1) <= 1}>Prev page</button>
-                      <button onclick={() => changeContentPage(1)} class="btn-secondary" disabled={activeSlide.content_json?.total_pages != null && (activeSlide.content_json?.file_page || 1) >= activeSlide.content_json.total_pages}>Next page</button>
-                      <div class="text-xs text-surface-400">Page {activeSlide.content_json?.file_page || 1}{activeSlide.content_json?.total_pages ? ` / ${activeSlide.content_json.total_pages}` : ''}</div>
-                    </div>
-                    <div class="overflow-x-auto">
-                      <ZoomableImageViewer
-                        src={getPageImageUrl(sessionId, activeSlide.id, activeSlide.content_json?.file_page || 1)}
-                        page={activeSlide.content_json?.file_page || 1}
-                        alt={`Page ${activeSlide.content_json?.file_page || 1}`}
-                        imgClass="rounded-xl border border-surface-200 mx-auto"
-                      />
-                    </div>
-                {/if}
-                <div class="border border-surface-200 rounded-xl p-4 sm:p-5 bg-surface-50">
-                  <div class="text-xl font-semibold mb-3">{contentTitle || 'Untitled slide'}</div>
-                  <div class="text-sm text-surface-300 whitespace-pre-wrap">{contentBody || 'Add your slide content...'}</div>
-                </div>
-              </div>
-            {:else if activeType === 'WORD_CLOUD'}
-              <div class="card p-4 sm:p-5 space-y-3">
-                <div class="text-lg font-semibold">Word Cloud</div>
-                {#if editingSlideId === activeSlideId}
-                  <input class="input-field" type="text" bind:value={wordCloudPrompt} placeholder="Prompt" />
-                  <div class="flex items-center gap-2">
-                    <button onclick={saveWordCloudSlide} class="btn-primary text-sm">Save prompt</button>
-                    <button onclick={stopEditing} class="btn-secondary">Done</button>
-                  </div>
-                {/if}
-                {#if slideResponses.length === 0}
-                  <div class="text-sm text-surface-400">No responses yet.</div>
-                {:else}
-                  <div class="border border-surface-200 rounded-xl p-4 sm:p-5 flex flex-wrap items-center justify-center gap-3 min-h-[180px]">
-                    {#each getWordCloudData() as item}
-                      <span
-                        class="text-brand-600 font-semibold transition-all"
-                        style={`font-size: ${item.size}rem; opacity: ${0.5 + (item.count / (slideResponses.length || 1)) * 0.5}`}
-                      >{item.word}</span>
-                    {/each}
-                  </div>
-                  <div class="text-xs text-surface-400">{slideResponses.length} response{slideResponses.length === 1 ? '' : 's'}</div>
-                {/if}
-              </div>
-            {:else}
-              <div class="card text-center text-surface-400 py-20">Unsupported slide type.</div>
-            {/if}
-          {/if}
-        </section>
-      </div>
+        <div class="h-[calc(100vh-140px)] min-h-[600px] w-full">
+          <DeckEditor
+            {sessionId}
+            {slides}
+            {activeSlideId}
+            {saveState}
+            {canUndo}
+            {canRedo}
+            onSaveReady={(save) => (deckEditorSave = save)}
+            onDirtyChange={(dirty) => (deckEditorDirty = dirty)}
+            onSelectSlide={(id) => activateSlide(id)}
+            onCreateSlide={async (type, layout) => {
+              try {
+                const defaultContent = getDefaultContent(type);
+                const finalContent = {
+                  ...defaultContent,
+                  layout: layout || (type === 'CONTENT' ? 'title_content' : 'interactive')
+                };
+                await withSaveState(async () => {
+                  const newSlide = await createSlide(sessionId, {
+                    type,
+                    order: slides.length,
+                    content_json: finalContent
+                  });
+                  slides = [...slides, newSlide];
+                  await activateSlide(newSlide.id);
+                  pushCreatedSlideUndo(newSlide, slides.length - 1, 'Add slide');
+                });
+              } catch (err) {
+                console.error('Failed to create slide:', err);
+              }
+            }}
+            onUpdateSlideContent={async (slideId, contentJson) => {
+              try {
+                await withSaveState(async () => {
+                  const updated = await updateSlide(sessionId, slideId, { content_json: contentJson });
+                  slides = slides.map((s) => (s.id === slideId ? updated : s));
+                  ws?.send('slide_change', { slide_id: slideId, slide: updated, activation: false });
+                });
+              } catch (err) {
+                console.error('Failed to update slide content:', err);
+              }
+            }}
+            onDeleteSlide={(slideId) => removeSlide(slideId)}
+            onDuplicateSlide={(slideId) => duplicateSlide(slideId)}
+            onReorderSlides={(slideIds) => reorderSlideIds(slideIds)}
+            onUploadFile={async (slideId, file) => {
+              try {
+                await withSaveState(async () => {
+                  await uploadSlideFile(sessionId, slideId, file);
+                  const updatedSession = await getSession(sessionId);
+                  slides = updatedSession.slides || [];
+                });
+              } catch (err) {
+                console.error('Failed to upload file:', err);
+              }
+            }}
+            onUndo={performUndo}
+            onRedo={performRedo}
+          />
+        </div>
       {/if}
+    {/if}
+
+    <Modal open={leavePromptOpen} onClose={handleLeavePromptCancel} ariaLabel={leavePromptTitle} maxWidth="max-w-md">
+      <div class="p-6">
+        <h2 class="text-lg font-heading font-bold text-slate-900 dark:text-white">{leavePromptTitle}</h2>
+        <p class="mt-2 text-sm text-slate-500 dark:text-slate-400">{leavePromptDescription}</p>
+        <div class="mt-5 flex flex-col gap-2 sm:flex-row">
+          <button class="btn-primary flex-1" onclick={handleLeavePromptSave}>Save</button>
+          <button class="btn-secondary flex-1" onclick={handleLeavePromptDiscard}>Discard</button>
+          <button class="btn-secondary flex-1" onclick={handleLeavePromptCancel}>Cancel</button>
+        </div>
+      </div>
+    </Modal>
+
+    {#if screenCommandFlash}
+      <div class="fixed bottom-4 right-4 z-50 rounded-xl border border-brand-200 bg-white px-4 py-2 text-sm font-medium text-brand-700 shadow-lg dark:border-brand-500/30 dark:bg-slate-950 dark:text-brand-300">
+        {screenCommandFlash}
+      </div>
     {/if}
 
     <!-- Moderator Setup -->

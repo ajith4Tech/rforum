@@ -1,12 +1,15 @@
 <script lang="ts">
-  import { joinSession, listResponses, getPageImageUrl, startSession, clearResponses } from '$lib/api';
+  import { joinSession, listResponses, getPageImageUrl, startSession, clearResponses, getScreenControl } from '$lib/api';
   import { RforumWebSocket } from '$lib/ws';
   import { onMount, onDestroy } from 'svelte';
+  import { theme } from '$lib/theme';
   import { BarChart3, MessageSquare, AlignLeft, FileText, Orbit, Cloud, Maximize2, Trash2 } from 'lucide-svelte';
   import JoinScreen from '$lib/components/JoinScreen.svelte';
   import QRModal from '$lib/components/QRModal.svelte';
+  import QRCode from '$lib/components/QRCode.svelte';
   import PageImageViewer from '$lib/components/PageImageViewer.svelte';
   import PresentationLiveView from '$lib/components/timeline/PresentationLiveView.svelte';
+  import ContentSlideCanvas from '$lib/components/ContentSlideCanvas.svelte';
   import { upsertTimelineItemFromWs } from '$lib/timelineTypes';
 
   let code = $state('');
@@ -28,8 +31,11 @@
   let error = $state('');
   let guestUrl = $state('');
   let showQRModal = $state(false);
+  let showJoinQr = $state(true);
+  let lastScreenControlId = $state('');
   let isStartingSession = $state(false);
   let isClearingResponses = $state(false);
+  let screenControlPollTimer: ReturnType<typeof setInterval> | null = null;
 
   // Use a queue to prevent race conditions when handling WebSocket messages
   let messageQueue: any[] = [];
@@ -55,6 +61,28 @@
   function queueMessage(msg: any) {
     messageQueue.push(msg);
     processMessageQueue();
+  }
+
+  function handleLocalScreenControl(event: StorageEvent) {
+    if (event.key !== "rforum_screen_control_" + code || !event.newValue) return;
+    try {
+      const data = JSON.parse(event.newValue);
+      if (data?.action === "refresh" || data?.action === "maximize_qr" || data?.action === "toggle_qr") {
+        queueMessage({ event: "screen_control", data: { action: data.action, command_id: data.command_id } });
+      }
+    } catch {
+      // Ignore malformed values from outside the application.
+    }
+  }
+
+  async function pollScreenControl() {
+    if (!code) return;
+    try {
+      const result: any = await getScreenControl(code);
+      if (result?.command?.event === "screen_control") queueMessage(result.command);
+    } catch {
+      // WebSocket delivery remains active when polling is temporarily unavailable.
+    }
   }
 
   async function handleStartSession() {
@@ -92,15 +120,19 @@
       ? window.location.pathname.split('/').pop() || ''
       : '';
     guestUrl = typeof window !== 'undefined' ? `${window.location.origin}/session/${code}` : '';
+    window.addEventListener("storage", handleLocalScreenControl);
 
     // Always connect WS so the screen auto-recovers when the session starts.
     // role: 'screen' marks this connection as strictly read-only.
     ws = new RforumWebSocket(code, { role: 'screen' });
-    ws.connect();
     ws.onMessage(queueMessage);
+    ws.connect();
+    void pollScreenControl();
+    screenControlPollTimer = setInterval(pollScreenControl, 2000);
 
     try {
       session = await joinSession(code);
+      showJoinQr = session.qr_visible ?? true;
 
       const active = session.slides?.find((s: any) => s.is_active);
       if (active) {
@@ -125,6 +157,8 @@
   });
 
   onDestroy(() => {
+    window.removeEventListener("storage", handleLocalScreenControl);
+    if (screenControlPollTimer) clearInterval(screenControlPollTimer);
     ws?.disconnect();
   });
 
@@ -261,12 +295,43 @@
             console.error('[screen] Failed to load presentation timeline after going live:', err);
           }
         }
+      } else if (msg.data?.qr_visible !== undefined) {
+        showJoinQr = !!msg.data.qr_visible;
+        if (session) session = { ...session, qr_visible: showJoinQr };
+      }
+    } else if (msg.event === 'screen_control') {
+      if (msg.data?.command_id && msg.data.command_id === lastScreenControlId) return;
+      if (msg.data?.command_id) lastScreenControlId = msg.data.command_id;
+      console.log('[screen] received screen_control', msg.data);
+      if (msg.data?.action === 'refresh') {
+        window.location.reload();
+        return;
+      } else if (msg.data?.action === 'maximize_qr') {
+        showQRModal = true;
+      } else if (msg.data?.action === 'toggle_qr') {
+        showQRModal = !showQRModal;
       }
     } else if (msg.event === 'clear_responses') {
       // Clear responses if it's for the current slide
       if (msg.data?.slide_id === activeSlide?.id) {
         responses = [];
       }
+    }
+  }
+
+  function getFitTitleStyle(text: string, type: 'title' | 'question' = 'title'): string {
+    const len = (text || '').trim().length;
+    if (!len) return '';
+    if (type === 'question') {
+      if (len < 30) return 'font-size: clamp(1.35rem, 3vw, 2.2rem); line-height: 1.15; word-break: break-word; overflow-wrap: anywhere;';
+      if (len < 70) return 'font-size: clamp(1.1rem, 2.4vw, 1.8rem); line-height: 1.18; word-break: break-word; overflow-wrap: anywhere;';
+      if (len < 120) return 'font-size: clamp(0.95rem, 1.9vw, 1.4rem); line-height: 1.24; word-break: break-word; overflow-wrap: anywhere;';
+      return 'font-size: clamp(0.82rem, 1.55vw, 1.1rem); line-height: 1.28; word-break: break-word; overflow-wrap: anywhere;';
+    } else {
+      if (len < 24) return 'font-size: clamp(1.8rem, 4vw, 3rem); line-height: 1.1; word-break: break-word; overflow-wrap: anywhere;';
+      if (len < 56) return 'font-size: clamp(1.35rem, 2.9vw, 2.2rem); line-height: 1.15; word-break: break-word; overflow-wrap: anywhere;';
+      if (len < 110) return 'font-size: clamp(1.05rem, 2vw, 1.55rem); line-height: 1.22; word-break: break-word; overflow-wrap: anywhere;';
+      return 'font-size: clamp(0.85rem, 1.55vw, 1.1rem); line-height: 1.28; word-break: break-word; overflow-wrap: anywhere;';
     }
   }
 
@@ -316,104 +381,64 @@
     isModerator={true}
   />
 {:else}
-  <!-- LIVE PRESENTATION SCREEN -->
-  <div class="min-h-screen flex flex-col bg-gray-950 text-white font-sans select-none overflow-hidden">
-    <!-- Header -->
-    <header class="flex items-center justify-between px-4 md:px-8 py-3 md:py-4 border-b border-white/10 flex-shrink-0 gap-4">
-      <!-- Left: Logo -->
-      <div class="flex items-center gap-2.5 flex-shrink-0">
-        <Orbit class="w-5 md:w-6 h-5 md:h-6 text-brand-400" />
-        <span class="font-heading font-bold text-base md:text-lg tracking-wide text-white/80">Rforum</span>
+  <!-- LIVE PRESENTATION SCREEN (Theme Aware) -->
+  <div class="min-h-screen flex flex-col {$theme === 'dark' ? 'bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900'} font-sans select-none overflow-hidden transition-colors">
+    <header class="grid min-h-[94px] grid-cols-[1fr_auto_1fr] items-center gap-4 border-b {$theme === 'dark' ? 'border-slate-800 bg-slate-950' : 'border-slate-200 bg-white'} px-5 py-3 sm:px-8">
+      <div class="flex items-center gap-2.5">
+        <Orbit class="h-6 w-6 text-purple-600 dark:text-purple-400" />
+        <span class="font-heading text-lg font-extrabold tracking-wide text-slate-900 dark:text-white">Rforum</span>
       </div>
-
-      <!-- Center: Code -->
-      <div class="flex flex-col items-center gap-0.5 flex-1 justify-center">
-        <span class="text-[10px] md:text-xs text-white/40 uppercase tracking-widest">Code</span>
-        <span class="font-mono font-bold text-2xl md:text-3xl tracking-[0.15em] md:tracking-[0.25em] text-white">{code}</span>
+      <div class="text-center">
+        <p class="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500">Code</p>
+        <p class="font-mono text-2xl font-extrabold tracking-[0.22em] text-purple-600 dark:text-white sm:text-3xl">{code}</p>
       </div>
-
-      <!-- Right: Session info and QR button -->
-      <div class="flex items-center gap-3 md:gap-4 flex-shrink-0">
-        <!-- Session and Moderator info -->
-        <div class="flex flex-col gap-1 text-right">
-          {#if session?.title}
-            <div class="flex flex-col gap-0.5">
-              <p class="text-[10px] md:text-xs text-white/40 uppercase tracking-widest">Session</p>
-              <p class="text-xs md:text-sm font-semibold text-white truncate max-w-xs">{session.title}</p>
-            </div>
-          {/if}
-          {#if session?.moderator_name}
-            <div class="flex flex-col gap-0.5">
-              <p class="text-[10px] md:text-xs text-white/40 uppercase tracking-widest">Moderator</p>
-              <p class="text-xs md:text-sm font-semibold text-white truncate max-w-xs">{session.moderator_name}</p>
-            </div>
-          {/if}
+      <div class="flex items-center justify-end gap-3">
+        <div class="hidden text-right sm:block">
+          <p class="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">Session</p>
+          <p class="max-w-[12rem] truncate text-sm font-bold text-slate-800 dark:text-white">{session?.title || 'Presentation'}</p>
+          {#if session?.moderator_name}<p class="mt-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">Moderator</p><p class="text-sm font-semibold text-slate-700 dark:text-slate-200">{session.moderator_name}</p>{/if}
         </div>
-
-        <!-- Show QR Button -->
-        {#if guestUrl}
-          <button
-            onclick={() => { showQRModal = true; }}
-            class="p-2 md:p-2.5 hover:bg-white/10 rounded-lg transition-colors flex items-center justify-center"
-            title="Show QR code for joining"
-            aria-label="Show QR code"
-          >
-            <Maximize2 class="w-5 md:w-5 h-5 md:h-5 text-white/60 hover:text-white" />
-          </button>
+        {#if guestUrl && showJoinQr}
+          <div class="hidden items-center gap-2 text-right sm:flex" title="Join QR code" aria-label="Join QR code">
+            <div class="rounded-md bg-white p-1"><QRCode data={guestUrl} size={34} /></div>
+            <span class="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Scan to join</span>
+          </div>
         {/if}
-
-        <!-- Clear Responses Button (Moderator only) -->
-        {#if activeSlide && responses.length > 0}
-          <button
-            onclick={handleClearResponses}
-            disabled={isClearingResponses}
-            class="p-2 md:p-2.5 hover:bg-red-500/10 disabled:opacity-50 rounded-lg transition-colors flex items-center justify-center"
-            title="Clear all responses for this slide"
-            aria-label="Clear responses"
-          >
-            <Trash2 class="w-5 md:w-5 h-5 md:h-5 text-red-400/60 hover:text-red-400" />
-          </button>
-        {/if}
+        <button onclick={() => document.documentElement.requestFullscreen?.()} class="rounded-lg p-2 text-slate-500 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800" title="Fullscreen" aria-label="Fullscreen"><Maximize2 class="h-5 w-5" /></button>
       </div>
     </header>
 
-    <!-- Centered Logo Section -->
-    <div class="flex justify-center pt-4 sm:pt-5 md:pt-6 pb-6 sm:pb-8 md:pb-10">
-      <img src="/logo-mascot.webp" alt="Tech Good Community" class="w-16 h-auto sm:w-20 md:w-24 lg:w-28 opacity-90 hover:opacity-100 transition-opacity" />
-    </div>
+    <!-- Main Presentation Workspace Stage -->
+    <main class="flex-1 flex flex-col items-center justify-center p-3 sm:p-5 overflow-hidden relative">
+      <!-- Centered Mascot Branding (below navbar, centered above slide stage) -->
+      <div class="flex items-center justify-center py-5 flex-shrink-0">
+        <img src="/logo-mascot.webp" alt="Rforum Mascot" class="w-16 h-16 sm:w-20 sm:h-20 object-contain opacity-90 hover:opacity-100 transition-opacity" />
+      </div>
 
-    <!-- Main -->
-    <main class="flex-1 flex flex-col items-center justify-start px-4 md:px-8 overflow-y-auto overflow-x-hidden">
-      {#if loading}
-        <div class="text-center py-20">
-          <Orbit class="w-12 h-12 text-brand-400 mx-auto mb-4 animate-pulse" />
-          <p class="text-white/50 text-lg">Connecting…</p>
-        </div>
-
-      {:else if error}
-        <div class="text-center animate-fade-in space-y-6 py-16">
-          <Orbit class="w-20 h-20 mx-auto text-brand-400/50 animate-pulse" />
-          <p class="text-3xl font-heading font-bold text-white/60">Waiting for session…</p>
-          <p class="text-white/40 text-lg">{error}</p>
-          <div class="mt-6 flex flex-col items-center gap-1">
-            <span class="text-white/30 text-sm tracking-widest uppercase">Code</span>
-            <span class="font-mono text-5xl font-bold tracking-[0.3em] text-brand-400">{code}</span>
+      {#if error}
+        <div class="text-center animate-fade-in space-y-4 py-16">
+          <Orbit class="w-16 h-16 mx-auto text-purple-500/40 animate-spin" />
+          <p class="text-2xl font-heading font-bold text-slate-600 dark:text-slate-400">Waiting for session…</p>
+          <p class="text-slate-400 text-base">{error}</p>
+          <div class="mt-4 inline-flex items-center gap-2 bg-purple-50 dark:bg-purple-950/40 px-4 py-2 rounded-xl border border-purple-200 dark:border-purple-800">
+            <span class="text-slate-500 dark:text-slate-400 text-xs font-bold uppercase">Code</span>
+            <span class="font-mono text-2xl font-bold text-purple-600 dark:text-purple-400">{code}</span>
           </div>
         </div>
 
       {:else if !hasActiveContent}
-        <div class="text-center animate-fade-in space-y-6 py-12 mt-6">
-          <Orbit class="w-20 h-20 mx-auto text-brand-400 animate-pulse" />
-          <p class="text-3xl font-heading font-bold text-white/80">Waiting for presenter…</p>
-          <p class="text-white/40 text-lg">The session is live. Slides will appear here automatically.</p>
-          <div class="mt-8 flex flex-col items-center gap-1">
-            <span class="text-white/30 text-sm tracking-widest uppercase">Join with code</span>
-            <span class="font-mono text-5xl font-bold tracking-[0.3em] text-brand-400">{code}</span>
+        <div class="text-center animate-fade-in space-y-4 py-12">
+          <Orbit class="w-16 h-16 mx-auto text-purple-500 animate-spin" />
+          <p class="text-2xl font-heading font-bold text-slate-700 dark:text-slate-300">Waiting for presenter…</p>
+          <p class="text-slate-400 text-base">The presentation session is active. Slides will display automatically.</p>
+          <div class="mt-6 inline-flex items-center gap-2 bg-slate-200 dark:bg-slate-800 px-5 py-2.5 rounded-2xl">
+            <span class="text-xs text-slate-500 dark:text-slate-400 uppercase font-bold tracking-wider">Join at</span>
+            <span class="font-mono text-xl font-bold text-purple-600 dark:text-purple-400">{guestUrl || code}</span>
           </div>
         </div>
 
       {:else if session?.presentation_id}
-        <div class="w-full max-w-5xl flex flex-col gap-4 mt-6">
+        <div class="aspect-[16/9] {$theme === 'dark' ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'} rounded-2xl shadow-2xl border p-6 sm:p-12 flex flex-col justify-between overflow-hidden my-auto presentation-stage" style="width: min(calc((100vh - 16rem) * 16 / 9), calc(100vw - 1.5rem)); height: min(calc(100vh - 16rem), calc((100vw - 1.5rem) * 9 / 16));">
           <PresentationLiveView
             activeItem={activeTimelineItem}
             presentationId={session.presentation_id}
@@ -424,154 +449,127 @@
         </div>
 
       {:else}
-        <div class="w-full max-w-5xl flex flex-col gap-4 mt-6">
+        <!-- True 16:9 Presentation Stage Container -->
+        <div class="aspect-[16/9] {$theme === 'dark' ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'} rounded-2xl shadow-2xl border p-6 sm:p-12 flex flex-col justify-between overflow-hidden my-auto presentation-stage transition-colors" style="width: min(calc((100vh - 16rem) * 16 / 9), calc(100vw - 1.5rem)); height: min(calc(100vh - 16rem), calc((100vw - 1.5rem) * 9 / 16));">
 
-          <!-- POLL -->
+          <!-- POLL SLIDE -->
           {#if activeSlide.type === 'POLL'}
-            <div class="flex flex-col gap-4 w-full">
-              <div class="text-center">
-                <div class="inline-flex items-center gap-2 bg-brand-500/10 text-brand-400 text-xs font-bold uppercase tracking-widest px-3 py-1 rounded-full mb-3">
-                  <BarChart3 class="w-3.5 h-3.5" /> Poll
+            <div class="flex flex-col h-full justify-between w-full overflow-hidden">
+              <div class="text-center space-y-2">
+                <div class="inline-flex items-center gap-2 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-bold uppercase tracking-widest px-3 py-1 rounded-full border border-emerald-500/20">
+                  <BarChart3 class="w-3.5 h-3.5" /> Interactive Poll
                 </div>
-                <h1 class="text-4xl font-heading font-bold text-white leading-snug">{activeSlide.content_json?.question}</h1>
-                <p class="text-white/40 mt-1 text-sm">{responses.length} response{responses.length === 1 ? '' : 's'}</p>
+                <h1 class="font-heading font-bold text-slate-900 dark:text-slate-100 leading-tight" style={getFitTitleStyle(activeSlide.content_json?.question, 'question')}>
+                  {activeSlide.content_json?.question || ''}
+                </h1>
+                <p class="text-slate-400 text-xs">{responses.length} response{responses.length === 1 ? '' : 's'}</p>
               </div>
-              <div class="space-y-4 max-h-[60vh] overflow-y-auto pr-1">
+
+              <div class="space-y-3 max-h-[55%] overflow-y-auto w-full my-auto px-2">
                 {#each getPollResults(activeSlide) as row, i}
-                  {@const hues = ['bg-brand-500','bg-cyan-500','bg-emerald-500','bg-amber-500','bg-rose-500','bg-violet-500']}
+                  {@const hues = ['bg-purple-600', 'bg-emerald-500', 'bg-cyan-500', 'bg-amber-500', 'bg-rose-500']}
                   <div class="space-y-1">
-                    <div class="flex items-center justify-between text-sm">
-                      <span class="font-semibold text-white/80 text-lg">{row.label}</span>
-                      <span class="font-mono font-bold text-white text-xl">{row.percent}%</span>
+                    <div class="flex items-center justify-between text-sm sm:text-base font-semibold">
+                      <span class="text-slate-800 dark:text-slate-200">{row.label}</span>
+                      <span class="font-mono font-bold text-purple-600 dark:text-purple-400">{row.percent}%</span>
                     </div>
-                    <div class="relative h-10 bg-white/5 rounded-xl overflow-hidden">
+                    <div class="relative h-9 bg-slate-100 dark:bg-slate-950 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800">
                       <div
                         class="absolute inset-y-0 left-0 rounded-xl transition-all duration-700 {hues[i % hues.length]}"
                         style={`width: ${row.percent}%; min-width: ${row.percent > 0 ? '12px' : '0'}`}
                       ></div>
-                      <span class="absolute inset-y-0 right-3 flex items-center text-white/50 text-sm font-mono">{row.count}</span>
+                      <span class="absolute inset-y-0 right-3 flex items-center text-slate-500 dark:text-slate-400 text-xs font-mono">{row.count}</span>
                     </div>
                   </div>
                 {/each}
               </div>
             </div>
 
-          <!-- Q&A -->
+          <!-- INTERACTIVE / CONTENT SLIDES -->
           {:else if activeSlide.type === 'QNA'}
-            <div class="flex flex-col gap-4 w-full">
-              <div class="text-center">
-                <div class="inline-flex items-center gap-2 bg-cyan-500/10 text-cyan-400 text-xs font-bold uppercase tracking-widest px-3 py-1 rounded-full mb-3">
-                  <MessageSquare class="w-3.5 h-3.5" /> Q&A
+            <div class="flex flex-col h-full justify-between w-full overflow-hidden">
+              <div class="text-center space-y-2">
+                <div class="inline-flex items-center gap-2 bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 text-xs font-bold uppercase tracking-widest px-3 py-1 rounded-full border border-cyan-500/20">
+                  <MessageSquare class="w-3.5 h-3.5" /> Interactive Q&A
                 </div>
-                <h1 class="text-4xl font-heading font-bold text-white leading-snug">{activeSlide.content_json?.prompt}</h1>
-                <p class="text-white/40 mt-1 text-sm">{responses.length} question{responses.length === 1 ? '' : 's'}</p>
+                <h1 class="font-heading font-bold text-slate-900 dark:text-slate-100 leading-tight" style={getFitTitleStyle(activeSlide.content_json?.prompt || 'Audience Questions', 'question')}>
+                  {activeSlide.content_json?.prompt || 'Audience Questions'}
+                </h1>
+                <p class="text-slate-400 text-xs">{responses.length} question{responses.length === 1 ? '' : 's'}</p>
               </div>
+
               {#if responses.length === 0}
-                <div class="text-center text-white/30 text-lg py-8">No questions yet…</div>
+                <div class="text-center text-slate-400 text-base py-8">No questions submitted yet…</div>
               {:else}
-                <div class="max-h-[60vh] overflow-y-auto space-y-3 pr-1 mask-fade-bottom">
+                <div class="max-h-[60%] overflow-y-auto space-y-3 pr-1 my-auto">
                   {#each [...responses].sort((a, b) => (b.upvotes ?? 0) - (a.upvotes ?? 0)) as response (response.id)}
-                    <div class="flex items-start gap-4 bg-white/5 border border-white/10 rounded-2xl px-5 py-4">
-                      <div class="flex flex-col items-center gap-0.5 flex-shrink-0 min-w-[2.5rem]">
-                        <span class="text-2xl font-bold text-brand-400">{response.upvotes ?? 0}</span>
-                        <span class="text-[10px] text-white/30 uppercase tracking-wide">votes</span>
+                    <div class="flex items-start gap-4 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl p-4">
+                      <div class="flex flex-col items-center justify-center shrink-0 px-3 py-1.5 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400 font-bold">
+                        <span class="text-xl font-bold">{response.upvotes ?? 0}</span>
+                        <span class="text-[9px] uppercase tracking-wider">votes</span>
                       </div>
-                      <div class="flex-1">
-                        <p class="text-white text-lg font-medium leading-snug">{response.value}</p>
-                        <p class="text-white/30 text-xs mt-1">{response.name || response.guest_identifier}</p>
+                      <div class="flex-1 min-w-0">
+                        <p class="text-slate-800 dark:text-slate-200 text-base font-medium leading-relaxed">{response.value}</p>
+                        <p class="text-slate-400 text-xs mt-1">{response.name || response.guest_identifier || 'Anonymous'}</p>
                       </div>
                     </div>
                   {/each}
                 </div>
               {/if}
             </div>
-
-          <!-- FEEDBACK -->
-          {:else if activeSlide.type === 'FEEDBACK'}
-            <div class="flex flex-col gap-4 w-full">
-              <div class="text-center">
-                <div class="inline-flex items-center gap-2 bg-rose-500/10 text-rose-400 text-xs font-bold uppercase tracking-widest px-3 py-1 rounded-full mb-3">
-                  <AlignLeft class="w-3.5 h-3.5" /> Feedback
-                </div>
-                <h1 class="text-4xl font-heading font-bold text-white leading-snug">{activeSlide.content_json?.prompt}</h1>
-                <p class="text-white/40 mt-1 text-sm">{responses.length} response{responses.length === 1 ? '' : 's'}</p>
-              </div>
-              {#if responses.length === 0}
-                <div class="text-center text-white/30 text-lg py-8">No feedback yet…</div>
-              {:else}
-                <div class="max-h-[60vh] overflow-y-auto space-y-3 pr-1">
-                  {#each responses as response (response.id)}
-                    <div class="bg-white/5 border border-white/10 rounded-2xl px-5 py-4">
-                      <div class="flex items-center justify-between mb-2">
-                        <span class="text-white/30 text-xs">{response.name || response.guest_identifier}</span>
-                        {#if response.rating}
-                          <span class="text-amber-400 text-sm font-bold">{'★'.repeat(response.rating)}{'☆'.repeat(5 - response.rating)}</span>
-                        {/if}
-                      </div>
-                      <p class="text-white text-lg leading-snug">{response.value}</p>
-                    </div>
-                  {/each}
-                </div>
-              {/if}
-            </div>
-
-          <!-- WORD CLOUD -->
           {:else if activeSlide.type === 'WORD_CLOUD'}
-            <div class="flex flex-col gap-4 w-full">
-              <div class="text-center">
-                <div class="inline-flex items-center gap-2 bg-violet-500/10 text-violet-400 text-xs font-bold uppercase tracking-widest px-3 py-1 rounded-full mb-3">
+            <div class="flex flex-col h-full justify-between w-full overflow-hidden">
+              <div class="text-center space-y-2">
+                <div class="inline-flex items-center gap-2 bg-amber-500/10 text-amber-600 dark:text-amber-400 text-xs font-bold uppercase tracking-widest px-3 py-1 rounded-full border border-amber-500/20">
                   <Cloud class="w-3.5 h-3.5" /> Word Cloud
                 </div>
-                <h1 class="text-4xl font-heading font-bold text-white leading-snug">{activeSlide.content_json?.prompt}</h1>
-                <p class="text-white/40 mt-1 text-sm">{responses.length} response{responses.length === 1 ? '' : 's'}</p>
+                <h1 class="font-heading font-bold text-slate-900 dark:text-slate-100 leading-tight" style={getFitTitleStyle(activeSlide.content_json?.prompt || 'Word Cloud', 'question')}>
+                  {activeSlide.content_json?.prompt || 'Word Cloud'}
+                </h1>
+                <p class="text-slate-400 text-xs">{responses.length} response{responses.length === 1 ? '' : 's'}</p>
               </div>
+
               {#if responses.length === 0}
-                <div class="text-center text-white/30 text-lg py-12">Waiting for responses…</div>
+                <div class="text-center text-slate-400 text-base py-8">Waiting for audience words…</div>
               {:else}
-                {@const palette = ['text-brand-400','text-cyan-400','text-emerald-400','text-amber-400','text-rose-400','text-violet-400','text-sky-400','text-pink-400']}
-                <div class="flex flex-wrap items-center justify-center gap-x-6 gap-y-3 max-h-[60vh] overflow-y-auto p-4">
+                {@const palette = ['text-purple-600 dark:text-purple-400','text-cyan-600 dark:text-cyan-400','text-emerald-600 dark:text-emerald-400','text-amber-600 dark:text-amber-400','text-rose-600 dark:text-rose-400']}
+                <div class="flex flex-wrap items-center justify-center gap-x-6 gap-y-4 max-h-[60%] overflow-y-auto p-4 my-auto">
                   {#each getWordCloudData() as item, i}
-                    <span
-                      class="font-heading font-bold transition-all duration-500 {palette[i % palette.length]}"
-                      style={`font-size: ${item.size}rem; opacity: ${0.55 + (item.count / (responses.length || 1)) * 0.45}`}
-                    >{item.word}</span>
+                    <span class="font-heading font-extrabold transition-all duration-500 {palette[i % palette.length]}" style={`font-size: ${item.size * 1.2}rem; opacity: ${0.6 + (item.count / (responses.length || 1)) * 0.4}`}>{item.word}</span>
                   {/each}
                 </div>
               {/if}
             </div>
-
-          <!-- CONTENT -->
-          {:else if activeSlide.type === 'CONTENT'}
-            <div class="flex flex-col items-center gap-4 w-full">
-              {#if !activeSlide.content_json?.file_url && !activeSlide.content_json?.has_file}
-                <!-- Text-only content slide -->
-                <div class="flex flex-col items-center justify-start text-center px-8 gap-6 max-w-3xl mx-auto py-8">
-                  <FileText class="w-14 h-14 text-brand-400 opacity-60" />
-                  <h1 class="text-5xl font-heading font-bold text-white leading-tight">{activeSlide.content_json?.title}</h1>
-                  {#if activeSlide.content_json?.body}
-                    <p class="text-white/60 text-2xl leading-relaxed whitespace-pre-wrap">{activeSlide.content_json.body}</p>
-                  {/if}
+          {:else if activeSlide.type === 'FEEDBACK'}
+            <div class="flex flex-col h-full justify-between w-full overflow-hidden">
+              <div class="text-center space-y-2">
+                <div class="inline-flex items-center gap-2 bg-rose-500/10 text-rose-600 dark:text-rose-400 text-xs font-bold uppercase tracking-widest px-3 py-1 rounded-full border border-rose-500/20">
+                  <AlignLeft class="w-3.5 h-3.5" /> Audience Feedback
                 </div>
+                <h1 class="font-heading font-bold text-slate-900 dark:text-slate-100 leading-tight" style={getFitTitleStyle(activeSlide.content_json?.prompt || 'Feedback', 'question')}>
+                  {activeSlide.content_json?.prompt || 'Feedback'}
+                </h1>
+                <p class="text-slate-400 text-xs">{responses.length} response{responses.length === 1 ? '' : 's'}</p>
+              </div>
+
+              {#if responses.length === 0}
+                <div class="text-center text-slate-400 text-base py-8">No feedback responses yet…</div>
               {:else}
-                <!-- File/image content slide -->
-                <div class="w-full flex flex-col items-center gap-4 max-h-[70vh]">
-                  {#if activeSlide.content_json?.title}
-                    <h1 class="text-3xl font-heading font-bold text-white text-center">{activeSlide.content_json.title}</h1>
-                  {/if}
-                  <PageImageViewer
-                    src={getPageImageUrl(session.id, activeSlide.id, activeSlide.content_json?.file_page || 1, code)}
-                    page={activeSlide.content_json?.file_page || 1}
-                    alt={`Slide page ${activeSlide.content_json?.file_page || 1}`}
-                    imgClass="max-w-full max-h-[65vh] w-auto rounded-2xl border border-white/10 object-contain shadow-2xl"
-                  />
-                  {#if activeSlide.content_json?.total_pages}
-                    <p class="text-white/30 text-sm font-mono">
-                      Page {activeSlide.content_json.file_page || 1} / {activeSlide.content_json.total_pages}
-                    </p>
-                  {/if}
+                <div class="max-h-[60%] overflow-y-auto space-y-3 pr-1 my-auto">
+                  {#each responses as response (response.id)}
+                    <div class="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl p-4">
+                      <div class="flex items-center justify-between mb-1 text-xs text-slate-400">
+                        <span>{response.name || response.guest_identifier || 'Anonymous'}</span>
+                        {#if response.rating}<span class="text-amber-400 font-bold">{'★'.repeat(response.rating)}{'☆'.repeat(5 - response.rating)}</span>{/if}
+                      </div>
+                      <p class="text-slate-800 dark:text-slate-200 text-base">{response.value}</p>
+                    </div>
+                  {/each}
                 </div>
               {/if}
             </div>
+          {:else if activeSlide.type === 'CONTENT'}
+            <ContentSlideCanvas slide={activeSlide} sessionId={session.id} sessionCode={code} variant="screen" />
           {/if}
 
         </div>
@@ -579,12 +577,12 @@
     </main>
 
     <!-- Footer -->
-    <footer class="flex items-center justify-center px-4 md:px-8 py-3 border-t border-white/10 flex-shrink-0 text-white/40 text-xs">
+    <footer class="flex items-center justify-center px-6 py-2.5 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 flex-shrink-0 text-slate-400 text-xs transition-colors">
       <div class="flex flex-col sm:flex-row items-center justify-center gap-3">
-        <span>Powered by <span class="font-semibold text-white/60">Tech4Good Community</span></span>
-        <span class="hidden sm:inline text-white/20">•</span>
-        <span>Built with <span class="text-red-400">❤</span> by Ajith</span>
-        <span class="hidden sm:inline text-white/20">•</span>
+        <span>Powered by <span class="font-semibold text-slate-600 dark:text-slate-300">Tech4Good Community</span></span>
+        <span class="hidden sm:inline text-slate-300 dark:text-slate-700">•</span>
+        <span>Built with <span class="text-red-500">❤</span> by Ajith</span>
+        <span class="hidden sm:inline text-slate-300 dark:text-slate-700">•</span>
         <span>Rforum@2026</span>
       </div>
     </footer>

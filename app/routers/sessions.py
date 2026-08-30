@@ -1,9 +1,12 @@
+import json
+import logging
 import random
 import string
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from redis.asyncio import Redis
+from redis.exceptions import RedisError
 from sqlalchemy import delete, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -25,6 +28,7 @@ from app.schemas import (
     PaginatedSessions,
     SessionCreate,
     SessionOut,
+    ScreenControl,
     SessionUpdate,
     SessionWithSlides,
     TimelineOut,
@@ -32,6 +36,7 @@ from app.schemas import (
 from app.services.guest_view import strip_slide_content_json
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
+logger = logging.getLogger(__name__)
 
 
 def _generate_code() -> str:
@@ -220,6 +225,55 @@ async def delete_session(
     if result.rowcount == 0:
         raise HTTPException(status_code=404, detail="Session not found")
     await db.commit()
+
+
+@router.post("/{session_id}/screen-control", status_code=status.HTTP_202_ACCEPTED)
+async def send_screen_control(
+    session_id: str,
+    payload: ScreenControl,
+    request: Request,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        session_uuid = uuid.UUID(session_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid session ID format")
+
+    query = select(Session).where(Session.id == session_uuid)
+    if user.role != UserRole.SUPER_ADMIN:
+        query = query.where(Session.owner_id == user.id)
+    session = (await db.execute(query)).scalar_one_or_none()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    message = json.dumps({"event": "screen_control", "data": {"action": payload.action, "command_id": payload.command_id}})
+    redis: Redis = request.app.state.redis
+    try:
+        await redis.setex(f"screen-control:{session.unique_code}", 15, message)
+        await redis.publish(f"session:{session.unique_code}", message)
+    except RedisError:
+        logger.warning("screen_control_publish_failed session=%s", session.unique_code, exc_info=True)
+        raise HTTPException(status_code=503, detail="Presentation controls are temporarily unavailable")
+
+    return {"status": "sent"}
+
+
+@router.get("/join/{code}/screen-control")
+async def get_screen_control(code: str, request: Request):
+    """Return the most recent short-lived projector command for polling fallback."""
+    try:
+        raw = await request.app.state.redis.get(f"screen-control:{code}")
+    except RedisError:
+        return {"command": None}
+    if not raw:
+        return {"command": None}
+    try:
+        if isinstance(raw, bytes):
+            raw = raw.decode("utf-8")
+        return {"command": json.loads(raw)}
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return {"command": None}
 
 
 # ── Guest endpoint (no auth) ─────────────────────────

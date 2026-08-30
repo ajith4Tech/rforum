@@ -8,6 +8,7 @@ export type StatusHandler = (status: ConnectionStatus) => void;
 // long a client waits before retrying and, combined with full jitter, how
 // spread-out a mass-reconnect wave is after a shared disruption.
 const MAX_RECONNECT_DELAY_MS = 15000;
+const MAX_PENDING_MESSAGES = 50;
 
 export interface WsConnectOptions {
   /** JWT of the authenticated session owner — identifies this connection as a moderator. */
@@ -26,6 +27,10 @@ export class RforumWebSocket {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private closed = false;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  // A presenter can click a control while this socket is still opening (or
+  // reconnecting). Keep those messages so controls such as refresh/QR do not
+  // disappear without reaching the projector.
+  private pendingMessages: string[] = [];
   public status: ConnectionStatus = 'disconnected';
 
   constructor(code: string, opts: WsConnectOptions = {}) {
@@ -52,14 +57,25 @@ export class RforumWebSocket {
     this.handler = handler;
   }
 
-  send(event: string, data: any) {
+  send(event: string, data: any): boolean {
+    const message = JSON.stringify({ event, data });
     if (this.socket?.readyState === WebSocket.OPEN) {
-      this.socket.send(JSON.stringify({ event, data }));
+      try {
+        this.socket.send(message);
+        return true;
+      } catch (error) {
+        console.warn('[ws] send failed; queuing for reconnect', error);
+      }
     }
+
+    if (this.closed || this.pendingMessages.length >= MAX_PENDING_MESSAGES) return false;
+    this.pendingMessages.push(message);
+    return true;
   }
 
   disconnect() {
     this.closed = true;
+    this.pendingMessages = [];
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -92,6 +108,7 @@ export class RforumWebSocket {
       this.reconnectBackoff = 500;
       this.setStatus('connected');
       this.startHeartbeat();
+      this.flushPendingMessages();
     };
 
     this.socket.onclose = () => {
@@ -117,6 +134,19 @@ export class RforumWebSocket {
         this.socket.send(JSON.stringify({ event: 'ping', data: Date.now() }));
       }
     }, 15000);
+  }
+
+  private flushPendingMessages() {
+    while (this.pendingMessages.length && this.socket?.readyState === WebSocket.OPEN) {
+      const message = this.pendingMessages[0];
+      try {
+        this.socket.send(message);
+        this.pendingMessages.shift();
+      } catch (error) {
+        console.warn('[ws] failed to flush pending message', error);
+        break;
+      }
+    }
   }
 
   private stopHeartbeat() {
