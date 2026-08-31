@@ -69,16 +69,6 @@ backend:
     enabled: true
     maxUnavailable: 1
 
-  autoscaling:
-    # Disabled by default — see the replicaCount note above. CPU-based HPA is
-    # safe to enable once you've load-tested beyond one replica, since the
-    # WS fan-out and rate limiting are both already Redis-backed (shared
-    # state), not in-process.
-    enabled: false
-    minReplicas: 1
-    maxReplicas: 4
-    targetCPUUtilizationPercentage: 70
-
   # Extra environment variables merged in verbatim (name/value pairs).
   extraEnv: []
 
