@@ -113,13 +113,11 @@ postgresql:
       memory: 1Gi
 
 # ── Bundled Redis (pub/sub fan-out + rate-limit counters) ────────────────
-# Disable and fill in `externalRedis` to point at a managed/external Redis
-# instead. Redis holds no durable business data (WS pub/sub is transient,
+# Redis holds no durable business data (WS pub/sub is transient,
 # rate-limit counters are short-TTL fixed windows — app/rate_limit.py) so
 # persistence here is a "don't reset counters/lose in-flight messages on
 # pod restart" nicety, not a correctness requirement.
 redis:
-  enabled: true
   image:
     repository: redis
     tag: "7-alpine"
@@ -134,14 +132,6 @@ redis:
     limits:
       cpu: 500m
       memory: 512Mi
-
-externalRedis:
-  host: ""
-  port: 6379
-  # rforum has no REDIS_PASSWORD setting today (app/config.py REDIS_URL is a
-  # single connection string) — if your external Redis requires auth, bake
-  # the credential into `externalRedis.url` instead and leave host/port unset.
-  url: ""
 
 # ── Application configuration (app/config.py Settings) ──────────────────
 app:

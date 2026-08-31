@@ -133,16 +133,8 @@ spec:
                   name: {{ include "rforum.app.secretName" . }}
                   key: aws-secret-access-key
             {{- end }}
-            {{- if .Values.redis.enabled }}
             - name: REDIS_URL
               value: {{ printf "redis://%s:6379/0" (include "rforum.redis.host" .) | quote }}
-            {{- else if .Values.externalRedis.url }}
-            - name: REDIS_URL
-              value: {{ .Values.externalRedis.url | quote }}
-            {{- else }}
-            - name: REDIS_URL
-              value: {{ printf "redis://%s:%v/0" .Values.externalRedis.host .Values.externalRedis.port | quote }}
-            {{- end }}
             {{- range .Values.backend.extraEnv }}
             - name: {{ .name }}
               value: {{ .value | quote }}

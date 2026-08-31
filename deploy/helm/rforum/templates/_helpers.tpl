@@ -116,13 +116,9 @@ Postgres connection details — always the bundled StatefulSet.
 postgres-password
 {{- end -}}
 
-{{/* Redis host used to build REDIS_URL when the bundled Redis is enabled */}}
+{{/* Redis host for REDIS_URL — always the bundled Service */}}
 {{- define "rforum.redis.host" -}}
-{{- if .Values.redis.enabled -}}
 {{ include "rforum.redis.fullname" . }}
-{{- else -}}
-{{ .Values.externalRedis.host }}
-{{- end -}}
 {{- end -}}
 
 {{/* Name of the Secret holding SECRET_KEY / AWS creds / REDIS_URL */}}
