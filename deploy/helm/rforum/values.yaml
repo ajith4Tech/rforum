@@ -1,7 +1,16 @@
-# Default values for rforum — sized for a small/fresh k3s VM and zero
-# external dependencies (bundled Postgres+Redis, local disk storage,
-# self-signed-friendly ingress). See values-production.yaml for a larger-VM,
-# S3-backed overlay matching the currently-deployed rforum.t4gc.in config.
+# Production values for rforum — sized for a 4 vCPU / 8GB VM (double the
+# 2 vCPU / 3.7GB host the 500-guest k6 load test was validated against)
+# and matching the rforum.t4gc.in shape: bundled Postgres+Redis, S3-backed
+# uploads with a local PVC read fallback, ingress-nginx + TLS.
+#
+#   helm upgrade --install rforum deploy/helm/rforum \
+#     -f deploy/helm/rforum/values.yaml \
+#     -f my-secrets.yaml \
+#     --namespace rforum --create-namespace
+#
+# Secrets (app.secretKey, postgresql.auth.password, storage.s3.secretAccessKey,
+# etc.) are intentionally NOT set here — supply them via a separate
+# --set/-f file or existingSecret, never commit real values into this file.
 
 nameOverride: ""
 fullnameOverride: ""
@@ -11,15 +20,15 @@ imagePullSecrets: []
 image:
   # Set to a registry prefix (e.g. "registry.example.com/") if pushing built
   # images to a registry. Leave empty when images are built locally and
-  # imported directly into containerd on each k3s node (see docs/deploy.md).
+  # imported directly into containerd on each k3s node (see docs/k3s-deploy.md).
   registry: ""
   backend:
     repository: rforum-backend
-    tag: "latest"
+    tag: "1.0.0"
     pullPolicy: IfNotPresent
   frontend:
     repository: rforum-frontend
-    tag: "latest"
+    tag: "1.0.0"
     pullPolicy: IfNotPresent
 
 # ── Backend (FastAPI/Uvicorn) ────────────────────────────────────────────
@@ -46,11 +55,11 @@ backend:
 
   resources:
     requests:
-      cpu: 500m
-      memory: 512Mi
+      cpu: "1"
+      memory: 1Gi
     limits:
-      cpu: "2"
-      memory: 1536Mi
+      cpu: "3"
+      memory: 3Gi
 
   probes:
     path: /api/health
@@ -70,16 +79,16 @@ backend:
 
 # ── Frontend (static SvelteKit build served by nginx) ───────────────────
 frontend:
-  replicaCount: 2
+  replicaCount: 1
   service:
     port: 8080
   resources:
     requests:
-      cpu: 100m
-      memory: 64Mi
+      cpu: 200m
+      memory: 128Mi
     limits:
-      cpu: 500m
-      memory: 256Mi
+      cpu: "1"
+      memory: 512Mi
   probes:
     path: /healthz
     initialDelaySeconds: 5
@@ -101,14 +110,18 @@ postgresql:
     password: ""
     existingSecret: ""
   persistence:
-    size: 10Gi
+    size: 50Gi
   resources:
     requests:
-      cpu: 250m
-      memory: 256Mi
-    limits:
       cpu: "1"
       memory: 1Gi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+  # pool_size=20 + max_overflow=10 per uvicorn worker (app/database.py) × 2
+  # workers × 1 replica = up to 60 pooled connections — comfortably inside
+  # Postgres's default max_connections=100. Re-check this arithmetic before
+  # raising backend.replicaCount or backend.workers.
 
 # ── Bundled Redis (pub/sub fan-out + rate-limit counters) ────────────────
 # Redis holds no durable business data (WS pub/sub is transient,
@@ -120,14 +133,14 @@ redis:
     repository: redis
     tag: "7-alpine"
   persistence:
-    size: 1Gi
+    size: 2Gi
   resources:
     requests:
-      cpu: 100m
-      memory: 128Mi
+      cpu: 250m
+      memory: 256Mi
     limits:
-      cpu: 500m
-      memory: 512Mi
+      cpu: "1"
+      memory: 1Gi
 
 # ── Application configuration (app/config.py Settings) ──────────────────
 app:
@@ -188,8 +201,8 @@ app:
     responsePerIpWindowSeconds: 60
 
   # JWT signing secret (app/config.py SECRET_KEY). MUST be overridden — see
-  # README in this chart directory / NOTES.txt. Prefer `existingSecret` over
-  # setting this in plain values for anything beyond local testing.
+  # NOTES.txt. Prefer `existingSecret` over setting this in plain values for
+  # anything beyond local testing.
   secretKey: ""
   # Name of a pre-created Secret to source SECRET_KEY (and, when S3 storage
   # is enabled, AWS credentials) from instead of the values above. Expected
@@ -200,15 +213,15 @@ app:
 
 # ── Presentation/upload storage (app/storage/) ───────────────────────────
 storage:
-  # "local" (default — zero external dependencies, backed by the PVC below)
-  # or "s3" (app/storage/s3.py; local PVC still mounted and used as a
-  # fallback read path for anything not yet in the bucket — see
-  # app/storage/fallback.py, which is exactly how the current production
-  # deployment is configured after its S3 migration).
-  backend: local
+  # New writes go to S3; reads fall back to the local PVC for anything
+  # uploaded before the S3 switchover (app/storage/fallback.py). Fill in
+  # storage.s3.bucket and supply credentials via app.existingSecret (keys
+  # aws-access-key-id / aws-secret-access-key) rather than
+  # storage.s3.secretAccessKey directly.
+  backend: s3
   root: /data/uploads
   persistence:
-    size: 20Gi
+    size: 30Gi
     accessMode: ReadWriteOnce
   s3:
     bucket: ""
@@ -249,8 +262,8 @@ ingress:
   host: rforum.example.com
   annotations: {}
   tls:
-    enabled: false
-    secretName: ""
+    enabled: true
+    secretName: rforum-tls
   # Matches the current prod nginx `client_max_body_size 25m` (app enforces
   # UPLOAD_MAX_MB=20 itself; the proxy limit carries headroom above that).
   maxBodySizeMb: 25
