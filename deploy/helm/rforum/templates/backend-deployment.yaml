@@ -166,12 +166,8 @@ spec:
             {{- toYaml .Values.backend.resources | nindent 12 }}
       volumes:
         - name: uploads
-          {{- if .Values.storage.persistence.enabled }}
           persistentVolumeClaim:
             claimName: {{ include "rforum.fullname" . }}-uploads
-          {{- else }}
-          emptyDir: {}
-          {{- end }}
         - name: tmp
           emptyDir: {}
         - name: home

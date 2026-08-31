@@ -101,7 +101,6 @@ postgresql:
     password: ""
     existingSecret: ""
   persistence:
-    enabled: true
     size: 10Gi
   resources:
     requests:
@@ -121,7 +120,6 @@ redis:
     repository: redis
     tag: "7-alpine"
   persistence:
-    enabled: true
     size: 1Gi
   resources:
     requests:
@@ -210,7 +208,6 @@ storage:
   backend: local
   root: /data/uploads
   persistence:
-    enabled: true
     size: 20Gi
     accessMode: ReadWriteOnce
   s3:
