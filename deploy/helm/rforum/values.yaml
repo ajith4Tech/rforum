@@ -270,17 +270,10 @@ serviceAccount:
 # ── Ingress ───────────────────────────────────────────────────────────────
 ingress:
   enabled: true
-  # "nginx" (ingress-nginx) or "traefik" (k3s's bundled controller) — picks
-  # the annotation set in templates/ingress.yaml. nginx is the default
-  # because it's a direct, well-documented translation of the hand-tuned
-  # nginx.conf already validated at 500 concurrent guests (proxy timeouts,
-  # body size, WS upgrade headers); Traefik's per-route timeout knobs aren't
-  # expressible as plain Ingress annotations. See docs/deploy.md.
-  controller: nginx
-  # Leave empty to default to `ingress.controller`'s name (the common case:
-  # ingress-nginx installs as class "nginx", k3s's bundled Traefik as class
-  # "traefik"). Set explicitly only if your controller uses a custom class name.
-  className: ""
+  # ingress-nginx class. Timeouts and body size below are a direct
+  # translation of the hand-tuned nginx.conf already validated at 500
+  # concurrent guests (proxy timeouts, body size, WS upgrade headers).
+  className: nginx
   host: rforum.example.com
   annotations: {}
   tls:
