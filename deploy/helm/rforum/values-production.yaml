@@ -43,7 +43,6 @@ frontend:
       memory: 512Mi
 
 postgresql:
-  enabled: true
   persistence:
     size: 50Gi
   resources:

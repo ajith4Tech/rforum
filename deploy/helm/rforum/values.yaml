@@ -88,10 +88,7 @@ frontend:
     failureThreshold: 3
 
 # ── Bundled PostgreSQL (StatefulSet) ─────────────────────────────────────
-# Disable and fill in `externalDatabase` to point at a managed/external
-# Postgres instead.
 postgresql:
-  enabled: true
   image:
     repository: postgres
     tag: "16-alpine"
@@ -99,7 +96,7 @@ postgresql:
     username: rforum
     database: rforum
     # Password is required — supply via --set postgresql.auth.password=...,
-    # via values-production.yaml, or (recommended) set auth.existingSecret to
+    # via a secrets values file, or (recommended) set auth.existingSecret to
     # a Secret you created out-of-band containing key "postgres-password".
     password: ""
     existingSecret: ""
@@ -114,14 +111,6 @@ postgresql:
     limits:
       cpu: "1"
       memory: 1Gi
-
-externalDatabase:
-  host: ""
-  port: 5432
-  database: rforum
-  username: rforum
-  existingSecret: ""
-  existingSecretPasswordKey: "postgres-password"
 
 # ── Bundled Redis (pub/sub fan-out + rate-limit counters) ────────────────
 # Disable and fill in `externalRedis` to point at a managed/external Redis

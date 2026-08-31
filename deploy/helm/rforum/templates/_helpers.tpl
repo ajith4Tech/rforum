@@ -85,64 +85,35 @@ repository:tag pair.
 {{- end -}}
 
 {{/*
-Postgres connection details — resolves to either the bundled StatefulSet or
-externalDatabase, depending on postgresql.enabled.
+Postgres connection details — always the bundled StatefulSet.
 */}}
 {{- define "rforum.db.host" -}}
-{{- if .Values.postgresql.enabled -}}
 {{ include "rforum.postgresql.fullname" . }}
-{{- else -}}
-{{ .Values.externalDatabase.host }}
-{{- end -}}
 {{- end -}}
 
 {{- define "rforum.db.port" -}}
-{{- if .Values.postgresql.enabled -}}
 5432
-{{- else -}}
-{{ .Values.externalDatabase.port }}
-{{- end -}}
 {{- end -}}
 
 {{- define "rforum.db.name" -}}
-{{- if .Values.postgresql.enabled -}}
 {{ .Values.postgresql.auth.database }}
-{{- else -}}
-{{ .Values.externalDatabase.database }}
-{{- end -}}
 {{- end -}}
 
 {{- define "rforum.db.user" -}}
-{{- if .Values.postgresql.enabled -}}
 {{ .Values.postgresql.auth.username }}
-{{- else -}}
-{{ .Values.externalDatabase.username }}
-{{- end -}}
 {{- end -}}
 
 {{/* Name of the Secret holding the DB password, and the key within it */}}
 {{- define "rforum.db.secretName" -}}
-{{- if .Values.postgresql.enabled -}}
 {{- if .Values.postgresql.auth.existingSecret -}}
 {{ .Values.postgresql.auth.existingSecret }}
 {{- else -}}
 {{ include "rforum.fullname" . }}
 {{- end -}}
-{{- else -}}
-{{- if .Values.externalDatabase.existingSecret -}}
-{{ .Values.externalDatabase.existingSecret }}
-{{- else -}}
-{{ include "rforum.fullname" . }}
-{{- end -}}
-{{- end -}}
 {{- end -}}
 
 {{- define "rforum.db.secretKey" -}}
-{{- if .Values.postgresql.enabled -}}
 postgres-password
-{{- else -}}
-{{ .Values.externalDatabase.existingSecretPasswordKey }}
-{{- end -}}
 {{- end -}}
 
 {{/* Redis host used to build REDIS_URL when the bundled Redis is enabled */}}

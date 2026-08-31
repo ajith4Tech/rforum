@@ -6,8 +6,8 @@ metadata:
   labels:
     {{- include "rforum.componentLabels" (dict "root" . "component" "migrate") | nindent 4 }}
   annotations:
-    # post-install (not pre-install!) on first install: when postgresql.enabled,
-    # the Postgres StatefulSet is a normal chart resource, not a hook — it
+    # post-install (not pre-install!) on first install: the Postgres
+    # StatefulSet is a normal chart resource, not a hook — it
     # doesn't exist yet during a pre-install hook, so a pre-install migration
     # Job can never resolve its Service DNS on a truly fresh install (verified:
     # this failed outright in local testing). post-install runs after normal
