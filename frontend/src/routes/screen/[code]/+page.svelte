@@ -39,6 +39,29 @@
   let isClearingResponses = $state(false);
   let screenControlPollTimer: ReturnType<typeof setInterval> | null = null;
 
+  // Refresh does window.location.reload(), which wipes in-memory
+  // lastScreenControlId. Redis keeps the command for 15s and onMount polls
+  // it immediately — without persisting the id, the projector reloads in a
+  // loop until TTL expires (and it looks infinite).
+  function screenControlSeenKey(sessionCode: string) {
+    return `rforum_last_screen_control_${sessionCode}`;
+  }
+  function readSeenScreenControlId(sessionCode: string): string {
+    try {
+      return sessionStorage.getItem(screenControlSeenKey(sessionCode)) || '';
+    } catch {
+      return '';
+    }
+  }
+  function rememberScreenControlId(sessionCode: string, commandId: string) {
+    lastScreenControlId = commandId;
+    try {
+      sessionStorage.setItem(screenControlSeenKey(sessionCode), commandId);
+    } catch {
+      // sessionStorage blocked — in-memory dedupe still covers this page lifetime.
+    }
+  }
+
   // Use a queue to prevent race conditions when handling WebSocket messages
   let messageQueue: any[] = [];
   let isProcessingMessage = false;
@@ -135,6 +158,7 @@
       ? window.location.pathname.split('/').pop() || ''
       : '';
     guestUrl = typeof window !== 'undefined' ? `${window.location.origin}/session/${code}` : '';
+    lastScreenControlId = readSeenScreenControlId(code);
     window.addEventListener("storage", handleLocalScreenControl);
 
     // Always connect WS so the screen auto-recovers when the session starts.
@@ -313,7 +337,7 @@
       }
     } else if (msg.event === 'screen_control') {
       if (msg.data?.command_id && msg.data.command_id === lastScreenControlId) return;
-      if (msg.data?.command_id) lastScreenControlId = msg.data.command_id;
+      if (msg.data?.command_id) rememberScreenControlId(code, msg.data.command_id);
       console.log('[screen] received screen_control', msg.data);
       if (msg.data?.action === 'refresh') {
         window.location.reload();

@@ -33,6 +33,8 @@ spec:
       serviceAccountName: {{ include "rforum.serviceAccountName" . }}
       securityContext:
         runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
       initContainers:
         - name: wait-for-postgres
           image: {{ include "rforum.backend.image" . }}
@@ -71,7 +73,11 @@ spec:
             - |
               set -e
               export DATABASE_URL="postgresql+asyncpg://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}"
-              cd db && alembic upgrade head
+              # `heads` (plural): this repo has two Alembic branch tips
+              # (org_settings + session_qr_visibility). `upgrade head` fails
+              # when the restored dump has both stamped. Settings() also
+              # requires SECRET_KEY (env.py imports app.database).
+              cd db && alembic upgrade heads
           envFrom:
             - configMapRef:
                 name: {{ include "rforum.fullname" . }}-config
@@ -81,6 +87,11 @@ spec:
                 secretKeyRef:
                   name: {{ include "rforum.db.secretName" . }}
                   key: {{ include "rforum.db.secretKey" . }}
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "rforum.app.secretName" . }}
+                  key: secret-key
           resources:
             {{- toYaml .Values.migrations.resources | nindent 12 }}
 {{- end }}

@@ -68,7 +68,14 @@ uploads/
 db-backups/
 .env.migration
 
+# Local Helm secrets overlay for this host — never commit
+values-migration.yaml
+deploy/helm/rforum/values-migration.yaml
+deploy/helm/rforum/.invite-code-smoke
+
 .claude/
 
 rforum_500_user_load_test.js
 rforum_500_user_load_test.legacy.js
+DEPLOY_REPORT.md
+CHART_SIMPLIFICATION.md

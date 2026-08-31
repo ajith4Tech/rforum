@@ -3,9 +3,15 @@
 # Target must already exist (the migration Compose db service creates
 # POSTGRES_DB on first boot). Does not drop the database itself.
 #
-#   DUMP_FILE=/path/to/rforum-rforum-YYYYMMDDThhmmssZ.dump \
+# Compose (docker-compose.migration.yml):
+#   DUMP_FILE=/path/to/rforum_backup.dump \
 #   PGHOST=127.0.0.1 PGPORT=5432 PGUSER=rforum PGDATABASE=rforum \
 #   PGPASSWORD='...' ./scripts/migration/restore_db.sh
+#
+# k3s: copy the dump into the Postgres pod and run pg_restore there — see
+# docs/k3s-deploy.md § "Restore production data". The clustered Postgres
+# password is the one in Secret `rforum` (key postgres-password), which
+# does not have to match the VM that produced the dump.
 #
 # Defaults match docker-compose.migration.yml's published loopback port (5432),
 # not docker-compose.yml's dev port (5433).

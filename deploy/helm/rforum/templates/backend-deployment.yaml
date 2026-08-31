@@ -32,8 +32,12 @@ spec:
       # traffic here before the drain begins) without regressing the
       # zero-unexpected-disconnect result from the 500-guest load test.
       terminationGracePeriodSeconds: {{ .Values.backend.terminationGracePeriodSeconds }}
+      # Numeric UID required: app/Dockerfile uses `USER rforum` (name).
+      # runAsNonRoot without runAsUser fails CreateContainerConfigError.
       securityContext:
         runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
       initContainers:
         # Backend pods and the migration Job are both normal/hook resources
         # submitted around the same time as the bundled Postgres StatefulSet
@@ -83,13 +87,18 @@ spec:
             - |
               set -e
               export DATABASE_URL="postgresql+asyncpg://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}"
+              # --proxy-headers + forwarded-allow-ips='*' are required
+              # behind Traefik: otherwise FastAPI 307s /api/sessions to
+              # http://… and the browser blocks mixed content (login loop).
               exec uvicorn app.main:app \
                 --host 0.0.0.0 \
                 --port {{ .Values.backend.port }} \
                 --workers {{ .Values.backend.workers }} \
                 --loop {{ .Values.backend.loop }} \
                 --http {{ .Values.backend.httpImpl }} \
-                --backlog {{ .Values.backend.backlog }}
+                --backlog {{ .Values.backend.backlog }} \
+                --proxy-headers \
+                --forwarded-allow-ips='*'
           lifecycle:
             preStop:
               exec:

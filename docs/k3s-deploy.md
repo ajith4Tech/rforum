@@ -1,43 +1,57 @@
 # Deploying Rforum to k3s with Helm
 
-This is the exact command sequence for a fresh Ubuntu VM. The chart lives at
-[`deploy/helm/rforum/`](../deploy/helm/rforum/); see that directory's
-`values.yaml` for every configurable knob and `NOTES.txt` for what prints
-after install.
+This is the command sequence verified on a **shared single-node k3s**
+host (Traefik already serving other Ingresses on 80/443, cert-manager
+already installed). The chart lives at
+[`deploy/helm/rforum/`](../deploy/helm/rforum/); see `values.yaml` for
+every knob and `NOTES.txt` for what prints after install.
 
-Reference VM: 4 vCPU / 8GB (double the 2 vCPU / 3.7GB host the 500-guest k6
-load test was validated against). Scale the resource requests/limits in
-`values.yaml` down if your VM is smaller.
-
-## 1. Install k3s
+Helm talks to the cluster via kubeconfig. On k3s, always:
 
 ```bash
-# Traefik is disabled — this chart's Ingress is tuned for ingress-nginx
-# only. Do not keep Traefik enabled; the chart no longer emits Traefik
-# annotations.
-curl -sfL https://get.k3s.io | sh -s - --disable=traefik
-
-sudo cat /var/lib/rancher/k3s/server/node-token   # only if you'll join other nodes later
+export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 ```
 
-k3s installs `kubectl` at `/usr/local/bin/kubectl` and writes a kubeconfig to
-`/etc/rancher/k3s/k3s.yaml`. For a non-root shell:
+(`kubectl` may already work; Helm without this tries `localhost:8080` and
+fails.)
+
+Reference sizing in `values.yaml` is 4 vCPU / 8GB. Scale requests/limits
+down on a smaller VM. On a busy shared node, confirm
+`kubectl describe node` still has headroom before install.
+
+## What this chart assumes
+
+| Piece | Chart default | Notes |
+|-------|---------------|--------|
+| Ingress | class `traefik` | k3s bundled Traefik. Do **not** `--disable=traefik` and do **not** install ingress-nginx on the same 80/443. |
+| TLS | Secret `rforum-tls` | cert-manager annotation on the Ingress; HTTP-01 solver must use class `traefik`. |
+| Images | `rforum-backend:1.0.0`, `rforum-frontend:1.0.0` | Built locally, imported into k3s containerd (`imagePullPolicy: IfNotPresent`). |
+| Backend UID | `runAsUser: 10001` | Matches `USER rforum` in `app/Dockerfile`. `runAsNonRoot` without a numeric UID fails `CreateContainerConfigError`. |
+| Uvicorn | `--proxy-headers --forwarded-allow-ips='*'` | So FastAPI 307s stay on **https**. Missing this causes mixed-content blocks (`http://…/api/sessions/`) and a `/login` loop. |
+| Migrations | Helm hook Job, `alembic upgrade heads` | Needs `SECRET_KEY` from the app Secret. `heads` (plural) because this repo has two Alembic branch tips. |
+
+---
+
+## 1. Install k3s (new VM only)
+
+Skip if k3s is already running.
 
 ```bash
+# Keep Traefik enabled — this chart's Ingress uses IngressClass "traefik".
+curl -sfL https://get.k3s.io | sh -
+
+sudo cat /var/lib/rancher/k3s/server/node-token   # only if you'll join other nodes later
+
 mkdir -p ~/.kube
 sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
 sudo chown $(id -u):$(id -g) ~/.kube/config
+export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 ```
 
-## 2. Verify the node
+Confirm the context is this node (`kubectl config current-context`,
+`kubectl get nodes`). Stop if it is not the cluster you intend.
 
-```bash
-kubectl get nodes
-# NAME     STATUS   ROLES                  AGE   VERSION
-# vm-host  Ready    control-plane,master   1m    v1.30.x+k3s1
-```
-
-## 3. Install Helm
+## 2. Helm
 
 ```bash
 curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
@@ -46,178 +60,43 @@ chmod +x get_helm.sh
 helm version
 ```
 
-## 4. Install ingress-nginx
+## 3. Traefik (bundled)
 
-### Why ingress-nginx, not Traefik
+The chart emits:
 
-k3s ships Traefik by default, but this app's WebSocket path
-(`/ws/{session_code}`) needs an 86400s proxy read timeout and `/api/`
-(presentation uploads) needs a 25MB body limit — exactly what the current
-bare-metal `nginx.conf` already enforces (see `docs/ARCHITECTURE.md` §9).
-ingress-nginx exposes both as plain per-Ingress annotations
-(`nginx.ingress.kubernetes.io/proxy-read-timeout`,
-`.../proxy-body-size`) — a direct, auditable translation of the existing
-config. Traefik has no equivalent per-Ingress-object timeout annotation
-(it's a static/dynamic entrypoint setting), so the same tuning would require
-a k3s-specific `HelmChartConfig` resource instead. This chart only emits
-ingress-nginx annotations.
+- Ingress `*-main` (`/` frontend, `/api` backend) and `*-ws` (`/ws`)
+- Traefik `ServersTransport` (86400s on `/ws`, 60s on `/api`)
+- Traefik `Middleware` buffering (`maxRequestBodyBytes` = 25MB)
+
+Idle **entrypoint** timeout is still Traefik-global (default 180s). Raise
+it once per cluster (brief Traefik restart — affects every Ingress on the
+node):
 
 ```bash
-helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
-helm repo update
-helm install ingress-nginx ingress-nginx/ingress-nginx \
-  --namespace ingress-nginx --create-namespace \
-  --set controller.ingressClassResource.name=nginx \
-  --set controller.service.type=LoadBalancer
-```
-
-On a single-node k3s VM, `LoadBalancer` is satisfied by k3s's bundled
-ServiceLB (Klipper) and simply binds host ports 80/443.
-
-## 5. Build and load application images
-
-Run from the repository root (`/home/ubuntu/rforum` or wherever you cloned
-it). No external registry is required — images are imported directly into
-k3s's embedded containerd.
-
-```bash
-docker build -f app/Dockerfile -t rforum-backend:1.0.0 .
-docker build -f frontend/Dockerfile -t rforum-frontend:1.0.0 ./frontend
-
-docker save rforum-backend:1.0.0  | sudo k3s ctr images import -
-docker save rforum-frontend:1.0.0 | sudo k3s ctr images import -
-
-# Confirm both landed in containerd's local image store:
-sudo k3s ctr images list | grep rforum
-```
-
-If you rebuild an image, re-run the two `docker save | k3s ctr images
-import` lines and then `kubectl rollout restart deployment/...` (imagePullPolicy
-is `IfNotPresent`, so a same-tag rebuild needs an explicit restart to pick up
-the new layer — or bump the tag and `helm upgrade` instead).
-
-## 6. Create the namespace
-
-```bash
-kubectl create namespace rforum
-```
-
-## 7. Create production secrets
-
-Don't put real secrets in a committed values file. Generate a `SECRET_KEY`
-and a Postgres password, then pass them at install time (or in a
-gitignored local file):
-
-```bash
-SECRET_KEY=$(openssl rand -hex 32)
-PG_PASSWORD=$(openssl rand -hex 20)
-
-cat > /tmp/rforum-secrets.yaml <<EOF
-app:
-  secretKey: "${SECRET_KEY}"
-  inviteCode: "$(openssl rand -hex 6)"
-postgresql:
-  auth:
-    password: "${PG_PASSWORD}"
+kubectl apply -f - <<'EOF'
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: traefik
+  namespace: kube-system
+spec:
+  valuesContent: |-
+    additionalArguments:
+      - "--entryPoints.web.transport.respondingTimeouts.idleTimeout=86400s"
+      - "--entryPoints.websecure.transport.respondingTimeouts.idleTimeout=86400s"
 EOF
-chmod 600 /tmp/rforum-secrets.yaml
 ```
 
-If you're using S3 storage (`storage.backend: s3`), add AWS credentials to
-the same file:
+On a single-node VM, Traefik's LoadBalancer is ServiceLB (Klipper) on
+host 80/443.
 
-```yaml
-storage:
-  s3:
-    accessKeyId: "AKIA..."
-    secretAccessKey: "..."
-```
+## 4. cert-manager
 
-(Or skip both keys entirely and rely on an IAM instance profile attached to
-the VM — `app/storage/s3.py` falls back to boto3's default credential chain
-when they're blank.)
+Skip install if `kubectl get ns cert-manager` already exists. Match the
+**existing** ClusterIssuer name (`kubectl get clusterissuer`) — this host
+uses `letsencrypt-prod`, not `letsencrypt`.
 
-Alternatively, pre-create your own Kubernetes Secrets and point
-`app.existingSecret` / `postgresql.auth.existingSecret` at them instead —
-see `values.yaml` for the expected keys.
-
-## 8. Configure `values.yaml`
-
-Edit `deploy/helm/rforum/values.yaml`:
-
-- `ingress.host` → your real hostname (replaces `rforum.example.com`)
-- `storage.s3.bucket` / `storage.s3.region` if using S3 storage
-- `image.backend.tag` / `image.frontend.tag` if you didn't build `1.0.0`
-
-## 9. Install
-
-```bash
-helm upgrade --install rforum deploy/helm/rforum \
-  --namespace rforum \
-  -f deploy/helm/rforum/values.yaml \
-  -f /tmp/rforum-secrets.yaml
-```
-
-On a fresh install, Postgres/Redis/backend/frontend are all submitted as
-normal resources first, then the Alembic migration Job runs as a
-**post-install** hook (not pre-install — the bundled Postgres StatefulSet
-doesn't exist yet during a pre-install hook, so migrations can't run before
-it; see the comment in `templates/migration-job.yaml`). On later `helm
-upgrade` runs, migrations run as a **pre-upgrade** hook instead, before the
-upgrade's changes apply — by then Postgres is already up from the prior
-release. Both the migration Job and backend pods carry a `wait-for-postgres`
-initContainer so they don't fail outright if Postgres takes a few extra
-seconds to accept connections after being created.
-
-One consequence on a fresh install: backend pods can start and report
-Ready (`/api/health` doesn't check the database) slightly before migrations
-finish, so the very first requests in that brief window may 500. This is
-self-healing (no crash-loop) and only affects the first install of a
-release with no existing traffic.
-
-## 10. Check rollout
-
-```bash
-kubectl -n rforum get pods
-kubectl -n rforum get svc
-kubectl -n rforum get ingress
-```
-
-All pods should reach `Running`/`1/1` or `2/2` Ready. Check the migration
-Job specifically — `kubectl -n rforum get jobs` — and confirm it reached
-`Complete` rather than assuming pod-Ready implies migrations finished.
-
-## 11. View logs
-
-```bash
-kubectl -n rforum logs -l app.kubernetes.io/component=migrate --tail=200
-kubectl -n rforum logs -l app.kubernetes.io/component=backend -f
-kubectl -n rforum logs -l app.kubernetes.io/component=frontend -f
-```
-
-## 12. Migrations
-
-Already run automatically by step 9 (Helm `post-install`/`pre-upgrade` hook —
-see `templates/migration-job.yaml`). To re-run manually against a live
-release without a full upgrade:
-
-```bash
-helm upgrade rforum deploy/helm/rforum -n rforum \
-  -f deploy/helm/rforum/values.yaml -f /tmp/rforum-secrets.yaml
-```
-
-## 13. Configure DNS
-
-Point your domain's `A`/`AAAA` record at the VM's public IP. k3s's
-ServiceLB binds the ingress-nginx LoadBalancer Service directly to host
-ports 80/443, so no additional cloud load balancer is needed for a
-single-node deployment.
-
-## 14. Configure HTTPS
-
-Two options:
-
-**cert-manager (recommended, automatic renewal):**
+Fresh cluster:
 
 ```bash
 helm repo add jetstack https://charts.jetstack.io
@@ -239,67 +118,251 @@ spec:
     solvers:
       - http01:
           ingress:
-            ingressClassName: nginx
+            class: traefik
 EOF
 ```
 
-Then add to your values file:
+Put the issuer name on the rforum overlay (step 7), not in git:
 
 ```yaml
 ingress:
+  host: rforum.example.com
+  className: traefik
   annotations:
-    cert-manager.io/cluster-issuer: letsencrypt
+    cert-manager.io/cluster-issuer: letsencrypt   # or letsencrypt-prod
   tls:
     enabled: true
     secretName: rforum-tls
 ```
 
-and `helm upgrade` again.
+## 5. Build and load images
 
-**Or reuse existing certs** (e.g. copied from the current
-`rforum.t4gc.in` Let's Encrypt certs): create the TLS secret directly and
-just set `ingress.tls.enabled: true` / `ingress.tls.secretName`:
+From the repository root. No external registry.
 
 ```bash
-kubectl -n rforum create secret tls rforum-tls \
-  --cert=fullchain.pem --key=privkey.pem
+docker build -f app/Dockerfile -t rforum-backend:1.0.0 .
+docker build -f frontend/Dockerfile -t rforum-frontend:1.0.0 ./frontend
+
+docker save rforum-backend:1.0.0  | sudo k3s ctr images import -
+docker save rforum-frontend:1.0.0 | sudo k3s ctr images import -
+
+sudo k3s ctr images list | grep rforum
 ```
 
-## 15. Verify the frontend
+Same-tag rebuilds need `kubectl -n rforum rollout restart deploy/rforum-backend`
+(and frontend) because `imagePullPolicy` is `IfNotPresent`.
+
+## 6. Secrets overlay (never commit)
+
+Chart `secret.yaml` expects:
+
+- DB Secret: `postgres-password`
+- App Secret: `secret-key`, `super-admin-bootstrap-token`; plus
+  `aws-access-key-id` / `aws-secret-access-key` when `storage.backend: s3`
+
+`INVITE_CODE` and `S3_BUCKET` are ConfigMap/values, not Secret keys.
+
+**Migrating an existing VM:** reuse `SECRET_KEY`, `INVITE_CODE`,
+`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `S3_BUCKET` (and region /
+endpoint) from the backed-up `.env` so JWTs and S3 keep working. Generate
+a **new** `POSTGRES_PASSWORD` — the dump does not need the old DB password.
 
 ```bash
-curl -sk https://<your-host>/ | head -20        # SvelteKit index.html
+# Example: source keys from a backup .env, new Postgres password
+python3 - <<'PY'
+# write /tmp/rforum-secrets.yaml (mode 600) — do not print values
+...
+PY
+chmod 600 /tmp/rforum-secrets.yaml
 ```
 
-## 16. Verify the API
+Shape of `/tmp/rforum-secrets.yaml`:
+
+```yaml
+app:
+  secretKey: "..."          # SECRET_KEY
+  inviteCode: "..."         # INVITE_CODE
+  superAdminEmail: ""       # optional
+postgresql:
+  auth:
+    password: "..."         # fresh openssl rand -hex 20
+storage:
+  s3:
+    bucket: "..."
+    region: "eu-north-1"
+    endpoint: ""            # or https://s3.eu-north-1.amazonaws.com
+    accessKeyId: "..."
+    secretAccessKey: "..."
+ingress:
+  host: rforum.t4gc.in
+  className: traefik
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+```
+
+Or pre-create Kubernetes Secrets and set `app.existingSecret` /
+`postgresql.auth.existingSecret` (see `values.yaml` for key names).
+
+`/tmp/rforum-secrets.yaml` is listed in `.gitignore` as
+`values-migration.yaml` style — keep it off git either way.
+
+## 7. Helm lint, then install
 
 ```bash
-curl -sk https://<your-host>/api/health
+helm lint deploy/helm/rforum \
+  --set postgresql.auth.password=lint-only \
+  --set app.secretKey=lint-only \
+  --set storage.s3.bucket=lint-bucket
+
+helm upgrade --install rforum deploy/helm/rforum \
+  --namespace rforum --create-namespace \
+  -f deploy/helm/rforum/values.yaml \
+  -f /tmp/rforum-secrets.yaml
+```
+
+Release name **`rforum`**, namespace **`rforum`**.
+
+On a **fresh** install, Postgres/Redis/backend/frontend are submitted
+first, then Alembic runs as a **post-install** hook. On later upgrades it
+is a **pre-upgrade** hook. The Job and backend both `wait-for-postgres`.
+
+`/api/health` does not touch the DB, so backend can show Ready a few
+seconds before migrations finish on a first install.
+
+**Restore-then-migrate:** if you will load a Postgres dump next, install
+once with `migrations.enabled: false` in the overlay so the hook does not
+create an empty schema you immediately overwrite. After restore, set it
+back to `true` and `helm upgrade` (or leave it true if the dump already
+includes `alembic_version` — `upgrade heads` is then a no-op).
+
+## 8. Rollout checks
+
+```bash
+kubectl -n rforum get pods,svc,ingress,certificate,pvc
+kubectl -n rforum get jobs -l app.kubernetes.io/component=migrate
+kubectl -n rforum logs -l app.kubernetes.io/component=migrate --tail=80
+```
+
+Expect Postgres, Redis, backend, frontend `1/1 Running`. Ingress class
+**traefik**, ADDRESS = node public IP. Certificate `rforum-tls` Ready.
+
+If backend is `Init:CreateContainerConfigError` mentioning a non-numeric
+user, the chart's `runAsUser: 10001` is missing from the live revision.
+
+## 9. Restore production data (optional second pass)
+
+Use a backup tree like `/root/rforum_db_backup`:
+
+| File / dir | Restore? |
+|------------|----------|
+| `rforum_backup.dump` | Yes — custom-format `pg_restore` |
+| `rforum_redis_backup.rdb` | Yes — onto the Redis PVC (often empty; still copy it) |
+| `uploads/` | Yes — onto PVC `rforum-uploads`, chown **10001** |
+| `.env` | Already applied as Helm secrets in step 6 |
+| `frontend-build/`, `nginx/`, `systemd/` | **No** — Traefik + current images replace the old VM |
+
+Keep the backend down or crash-looping during Postgres restore is fine;
+do not run Alembic against an empty DB if you are about to `pg_restore --clean`.
+
+### Postgres
+
+```bash
+kubectl -n rforum cp /path/to/rforum_backup.dump rforum-postgresql-0:/tmp/rforum_backup.dump
+PGPASSWORD="$(kubectl -n rforum get secret rforum -o jsonpath='{.data.postgres-password}' | base64 -d)"
+kubectl -n rforum exec rforum-postgresql-0 -- \
+  env PGPASSWORD="${PGPASSWORD}" pg_restore \
+    --clean --if-exists --no-owner --no-acl --exit-on-error \
+    -U rforum -d rforum /tmp/rforum_backup.dump
+kubectl -n rforum exec rforum-postgresql-0 -- rm -f /tmp/rforum_backup.dump
+unset PGPASSWORD
+```
+
+`scripts/migration/restore_db.sh` is the same flags for Compose
+port-forward; on k3s, `kubectl exec` as above is simpler.
+
+Then `helm upgrade` with `migrations.enabled: true` so
+`alembic upgrade heads` catches any revisions newer than the dump.
+
+### Redis
+
+Redis is started with AOF. To load an RDB, stop the pod, replace files,
+start again:
+
+```bash
+kubectl -n rforum scale deploy/rforum-redis --replicas=0
+kubectl -n rforum wait --for=delete pod -l app.kubernetes.io/component=redis --timeout=120s
+
+# local-path volume, e.g.:
+# /var/lib/rancher/k3s/storage/pvc-<uid>_rforum_rforum-redis
+REDIS_PVC=$(kubectl -n rforum get pvc rforum-redis -o jsonpath='{.spec.volumeName}')
+# Resolve host path from the PV, then:
+#   rm -rf "$HOST/appendonlydir" "$HOST/dump.rdb"
+#   cp rforum_redis_backup.rdb "$HOST/dump.rdb"
+#   chown 999:999 "$HOST/dump.rdb"
+
+kubectl -n rforum scale deploy/rforum-redis --replicas=1
+```
+
+### Uploads (local fallback)
+
+```bash
+# PV for claim rforum-uploads — mount is /data/uploads in the backend
+rsync -a /path/to/backup/uploads/ "$UPLOADS_HOST_PATH/"
+chown -R 10001:10001 "$UPLOADS_HOST_PATH"
+```
+
+New writes still go to S3 when `storage.backend: s3`; the PVC is the
+read fallback (`app/storage/fallback.py`).
+
+## 10. DNS
+
+Point the hostname's `A`/`AAAA` at the VM public IP. Traefik already
+binds 80/443.
+
+## 11. Smoke test
+
+```bash
+curl -sI https://<host>/ | head -8          # 200, TLS from Let's Encrypt
+curl -sk https://<host>/api/health
 # {"status":"ok","service":"rforum","capabilities":{...}}
+
+# Slash redirect must stay on https (mixed-content / login-loop check):
+curl -sI https://<host>/api/sessions?limit=1 | grep -i location
+# location: https://<host>/api/sessions/?limit=1
 ```
 
-## 17. Verify the WebSocket
+Log in (invite code from the overlay). Dashboard events/sessions lists
+must not 307 to `http://`. Upload a presentation; confirm S3 or PVC
+fallback. WebSocket: `wss://<host>/ws/<code>` (dedicated Ingress
+`rforum-ws`).
 
 ```bash
-# Any WS client works; a quick smoke test with websocat:
-websocat "wss://<your-host>/ws/does-not-exist"
-# Expect an immediate close with code 4404 (session not found) — confirms
-# the Ingress is passing the Upgrade handshake through to the backend Service.
+websocat "wss://<host>/ws/does-not-exist"
+# close 4404 = session not found — Upgrade reached the backend
 ```
 
-## 18. Verify presentation upload + interactive slides
+## 12. Logs
 
-Log in through the UI (register with the `app.inviteCode` you set in step
-7), create an event/session, upload a PDF/PPTX, and confirm page images
-render and a poll/QNA slide accepts responses live. This exercises the
-storage backend (local PVC or S3), LibreOffice conversion, and the Redis
-pub/sub broadcast path end-to-end.
+```bash
+kubectl -n rforum logs -l app.kubernetes.io/component=migrate --tail=200
+kubectl -n rforum logs -l app.kubernetes.io/component=backend -c backend --tail=100
+kubectl -n rforum logs -l app.kubernetes.io/component=frontend --tail=50
+```
 
-## 19. Run the existing 500-user k6 load test
+## 13. Load test
 
-Run `rforum_500_user_load_test.js` **from a separate machine**, not from
-the cluster's node — see the load-test's own header comments for required
-env vars (moderator invite code, target host). Do not run it from this k3s
-host itself if it's small; validate capacity incrementally and watch
-`kubectl top pods` / `kubectl -n rforum get pods` for OOMKills or restarts
-during the run.
+Run `rforum_500_user_load_test.js` **from another machine**. Watch
+`kubectl top pods` / OOMKills. The 500-guest test was validated at
+`backend.replicaCount: 1`.
+
+## Troubleshooting
+
+| Symptom | Cause | Fix |
+|---------|--------|-----|
+| Helm `cluster unreachable` on `:8080` | Missing kubeconfig | `export KUBECONFIG=/etc/rancher/k3s/k3s.yaml` |
+| Ingress 404 on the public hostname | Ingress class `nginx` while Traefik owns 80/443 | `ingress.className: traefik` |
+| `CreateContainerConfigError` non-numeric user | `runAsNonRoot` without UID | Chart `runAsUser: 10001` |
+| Migrate Job: `SECRET_KEY` Field required | Job only had ConfigMap | Chart mounts `secret-key` from the app Secret |
+| Migrate Job: multiple Alembic heads | `alembic upgrade head` | Chart runs `upgrade heads` |
+| Login loops; console mixed content `http://…/api/sessions/` | 307 Location uses http | Uvicorn `--proxy-headers --forwarded-allow-ips='*'` (already in the chart) |
+| Certificate not issuing | HTTP-01 class ≠ Traefik | ClusterIssuer solver `class: traefik`; DNS A record to this node |

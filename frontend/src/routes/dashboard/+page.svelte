@@ -6,7 +6,8 @@
     listAssets,
     getStorageUsage,
     formatBytes,
-    isAuthenticated
+    isAuthenticated,
+    isAuthFailure
   } from '$lib/api';
   import { getEvents, getSessions, invalidateEvents, invalidateSessions } from '$lib/dataCache';
   import { Plus, ExternalLink, Copy, Calendar, Presentation, Radio, ArrowRight, CheckSquare, Square, Trash2, HardDrive, File, RefreshCw, Upload } from 'lucide-svelte';
@@ -112,8 +113,8 @@
       ]);
       sessions = sessionsResult.items;
       events = eventsResult.items;
-    } catch {
-      goto('/login');
+    } catch (e) {
+      if (isAuthFailure(e)) goto('/login');
     }
     // Assets/storage are non-critical — fetch separately so failures don't block the dashboard
     try {

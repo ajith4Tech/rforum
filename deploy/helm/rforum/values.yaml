@@ -1,7 +1,7 @@
 # Production values for rforum — sized for a 4 vCPU / 8GB VM (double the
 # 2 vCPU / 3.7GB host the 500-guest k6 load test was validated against)
 # and matching the rforum.t4gc.in shape: bundled Postgres+Redis, S3-backed
-# uploads with a local PVC read fallback, ingress-nginx + TLS.
+# uploads with a local PVC read fallback, k3s Traefik Ingress + TLS.
 #
 #   helm upgrade --install rforum deploy/helm/rforum \
 #     -f deploy/helm/rforum/values.yaml \
@@ -255,20 +255,26 @@ serviceAccount:
 # ── Ingress ───────────────────────────────────────────────────────────────
 ingress:
   enabled: true
-  # ingress-nginx class. Timeouts and body size below are a direct
-  # translation of the hand-tuned nginx.conf already validated at 500
-  # concurrent guests (proxy timeouts, body size, WS upgrade headers).
-  className: nginx
+  # k3s bundled Traefik (IngressClass "traefik"). Timeouts and body size
+  # below are applied via Traefik ServersTransport + buffering Middleware
+  # CRDs (see templates/ingress.yaml), matching the historical nginx.conf
+  # validated at 500 concurrent guests. Entrypoint idle timeout for long
+  # WebSockets is a Traefik setting — see docs/k3s-deploy.md.
+  className: traefik
   host: rforum.example.com
+  # Shared k3s clusters that already have cert-manager should set:
+  #   cert-manager.io/cluster-issuer: letsencrypt-prod
+  # (or `letsencrypt` — match `kubectl get clusterissuer`). HTTP-01 must
+  # use Ingress class traefik, same as this chart.
   annotations: {}
   tls:
     enabled: true
     secretName: rforum-tls
-  # Matches the current prod nginx `client_max_body_size 25m` (app enforces
+  # Matches the historical nginx `client_max_body_size 25m` (app enforces
   # UPLOAD_MAX_MB=20 itself; the proxy limit carries headroom above that).
   maxBodySizeMb: 25
-  # Matches the current prod nginx `proxy_read_timeout 86400` on /ws/.
+  # Matches the historical nginx `proxy_read_timeout 86400` on /ws/.
   wsTimeoutSeconds: 86400
-  # Matches the current prod nginx `proxy_read_timeout`/`proxy_send_timeout`
+  # Matches the historical nginx `proxy_read_timeout`/`proxy_send_timeout`
   # default (60s) for plain /api/ requests — much shorter than the WS timeout.
   apiTimeoutSeconds: 60

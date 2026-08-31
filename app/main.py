@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import ORJSONResponse
 from redis.asyncio import Redis
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 from app.config import get_settings
 from app.database import async_session, engine
@@ -109,6 +110,11 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
 )
+# Honor X-Forwarded-Proto from Traefik so slash-redirects stay https.
+# Without this, the browser blocks mixed content (http API URLs on an
+# https page) and the dashboard bounces back to /login. Helm also passes
+# uvicorn --proxy-headers --forwarded-allow-ips='*'.
+app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
 
 # Uploads are served through the /page/{page_num} endpoint — not as raw static files
 

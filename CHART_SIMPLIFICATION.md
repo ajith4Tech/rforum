@@ -2,7 +2,13 @@
 
 Repo-only change on branch `helm-chart-simplification`. Verified with
 `helm lint` and `helm template` diffs. **No `helm install` or `helm upgrade`
-was run against any cluster.**
+was run against any cluster at the time of that PR.**
+
+Production on k3s later switched Ingress back to **Traefik** (k3s default on
+a shared node) and added `runAsUser: 10001`, migrate-job `SECRET_KEY`,
+`alembic upgrade heads`, and uvicorn `--proxy-headers`. See
+[`docs/k3s-deploy.md`](./docs/k3s-deploy.md). The table below is the
+simplification PR as merged, not the live chart.
 
 ## What was removed and why
 

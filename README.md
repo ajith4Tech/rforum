@@ -234,11 +234,12 @@ Rforum supports two production deployment methods — there is no full
 Docker Compose stack for backend/frontend (`docker-compose.yml` only runs
 Postgres/Redis as containers; see "Quick Start" above):
 
-**1. k3s / Helm (recommended for new deployments)** — a full chart bundling
-backend, frontend, Postgres, Redis, ingress, and migrations. See
-[`docs/k3s-deploy.md`](./docs/k3s-deploy.md) for the exact command sequence
-and [`deploy/helm/rforum/`](./deploy/helm/rforum/) for every configurable
-value.
+**1. k3s / Helm (recommended for new deployments)** — chart at
+[`deploy/helm/rforum/`](./deploy/helm/rforum/) (Traefik Ingress, bundled
+Postgres/Redis, cert-manager TLS, Alembic hook). Follow
+[`docs/k3s-deploy.md`](./docs/k3s-deploy.md) for install, secrets, optional
+Postgres/Redis/uploads restore from a VM backup, and the HTTPS
+proxy-header setting that prevents a `/login` mixed-content loop.
 
 **2. Bare-metal** — Uvicorn running directly on the host (per "Manual
 Installation" above) behind your own reverse proxy. See
@@ -285,8 +286,8 @@ config: it's baked into the frontend's Docker image (see
 `frontend/Dockerfile`) to serve the built static site on its own — used by
 the k3s/Helm deployment path, not a reverse proxy for the whole app. If
 you're deploying to k3s, use [`docs/k3s-deploy.md`](./docs/k3s-deploy.md)
-instead, which configures ingress-nginx via Helm chart annotations rather
-than a hand-written nginx.conf.
+instead, which routes TLS and `/api`+`/ws` through Traefik (k3s default)
+rather than a hand-written reverse-proxy nginx.conf.
 
 ## Workflow Guides
 

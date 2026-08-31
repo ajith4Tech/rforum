@@ -1,25 +1,35 @@
 {{- if .Values.ingress.enabled }}
+{{- $ns := .Release.Namespace }}
+{{- $fullname := include "rforum.fullname" . }}
 ---
-# Long-lived WebSocket path, split into its own Ingress object because
-# ingress-nginx annotations (proxy-read-timeout/proxy-send-timeout) apply to
-# the whole Ingress resource, not per-path — and /ws/ needs an 86400s read
-# timeout (matching the current bare-metal nginx.conf) while /api/ should
-# keep a normal short timeout.
+# Long-lived WebSocket path on its own Ingress so the WS ServersTransport
+# (86400s forwarding timeouts) does not apply to /api or the frontend.
+# Traefik proxies the Upgrade header by default.
+apiVersion: traefik.io/v1alpha1
+kind: ServersTransport
+metadata:
+  name: {{ $fullname }}-ws
+  labels:
+    {{- include "rforum.labels" . | nindent 4 }}
+spec:
+  forwardingTimeouts:
+    dialTimeout: 10s
+    idleConnTimeout: {{ .Values.ingress.wsTimeoutSeconds }}s
+    responseHeaderTimeout: {{ .Values.ingress.wsTimeoutSeconds }}s
+---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: {{ include "rforum.fullname" . }}-ws
+  name: {{ $fullname }}-ws
   labels:
     {{- include "rforum.labels" . | nindent 4 }}
   annotations:
-    nginx.ingress.kubernetes.io/proxy-read-timeout: {{ .Values.ingress.wsTimeoutSeconds | quote }}
-    nginx.ingress.kubernetes.io/proxy-send-timeout: {{ .Values.ingress.wsTimeoutSeconds | quote }}
-    nginx.ingress.kubernetes.io/proxy-connect-timeout: "10"
+    traefik.ingress.kubernetes.io/service.serverstransport: {{ printf "%s-%s-ws@kubernetescrd" $ns $fullname | quote }}
     {{- with .Values.ingress.annotations }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
 spec:
-  ingressClassName: {{ .Values.ingress.className | default "nginx" }}
+  ingressClassName: {{ .Values.ingress.className | default "traefik" }}
   {{- if .Values.ingress.tls.enabled }}
   tls:
     - hosts: [{{ .Values.ingress.host }}]
@@ -37,25 +47,44 @@ spec:
                 port:
                   number: {{ .Values.backend.service.port }}
 ---
-# Frontend (/) and API (/api) — shorter timeouts, larger body size for
-# presentation uploads (app UPLOAD_MAX_MB defaults to 20; the proxy limit
-# below carries headroom above that, matching the current nginx.conf's
-# `client_max_body_size 25m` on /api/).
+# 25MB body cap for presentation uploads (matches historical nginx
+# client_max_body_size 25m; the app still enforces UPLOAD_MAX_MB=20).
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: {{ $fullname }}-upload-body
+  labels:
+    {{- include "rforum.labels" . | nindent 4 }}
+spec:
+  buffering:
+    maxRequestBodyBytes: {{ mul .Values.ingress.maxBodySizeMb 1048576 }}
+---
+apiVersion: traefik.io/v1alpha1
+kind: ServersTransport
+metadata:
+  name: {{ $fullname }}-api
+  labels:
+    {{- include "rforum.labels" . | nindent 4 }}
+spec:
+  forwardingTimeouts:
+    dialTimeout: 10s
+    idleConnTimeout: {{ .Values.ingress.apiTimeoutSeconds }}s
+    responseHeaderTimeout: {{ .Values.ingress.apiTimeoutSeconds }}s
+---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: {{ include "rforum.fullname" . }}-main
+  name: {{ $fullname }}-main
   labels:
     {{- include "rforum.labels" . | nindent 4 }}
   annotations:
-    nginx.ingress.kubernetes.io/proxy-body-size: {{ printf "%vm" .Values.ingress.maxBodySizeMb | quote }}
-    nginx.ingress.kubernetes.io/proxy-read-timeout: {{ .Values.ingress.apiTimeoutSeconds | quote }}
-    nginx.ingress.kubernetes.io/proxy-send-timeout: {{ .Values.ingress.apiTimeoutSeconds | quote }}
+    traefik.ingress.kubernetes.io/router.middlewares: {{ printf "%s-%s-upload-body@kubernetescrd" $ns $fullname | quote }}
+    traefik.ingress.kubernetes.io/service.serverstransport: {{ printf "%s-%s-api@kubernetescrd" $ns $fullname | quote }}
     {{- with .Values.ingress.annotations }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
 spec:
-  ingressClassName: {{ .Values.ingress.className | default "nginx" }}
+  ingressClassName: {{ .Values.ingress.className | default "traefik" }}
   {{- if .Values.ingress.tls.enabled }}
   tls:
     - hosts: [{{ .Values.ingress.host }}]

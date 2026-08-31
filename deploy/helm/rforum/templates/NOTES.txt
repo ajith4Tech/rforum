@@ -40,7 +40,11 @@ registration (app/routers/auth.py).
      {{- if eq .Values.storage.backend "local" }} (PVC-backed, {{ .Values.storage.persistence.size }}).{{ else }} (S3 bucket "{{ .Values.storage.s3.bucket }}", with the local PVC kept as a read fallback for anything not yet migrated — app/storage/fallback.py).{{ end }}
    - Database migrations run once per install/upgrade via a post-install
      (first install) / pre-upgrade (later upgrades) Helm hook Job
-     (alembic upgrade head) — never per backend replica.
+     (`alembic upgrade heads`) — never per backend replica. The Job needs
+     SECRET_KEY from the app Secret (env.py loads Settings).
+   - IngressClass is Traefik (k3s default). Behind TLS, uvicorn is started
+     with --proxy-headers so API slash-redirects stay on https (otherwise
+     the browser blocks mixed content and login appears to loop).
 
 5) To upgrade after changing images/config:
    helm upgrade {{ .Release.Name }} deploy/helm/rforum -n {{ .Release.Namespace }} -f <your-values>.yaml

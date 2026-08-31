@@ -89,6 +89,12 @@ async function fetchJson<T>(path: string, options: RequestInit = {}, auth = fals
 // ── Auth ─────────────────────────────────────────────
 export const isAuthenticated = () => Boolean(getToken());
 
+/** True when an API error means the session is gone — not a generic 5xx/timeout. */
+export function isAuthFailure(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err ?? '');
+  return /not authenticated|unauthorized|invalid authentication credentials/i.test(msg);
+}
+
 export const logout = () => {
   if (typeof localStorage !== 'undefined') {
     localStorage.removeItem('rforum_token');

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
-  import { logout, getMe, isAuthenticated } from '$lib/api';
+  import { logout, getMe, isAuthenticated, isAuthFailure } from '$lib/api';
   import { invalidateAll } from '$lib/dataCache';
   import { currentUser } from '$lib/stores';
   import Nav from '$lib/components/Nav.svelte';
@@ -18,10 +18,12 @@
     try {
       const me = await getMe();
       currentUser.set(me);
-    } catch {
-      logout();
-      invalidateAll();
-      goto('/login');
+    } catch (e) {
+      if (isAuthFailure(e)) {
+        logout();
+        invalidateAll();
+        goto('/login');
+      }
     }
   });
 
