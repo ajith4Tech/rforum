@@ -12,9 +12,10 @@
     presentation,
     timeline,
     activeItemId = null,
+    liveItemId = null,
     wsStatus = 'disconnected' as WsStatus,
     onToggleLive,
-    onActivate,
+    onSelect,
     onInsert,
     onDeleteItem,
     onDuplicateItem,
@@ -27,9 +28,10 @@
     presentation: any;
     timeline: { items: any[] };
     activeItemId: string | null;
+    liveItemId?: string | null;
     wsStatus: WsStatus;
     onToggleLive: () => void;
-    onActivate: (itemId: string) => void;
+    onSelect: (itemId: string) => void;
     onInsert: (itemType: string, position: number) => void;
     onDeleteItem: (itemId: string) => void;
     onDuplicateItem: (itemId: string) => void;
@@ -157,7 +159,7 @@
         <div animate:flip={{ duration: 200 }} class="transition-opacity {draggedItemId === item.id ? 'opacity-40' : ''}">
           {#if item.item_type === 'PAGE'}
             <button
-              onclick={() => onActivate(item.id)}
+              onclick={() => onSelect(item.id)}
               ondragover={(e) => handleDragOver(e, index)}
               ondrop={(e) => handleDrop(e, index)}
               aria-current={item.id === activeItemId ? 'true' : undefined}
@@ -182,6 +184,7 @@
               <span class="text-xs font-medium {item.id === activeItemId ? 'text-purple-700 dark:text-purple-300' : 'text-slate-600 dark:text-slate-400'}">
                 Page {item.page.page_number}
               </span>
+              {#if item.id === liveItemId}<span class="ml-auto text-[10px] font-semibold uppercase tracking-wider text-brand-500">Live</span>{/if}
             </button>
           {:else if confirmingDeleteId === item.id}
             <div class="flex items-center gap-2 p-2 rounded-xl border border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-500/10">
@@ -205,12 +208,13 @@
               <span class="w-4 h-4 flex items-center justify-center opacity-40 group-hover:opacity-100 transition-opacity text-slate-400 flex-shrink-0">
                 <GripVertical class="w-3.5 h-3.5" />
               </span>
-              <button onclick={() => onActivate(item.id)} class="flex items-center gap-2 flex-1 min-w-0 text-left">
+              <button onclick={() => onSelect(item.id)} class="flex items-center gap-2 flex-1 min-w-0 text-left">
                 <span class="w-2 h-2 rounded-full flex-shrink-0 {meta.dot}"></span>
                 <meta.icon class="w-3.5 h-3.5 flex-shrink-0 text-slate-500 dark:text-slate-400" />
                 <span class="text-xs font-medium truncate {item.id === activeItemId ? 'text-slate-900 dark:text-white' : 'text-slate-600 dark:text-slate-400'}">
                   {meta.label}
                 </span>
+                {#if item.id === liveItemId}<span class="text-[10px] font-semibold uppercase tracking-wider text-brand-500">Live</span>{/if}
               </button>
               <div class="flex items-center opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity flex-shrink-0">
                 <button onclick={() => moveItem(item.id, -1)} disabled={index === 0} class="p-1 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 transition disabled:opacity-30 disabled:pointer-events-none" aria-label="Move up" title="Move up">

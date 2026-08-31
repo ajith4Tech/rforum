@@ -9,6 +9,7 @@
   import ZoomableImageViewer from '$lib/components/ZoomableImageViewer.svelte';
   import { getPageImageUrl } from '$lib/api';
   import { theme } from '$lib/theme';
+  import { getFitTitleStyle } from '$lib/fitTitle';
 
   let {
     sessionId,
@@ -92,23 +93,6 @@
     { label: 'JetBrains (Mono)', value: "'JetBrains Mono', monospace" },
     { label: 'Georgia (Serif)', value: 'Georgia, serif' },
   ];
-
-  // Dynamic responsive font size helper for slide titles and long questions
-  function getFitTitleStyle(text: string, type: 'title' | 'question' = 'title'): string {
-    const len = (text || '').trim().length;
-    if (!len) return '';
-    if (type === 'question') {
-      if (len < 30) return 'font-size: clamp(1.35rem, 3vw, 2.2rem); line-height: 1.15; word-break: break-word; overflow-wrap: anywhere;';
-      if (len < 70) return 'font-size: clamp(1.1rem, 2.4vw, 1.8rem); line-height: 1.18; word-break: break-word; overflow-wrap: anywhere;';
-      if (len < 120) return 'font-size: clamp(0.95rem, 1.9vw, 1.4rem); line-height: 1.24; word-break: break-word; overflow-wrap: anywhere;';
-      return 'font-size: clamp(0.82rem, 1.55vw, 1.1rem); line-height: 1.28; word-break: break-word; overflow-wrap: anywhere;';
-    } else {
-      if (len < 24) return 'font-size: clamp(1.8rem, 4vw, 3rem); line-height: 1.1; word-break: break-word; overflow-wrap: anywhere;';
-      if (len < 56) return 'font-size: clamp(1.35rem, 2.9vw, 2.2rem); line-height: 1.15; word-break: break-word; overflow-wrap: anywhere;';
-      if (len < 110) return 'font-size: clamp(1.05rem, 2vw, 1.55rem); line-height: 1.22; word-break: break-word; overflow-wrap: anywhere;';
-      return 'font-size: clamp(0.85rem, 1.55vw, 1.1rem); line-height: 1.28; word-break: break-word; overflow-wrap: anywhere;';
-    }
-  }
 
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
   let savePending = $state(false);
@@ -436,7 +420,7 @@
         <label class="cursor-pointer text-[11px] font-semibold text-purple-600 dark:text-purple-400 hover:underline flex items-center gap-1">
           <Upload class="w-3 h-3" />
           <span>Upload File</span>
-          <input type="file" accept=".pdf,.ppt,.pptx" class="hidden" onchange={handleFileUploadChange} />
+          <input type="file" accept=".pdf,.ppt,.pptx,.png,.jpg,.jpeg,.webp" class="hidden" onchange={handleFileUploadChange} />
         </label>
       </div>
 
@@ -594,7 +578,7 @@
                     <ImageIcon class="w-10 h-10 text-slate-400 dark:text-slate-600 mb-2" />
                     <label class="cursor-pointer text-xs text-purple-600 dark:text-purple-400 hover:underline font-semibold">
                       Upload slide image
-                      <input type="file" accept=".pdf,.ppt,.pptx" class="hidden" onchange={handleFileUploadChange} />
+                      <input type="file" accept=".pdf,.ppt,.pptx,.png,.jpg,.jpeg,.webp" class="hidden" onchange={handleFileUploadChange} />
                     </label>
                   {/if}
                 </div>
@@ -748,14 +732,14 @@
                 <div class="font-mono truncate">Page {activeSlide.content_json?.file_page || 1} of {activeSlide.content_json?.total_pages || 1}</div>
                 <label class="cursor-pointer inline-block text-purple-600 dark:text-purple-400 hover:underline">
                   Replace slide file
-                  <input type="file" accept=".pdf,.ppt,.pptx" class="hidden" onchange={handleFileUploadChange} />
+                  <input type="file" accept=".pdf,.ppt,.pptx,.png,.jpg,.jpeg,.webp" class="hidden" onchange={handleFileUploadChange} />
                 </label>
               </div>
             {:else}
               <label class="flex flex-col items-center justify-center p-4 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 hover:border-purple-500 cursor-pointer text-xs text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition">
                 <Upload class="w-5 h-5 mb-1 text-purple-500" />
                 <span>Upload PDF / PPTX slide</span>
-                <input type="file" accept=".pdf,.ppt,.pptx" class="hidden" onchange={handleFileUploadChange} />
+                <input type="file" accept=".pdf,.ppt,.pptx,.png,.jpg,.jpeg,.webp" class="hidden" onchange={handleFileUploadChange} />
               </label>
             {/if}
           </div>

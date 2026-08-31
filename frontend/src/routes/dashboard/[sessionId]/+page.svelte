@@ -1,6 +1,6 @@
 <script lang="ts">
   import {
-    getSession, updateSession, sendScreenControl, createSlide, updateSlide, deleteSlide, listResponses, getPageImageUrl,
+    getSession, updateSession, sendScreenControl, createSlide, updateSlide, deleteSlide, listResponses,
     getSessionPresentation, uploadPresentation, replacePresentation, regeneratePresentation,
     insertTimelineItem, updateTimelineItem, deleteTimelineItem, reorderTimelineItems, activateTimelineItem,
     attachPresentation, detachPresentation, deletePresentation, uploadSlideFile
@@ -14,24 +14,17 @@
   import { beforeNavigate, goto } from '$app/navigation';
   import Modal from '$lib/components/Modal.svelte';
   import {
-    BarChart3,
-    MessageSquare,
-    AlignLeft,
-    FileText,
-    Cloud,
     NotebookPen,
     UserRound,
     Users
   } from 'lucide-svelte';
-  import Sidebar from '$lib/components/Sidebar.svelte';
-  import ZoomableImageViewer from '$lib/components/ZoomableImageViewer.svelte';
   import PresentationWorkspace from '$lib/components/timeline/PresentationWorkspace.svelte';
   import PresentationEmptyState from '$lib/components/timeline/PresentationEmptyState.svelte';
-  import RichContentEditor from '$lib/components/RichContentEditor.svelte';
   import DeckEditor from '$lib/components/DeckEditor.svelte';
   import DeckView from '$lib/components/DeckView.svelte';
   import { upsertTimelineItemFromWs } from '$lib/timelineTypes';
   import { UndoManager, type IdBox } from '$lib/undoManager';
+  import { mergeResponsesById, responsesForSlide } from '$lib/fitTitle';
 
   const sessionId = $derived($page.params.sessionId);
 
@@ -64,6 +57,9 @@
   let screenCommandTimer: ReturnType<typeof setTimeout> | null = null;
   let deckEditorDirty = $state(false);
   let deckEditorSave: null | (() => Promise<void>) = null;
+  let startNativeEditor = $state(false);
+  let previewItemId = $state<string | null>(null);
+  let lastWsStatus: WsStatus = 'disconnected';
   let leavePromptOpen = $state(false);
   let leavePromptTitle = $state('');
   let leavePromptDescription = $state('');
@@ -193,22 +189,6 @@
     return confirm('You have unsaved changes. Switch slides anyway?');
   }
 
-  const slideIcons: Record<string, any> = {
-    POLL: BarChart3,
-    QNA: MessageSquare,
-    FEEDBACK: AlignLeft,
-    CONTENT: FileText,
-    WORD_CLOUD: Cloud
-  };
-
-  const slideLabels: Record<string, string> = {
-    POLL: 'Poll',
-    QNA: 'Q&A',
-    FEEDBACK: 'Feedback',
-    CONTENT: 'Content',
-    WORD_CLOUD: 'Word Cloud'
-  };
-
   $effect(() => {
     const active = getActiveSlide();
     // Skip re-syncing the edit buffers while the moderator is actively
@@ -248,7 +228,11 @@
       const active = slides.find((s: any) => s.is_active);
       if (active) {
         activeSlideId = active.id;
+        previewItemId = active.id;
         await loadResponses(active.id);
+      } else if (slides[0]?.id) {
+        previewItemId = slides[0].id;
+        await loadResponses(slides[0].id);
       }
 
       if (session.presentation_id) {
@@ -262,7 +246,12 @@
       // Connect WebSocket — pass our JWT so the server recognizes us as this
       // session's moderator (required to send slide_change/page_change/session_update)
       ws = new RforumWebSocket(session.unique_code, { token: get(token) || undefined });
-      ws.onStatusChange((s) => { wsStatus = s; });
+      ws.onStatusChange((s) => {
+        const wasReconnecting = wsStatus === 'reconnecting' || lastWsStatus === 'reconnecting';
+        lastWsStatus = s;
+        wsStatus = s;
+        if (s === 'connected' && wasReconnecting) void refetchRelevantResponses();
+      });
       ws.onMessage(handleWsMessage);
       ws.connect();
     } catch (error) {
@@ -302,21 +291,23 @@
         };
       }
       if (msg.data.slide) {
-        loadTimelineResponses(msg.data.slide.id);
-      } else {
+        if (!previewItemId || previewItemId === msg.data.timeline_item_id) {
+          loadTimelineResponses(msg.data.slide.id);
+        }
+      } else if (!previewItemId || previewItemId === msg.data.timeline_item_id) {
         timelineResponses = [];
       }
       return;
     }
     if (msg.event === 'new_response') {
-      // Check if response already exists to prevent duplicates
-      const exists = slideResponses.some((r) => r.id === msg.data.id);
-      if (!exists) {
-        slideResponses = [...slideResponses, msg.data];
+      const relevantSlideId = currentPreviewSlideId();
+      if (!msg.data?.id || (msg.data.slide_id && relevantSlideId && msg.data.slide_id !== relevantSlideId)) {
+        return;
       }
-      const timelineExists = timelineResponses.some((r) => r.id === msg.data.id);
-      if (!timelineExists) {
-        timelineResponses = [...timelineResponses, msg.data];
+      if (session?.presentation_id) {
+        timelineResponses = mergeResponsesById(timelineResponses, [msg.data]);
+      } else {
+        slideResponses = mergeResponsesById(slideResponses, [msg.data]);
       }
     } else if (msg.event === 'upvote') {
       slideResponses = slideResponses.map((r) =>
@@ -341,6 +332,11 @@
       if (session && msg.data?.qr_visible !== undefined) {
         session = { ...session, qr_visible: msg.data.qr_visible };
       }
+    } else if (msg.event === 'clear_responses') {
+      const clearedId = msg.data?.slide_id;
+      if (!clearedId) return;
+      slideResponses = slideResponses.filter((r) => r.slide_id !== clearedId);
+      timelineResponses = timelineResponses.filter((r) => r.slide_id !== clearedId);
     }
   }
 
@@ -404,22 +400,51 @@
   }
 
   async function loadResponses(slideId: string) {
-    slideResponses = await listResponses(slideId);
+    slideResponses = responsesForSlide(await listResponses(slideId), slideId);
+  }
+
+  function currentPreviewSlideId(): string | null {
+    if (session?.presentation_id) {
+      const itemId = previewItemId || timeline?.active_timeline_item_id;
+      const item = (timeline?.items || []).find((i: any) => i.id === itemId);
+      return item?.slide?.id ?? null;
+    }
+    return previewItemId || activeSlideId;
+  }
+
+  async function refetchRelevantResponses() {
+    const slideId = currentPreviewSlideId();
+    if (!slideId) return;
+    try {
+      const fetched = responsesForSlide(await listResponses(slideId), slideId);
+      if (session?.presentation_id) timelineResponses = fetched;
+      else slideResponses = fetched;
+    } catch {
+      // Keep existing in-memory responses if the refetch fails after reconnect.
+    }
   }
 
   async function inspectDeckItem(itemId: string) {
+    previewItemId = itemId;
     if (session?.presentation_id) {
-      await activatePresentationItem(itemId);
+      const item = (timeline?.items || []).find((i: any) => i.id === itemId);
+      if (item?.slide?.id) await loadTimelineResponses(item.slide.id);
+      else timelineResponses = [];
       return;
     }
-    await activateSlide(itemId);
+    await loadResponses(itemId);
   }
 
   function openPresentation() {
     if (session?.unique_code) window.open('/screen/' + session.unique_code, '_blank', 'noopener,noreferrer');
   }
 
-  async function startPresentation() {
+  async function startPresentation(itemId: string | null = null) {
+    const targetId = itemId || previewItemId || timeline?.active_timeline_item_id || activeSlideId;
+    if (targetId) {
+      if (session?.presentation_id) await activatePresentationItem(targetId);
+      else await activateSlide(targetId);
+    }
     openPresentation();
     if (!session?.is_live) {
       await toggleLive();
@@ -516,7 +541,7 @@
         content_json: tempSlide.content_json
       });
       slides = slides.map((s) => s.id === tempId ? slide : s);
-      await activateSlide(slide.id);
+      await selectSlide(slide.id);
       pushCreatedSlideUndo(slide, slides.length - 1, 'Add slide');
     } catch {
       // Revert on failure
@@ -535,7 +560,7 @@
         content_json: { ...source.content_json }
       });
       slides = [...slides.slice(0, index + 1), slide, ...slides.slice(index + 1)];
-      await activateSlide(slide.id);
+      await selectSlide(slide.id);
       pushCreatedSlideUndo(slide, index + 1, 'Duplicate slide');
     } catch (err) {
       saveError = err instanceof Error ? err.message : 'Duplicate failed';
@@ -563,7 +588,7 @@
         box.id = recreated.id;
         const insertAt = Math.min(index, slides.length);
         slides = [...slides.slice(0, insertAt), recreated, ...slides.slice(insertAt)];
-        await activateSlide(recreated.id);
+        await selectSlide(recreated.id);
       }
     });
   }
@@ -598,7 +623,7 @@
       case 'FEEDBACK':
         return { prompt: 'Share your thoughts...' };
       case 'CONTENT':
-        return { title: 'New Slide', body: '<p>Start typing your content here.</p>' };
+        return { title: 'New Slide', body: '<p>Start typing your content here.</p>', layout: 'title_content' };
       case 'WORD_CLOUD':
         return { prompt: 'What comes to mind?' };
       default:
@@ -606,11 +631,19 @@
     }
   }
 
+  async function selectSlide(slideId: string) {
+    if (slideId !== activeSlideId && !confirmDiscardUnsavedChanges()) return;
+    activeSlideId = slideId;
+    previewItemId = slideId;
+    void loadResponses(slideId);
+  }
+
   async function activateSlide(slideId: string) {
     if (slideId !== activeSlideId && !confirmDiscardUnsavedChanges()) return;
     await updateSlide(sessionId, slideId, { is_active: true });
     slides = slides.map((s) => ({ ...s, is_active: s.id === slideId }));
     activeSlideId = slideId;
+    previewItemId = slideId;
     void loadResponses(slideId);
   }
 
@@ -933,7 +966,7 @@
       : Math.max(base - 1, 0);
     const nextId = ids[nextIndex];
     if (nextId && nextId !== activeSlideId) {
-      await activateSlide(nextId);
+      await selectSlide(nextId);
     }
   }
 
@@ -958,15 +991,18 @@
     presentation = data.presentation;
     timeline = data.timeline;
     const activeItem = (timeline?.items || []).find((i: any) => i.id === timeline?.active_timeline_item_id);
+    previewItemId = activeItem?.id || timeline?.items?.[0]?.id || previewItemId;
     if (activeItem?.slide) {
       await loadTimelineResponses(activeItem.slide.id);
     } else {
-      timelineResponses = [];
+      const preview = (timeline?.items || []).find((i: any) => i.id === previewItemId);
+      if (preview?.slide) await loadTimelineResponses(preview.slide.id);
+      else timelineResponses = [];
     }
   }
 
   async function loadTimelineResponses(slideId: string) {
-    timelineResponses = await listResponses(slideId);
+    timelineResponses = responsesForSlide(await listResponses(slideId), slideId);
   }
 
   async function handleUploadPresentation(file: File) {
@@ -977,9 +1013,8 @@
   }
 
   function handleUploadDone(result: any) {
-    // Only now (after the UploadProgress "Ready" beat) do we flip to the full
-    // workspace — session.presentation_id is what the template branches on.
     session = { ...session, presentation_id: result.presentation.id };
+    requestNavigation(`/dashboard/${sessionId}`);
   }
 
   async function handleAttachExistingPresentation(presentationId: string) {
@@ -988,6 +1023,7 @@
       presentation = result.presentation;
       timeline = result.timeline;
       session = { ...session, presentation_id: presentation.id };
+      requestNavigation(`/dashboard/${sessionId}`);
     });
   }
 
@@ -1033,6 +1069,7 @@
       active_timeline_item_id: itemId,
       items: timeline.items.map((i: any) => (i.id === item.id ? item : i))
     };
+    previewItemId = itemId;
     if (item.slide) {
       await loadTimelineResponses(item.slide.id);
     } else {
@@ -1226,7 +1263,6 @@
         {activeSlideId}
         responses={session?.presentation_id ? timelineResponses : slideResponses}
         {wsStatus}
-        onAddSlide={addSlide}
         onSelect={inspectDeckItem}
         onEdit={() => requestNavigation(`/dashboard/${sessionId}?mode=editor`)}
         onPresent={startPresentation}
@@ -1234,24 +1270,13 @@
         onRefreshPresentation={refreshPresentationScreen}
         onMaximizeQr={maximizePresentationQr}
       />
-    {:else}
-      {#if !session?.presentation_id}
-        <PresentationEmptyState
-          eventId={session?.event_id ?? null}
-          onUpload={handleUploadPresentation}
-          onUploadDone={handleUploadDone}
-          onAttach={handleAttachExistingPresentation}
-        />
-      {/if}
-
-      {#if session?.presentation_id}
+    {:else if session?.presentation_id}
         <PresentationWorkspace
           {session}
           {presentation}
           {timeline}
           responses={timelineResponses}
           {wsStatus}
-        onAddSlide={addSlide}
           {saveState}
           {canUndo}
           {canRedo}
@@ -1269,10 +1294,11 @@
           onDeletePresentation={handleDeletePresentation}
           onDetailsClosedAfterChange={handlePresentationDetailsClosedAfterChange}
           onDirtyChange={(dirty) => (timelineFormDirty = dirty)}
+          onSelectItem={inspectDeckItem}
           onUndo={performUndo}
           onRedo={performRedo}
         />
-      {:else}
+    {:else if slides.length > 0 || startNativeEditor}
         <div class="h-[calc(100vh-140px)] min-h-[600px] w-full">
           <DeckEditor
             {sessionId}
@@ -1283,7 +1309,7 @@
             {canRedo}
             onSaveReady={(save) => (deckEditorSave = save)}
             onDirtyChange={(dirty) => (deckEditorDirty = dirty)}
-            onSelectSlide={(id) => activateSlide(id)}
+            onSelectSlide={(id) => selectSlide(id)}
             onCreateSlide={async (type, layout) => {
               try {
                 const defaultContent = getDefaultContent(type);
@@ -1298,7 +1324,7 @@
                     content_json: finalContent
                   });
                   slides = [...slides, newSlide];
-                  await activateSlide(newSlide.id);
+                  await selectSlide(newSlide.id);
                   pushCreatedSlideUndo(newSlide, slides.length - 1, 'Add slide');
                 });
               } catch (err) {
@@ -1322,9 +1348,8 @@
             onUploadFile={async (slideId, file) => {
               try {
                 await withSaveState(async () => {
-                  await uploadSlideFile(sessionId, slideId, file);
-                  const updatedSession = await getSession(sessionId);
-                  slides = updatedSession.slides || [];
+                  const updated = await uploadSlideFile(sessionId, slideId, file);
+                  slides = slides.map((s) => (s.id === slideId ? { ...s, ...updated } : s));
                 });
               } catch (err) {
                 console.error('Failed to upload file:', err);
@@ -1334,7 +1359,16 @@
             onRedo={performRedo}
           />
         </div>
-      {/if}
+    {:else}
+        <PresentationEmptyState
+          eventId={session?.event_id ?? null}
+          onUpload={handleUploadPresentation}
+          onUploadDone={handleUploadDone}
+          onAttach={handleAttachExistingPresentation}
+        />
+        <div class="mt-4 text-center">
+          <button class="btn-secondary" type="button" onclick={() => (startNativeEditor = true)}>Create slides</button>
+        </div>
     {/if}
 
     <Modal open={leavePromptOpen} onClose={handleLeavePromptCancel} ariaLabel={leavePromptTitle} maxWidth="max-w-md">
@@ -1356,7 +1390,7 @@
     {/if}
 
     <!-- Moderator Setup -->
-    {#if !loading && !errorMessage}
+    {#if !loading && !errorMessage && editorMode}
       <div class="card mt-6 mx-0">
         <div class="flex items-center justify-between mb-3">
           <div class="flex items-center gap-2">

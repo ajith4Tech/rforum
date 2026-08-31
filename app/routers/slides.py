@@ -15,6 +15,7 @@ from redis.exceptions import RedisError
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.auth import get_current_user
 from app.config import get_settings
@@ -28,6 +29,7 @@ from app.services.file_processing import (
     extract_total_pages,
     validate_upload,
 )
+from app.services.guest_view import merge_slide_content_json
 
 logger = logging.getLogger(__name__)
 
@@ -152,6 +154,10 @@ async def update_slide(
         raise HTTPException(status_code=404, detail="Slide not found")
 
     update_data = payload.model_dump(exclude_unset=True)
+    if "content_json" in update_data:
+        update_data["content_json"] = merge_slide_content_json(
+            slide.content_json, update_data.get("content_json")
+        )
 
     # If activating this slide, deactivate all others in the session
     if update_data.get("is_active"):
@@ -326,7 +332,9 @@ async def upload_content_file(
     content_json["file_type"] = content_type
     content_json["file_page"] = 1
     content_json["total_pages"] = total_pages
+    content_json["has_file"] = True
     slide.content_json = content_json
+    flag_modified(slide, "content_json")
 
     # ── Create or update SessionAsset record ─────────────
     existing_asset_result = await db.execute(

@@ -1,13 +1,15 @@
 <script lang="ts">
-  import { joinSession, submitResponse, upvoteResponse, listResponses, getPageImageUrl } from '$lib/api';
+  import { joinSession, submitResponse, upvoteResponse, listResponses } from '$lib/api';
   import { RforumWebSocket } from '$lib/ws';
+  import type { ConnectionStatus as WsStatus } from '$lib/ws';
   import { theme, toggleTheme } from '$lib/theme';
   import { onMount, onDestroy } from 'svelte';
-  import PageImageViewer from '$lib/components/PageImageViewer.svelte';
   import PresentationLiveView from '$lib/components/timeline/PresentationLiveView.svelte';
+  import ContentSlideCanvas from '$lib/components/ContentSlideCanvas.svelte';
   import { upsertTimelineItemFromWs } from '$lib/timelineTypes';
+  import { getFitTitleStyle, mergeResponsesById, responsesForSlide } from '$lib/fitTitle';
   import {
-    Orbit, Send, ChevronUp, BarChart3, MessageSquare, AlignLeft, FileText, CheckCircle2, Cloud, Sun, Moon
+    Orbit, Send, ChevronUp, BarChart3, MessageSquare, AlignLeft, CheckCircle2, Cloud, Sun, Moon
   } from 'lucide-svelte';
 
   let code = $state('');
@@ -26,6 +28,7 @@
   );
   const hasActiveContent = $derived(session?.presentation_id ? !!activeTimelineItem : !!activeSlide);
   let ws: RforumWebSocket | null = $state(null);
+  let lastWsStatus: WsStatus = 'disconnected';
   let error = $state('');
   let loading = $state(true);
   let inputValue = $state('');
@@ -143,6 +146,19 @@
       type: slide.type?.toUpperCase()
     };
   }
+
+  async function refetchGuestResponses() {
+    try {
+      if (session?.presentation_id) {
+        const slideId = activeTimelineItem?.slide?.id;
+        timelineResponses = slideId ? responsesForSlide(await listResponses(slideId), slideId) : [];
+      } else if (activeSlide?.id) {
+        responses = responsesForSlide(await listResponses(activeSlide.id), activeSlide.id);
+      }
+    } catch {
+      // Keep last known responses if reconnect refetch fails.
+    }
+  }
   
   onMount(async () => {
     // Generate guest ID
@@ -161,8 +177,7 @@
       const active = normalizeSlide(session.slides?.find((s: any) => s.is_active));
       if (active) {
         activeSlide = active;
-        restoreSubmittedState(active);
-        responses = await listResponses(active.id);
+        responses = responsesForSlide(await listResponses(active.id), active.id);
       }
 
       if (session.presentation_id && session.timeline) {
@@ -170,12 +185,17 @@
         const items = [...(presentationTimeline.items || [])].sort((a: any, b: any) => a.order - b.order);
         const activeItem = items.find((i: any) => i.id === presentationTimeline.active_timeline_item_id);
         if (activeItem?.slide) {
-          timelineResponses = await listResponses(activeItem.slide.id);
+          timelineResponses = responsesForSlide(await listResponses(activeItem.slide.id), activeItem.slide.id);
         }
       }
 
       // Connect WebSocket
       ws = new RforumWebSocket(code);
+      ws.onStatusChange((s) => {
+        const wasReconnecting = lastWsStatus === 'reconnecting';
+        lastWsStatus = s;
+        if (s === 'connected' && wasReconnecting) void refetchGuestResponses();
+      });
       ws.connect();
       ws.onMessage(queueMessage);
 
@@ -207,7 +227,7 @@
       }
       if (msg.data.slide) {
         try {
-          timelineResponses = await listResponses(msg.data.slide.id);
+          timelineResponses = responsesForSlide(await listResponses(msg.data.slide.id), msg.data.slide.id);
         } catch (err) {
           console.error('Failed to load responses for new timeline item:', err);
           timelineResponses = [];
@@ -228,7 +248,7 @@
         inputValue = '';
         // Always reload responses for the new slide to prevent stale data
         try {
-          responses = await listResponses(msg.data.slide.id);
+          responses = responsesForSlide(await listResponses(msg.data.slide.id), msg.data.slide.id);
         } catch (err) {
           console.error('Failed to load responses for new slide:', err);
           responses = [];
@@ -242,7 +262,7 @@
           restoreSubmittedState(activeSlide);
           inputValue = '';
           if (active) {
-            responses = await listResponses(active.id);
+            responses = responsesForSlide(await listResponses(active.id), active.id);
           } else {
             responses = [];
           }
@@ -252,20 +272,19 @@
         }
       }
     } else if (msg.event === 'new_response') {
-      // Only add response if it's for the current slide
       if (msg.data && activeSlide && msg.data.slide_id === activeSlide.id) {
-        // Check if response already exists to prevent duplicates
-        const exists = responses.some((r) => r.id === msg.data.id);
-        if (!exists) {
-          responses = [...responses, msg.data];
-        }
+        responses = mergeResponsesById(responses, [msg.data]);
       }
       if (msg.data && activeTimelineItem?.slide && msg.data.slide_id === activeTimelineItem.slide.id) {
-        const timelineExists = timelineResponses.some((r) => r.id === msg.data.id);
-        if (!timelineExists) {
-          timelineResponses = [...timelineResponses, msg.data];
-        }
+        timelineResponses = mergeResponsesById(timelineResponses, [msg.data]);
       }
+    } else if (msg.event === 'clear_responses') {
+      const clearedId = msg.data?.slide_id;
+      if (!clearedId) return;
+      if (clearedId === activeSlide?.id) responses = [];
+      if (clearedId === activeTimelineItem?.slide?.id) timelineResponses = [];
+      responses = responses.filter((r) => r.slide_id !== clearedId);
+      timelineResponses = timelineResponses.filter((r) => r.slide_id !== clearedId);
     } else if (msg.event === 'upvote') {
       // Update the response with new upvote count
       responses = responses.map((r) =>
@@ -447,6 +466,7 @@
         <PresentationLiveView
           activeItem={activeTimelineItem}
           presentationId={session.presentation_id}
+          sessionId={session.id}
           sessionCode={code}
           responses={timelineResponses}
           variant="guest"
@@ -459,7 +479,7 @@
         {#if activeSlide.type === 'POLL'}
           <div class="text-center mb-4">
             <BarChart3 class="w-10 h-10 text-purple-600 mx-auto mb-2" />
-            <h1 class="text-2xl font-bold text-slate-900 dark:text-white">{activeSlide.content_json?.question}</h1>
+            <h1 class="font-heading font-bold text-slate-900 dark:text-white leading-tight" style={getFitTitleStyle(activeSlide.content_json?.question, 'question')}>{activeSlide.content_json?.question}</h1>
           </div>
 
           {#if submitted}
@@ -490,7 +510,7 @@
         {#if activeSlide.type === 'QNA'}
           <div class="text-center mb-4">
             <MessageSquare class="w-10 h-10 text-purple-600 mx-auto mb-2" />
-            <h1 class="text-2xl font-bold text-slate-900 dark:text-white">{activeSlide.content_json?.prompt}</h1>
+            <h1 class="font-heading font-bold text-slate-900 dark:text-white leading-tight" style={getFitTitleStyle(activeSlide.content_json?.prompt, 'question')}>{activeSlide.content_json?.prompt}</h1>
           </div>
 
           <form onsubmit={(event) => { event.preventDefault(); handleTextSubmit(); }} class="space-y-2 mb-4">
@@ -550,7 +570,7 @@
         {#if activeSlide.type === 'FEEDBACK'}
           <div class="text-center mb-4">
             <AlignLeft class="w-10 h-10 text-purple-600 mx-auto mb-2" />
-            <h1 class="text-2xl font-bold text-slate-900 dark:text-white">{activeSlide.content_json?.prompt}</h1>
+            <h1 class="font-heading font-bold text-slate-900 dark:text-white leading-tight" style={getFitTitleStyle(activeSlide.content_json?.prompt, 'question')}>{activeSlide.content_json?.prompt}</h1>
           </div>
 
           {#if submitted}
@@ -595,7 +615,7 @@
         {#if activeSlide.type === 'WORD_CLOUD'}
           <div class="text-center mb-4">
             <Cloud class="w-10 h-10 text-purple-600 mx-auto mb-2" />
-            <h1 class="text-2xl font-bold text-slate-900 dark:text-white">{activeSlide.content_json?.prompt}</h1>
+            <h1 class="font-heading font-bold text-slate-900 dark:text-white leading-tight" style={getFitTitleStyle(activeSlide.content_json?.prompt, 'question')}>{activeSlide.content_json?.prompt}</h1>
           </div>
 
           <form onsubmit={(event) => { event.preventDefault(); handleTextSubmit(); }} class="space-y-2 mb-4">
@@ -631,24 +651,9 @@
         {/if}
 
         <!-- Content Slide -->
-        {#if activeSlide.type === 'CONTENT'}
-          <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 text-center animate-fade-in">
-            <FileText class="w-10 h-10 text-purple-600 mx-auto mb-4" />
-            <h1 class="text-2xl font-bold text-slate-900 dark:text-white mb-4">{activeSlide.content_json?.title}</h1>
-            <div class="text-slate-600 dark:text-slate-300 leading-relaxed prose dark:prose-invert max-w-none text-left my-4">
-              {@html activeSlide.content_json?.body || ''}
-            </div>
-              {#if (activeSlide.content_json?.file_url || activeSlide.content_json?.has_file) && session?.id}
-                <div style="-webkit-touch-callout: none; -webkit-user-select: none;">
-                  <PageImageViewer
-                    src={getPageImageUrl(session.id, activeSlide.id, activeSlide.content_json?.file_page || 1, code)}
-                    page={activeSlide.content_json?.file_page || 1}
-                    alt={`Slide page ${activeSlide.content_json?.file_page || 1}`}
-                    imgClass="w-full mt-6 rounded-xl border border-slate-200 dark:border-slate-800 select-none pointer-events-none"
-                  />
-                </div>
-                <div class="text-xs text-slate-500 mt-2">Page {activeSlide.content_json?.file_page || 1}{activeSlide.content_json?.total_pages ? ` / ${activeSlide.content_json.total_pages}` : ''}</div>
-              {/if}
+        {#if activeSlide.type?.toUpperCase() === 'CONTENT'}
+          <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 animate-fade-in min-h-[16rem]">
+            <ContentSlideCanvas slide={activeSlide} sessionId={session?.id} sessionCode={code} variant="screen" />
           </div>
         {/if}
       </div>

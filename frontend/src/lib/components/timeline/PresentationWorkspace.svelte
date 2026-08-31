@@ -22,6 +22,7 @@
     canRedo = false,
     onToggleLive,
     onActivateItem,
+    onSelectItem,
     onNavigate,
     onInsertItem,
     onUpdateItemContent,
@@ -47,6 +48,7 @@
     canRedo?: boolean;
     onToggleLive: () => void;
     onActivateItem: (itemId: string) => void;
+    onSelectItem?: (itemId: string) => void;
     onNavigate: (direction: 'prev' | 'next') => void;
     onInsertItem: (itemType: string, position: number) => void;
     onUpdateItemContent: (itemId: string, contentJson: Record<string, unknown>) => void;
@@ -82,9 +84,31 @@
   });
 
   const sortedItems = $derived([...(timeline?.items || [])].sort((a: any, b: any) => a.order - b.order));
-  const activeItem = $derived(sortedItems.find((i: any) => i.id === timeline?.active_timeline_item_id) || null);
+  const liveItemId = $derived(timeline?.active_timeline_item_id ?? null);
+  let selectedItemId = $state<string | null>(null);
+  $effect(() => {
+    if (!selectedItemId && (liveItemId || sortedItems[0]?.id)) {
+      selectedItemId = liveItemId || sortedItems[0].id;
+    }
+  });
+  $effect(() => {
+    if (selectedItemId && !sortedItems.some((i: any) => i.id === selectedItemId)) {
+      selectedItemId = liveItemId || sortedItems[0]?.id || null;
+    }
+  });
+  const selectedItem = $derived(sortedItems.find((i: any) => i.id === selectedItemId) || null);
+  const activeItem = $derived(selectedItem);
   const activeIndex = $derived(activeItem ? sortedItems.findIndex((i: any) => i.id === activeItem.id) : -1);
   const activeMeta = $derived(activeItem ? metaForItem(activeItem) : null);
+
+  function selectItem(itemId: string) {
+    selectedItemId = itemId;
+    onSelectItem?.(itemId);
+  }
+
+  function presentSelected() {
+    if (selectedItemId) onActivateItem(selectedItemId);
+  }
 
   let editingItemId: string | null = $state(null);
   let replaceInputEl: HTMLInputElement | null = $state(null);
@@ -137,6 +161,8 @@
   });
 
   $effect(() => {
+    const items = sortedItems;
+    const currentId = selectedItemId;
     function onKeydown(e: KeyboardEvent) {
       const target = e.target as HTMLElement | null;
       const isTyping = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
@@ -144,10 +170,14 @@
 
       if (e.key === 'ArrowLeft') {
         e.preventDefault();
-        onNavigate('prev');
+        const ids = items.map((i: any) => i.id);
+        const idx = ids.indexOf(currentId || '');
+        if (idx > 0) selectItem(ids[idx - 1]);
       } else if (e.key === 'ArrowRight') {
         e.preventDefault();
-        onNavigate('next');
+        const ids = items.map((i: any) => i.id);
+        const idx = ids.indexOf(currentId || '');
+        if (idx >= 0 && idx < ids.length - 1) selectItem(ids[idx + 1]);
       } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
         // Every mutation already persists immediately — this is pure feedback,
         // it doesn't trigger a new save. Preventing default just stops the
@@ -179,10 +209,11 @@
     {session}
     {presentation}
     {timeline}
-    activeItemId={timeline?.active_timeline_item_id ?? null}
+    activeItemId={selectedItemId}
+    liveItemId={liveItemId}
     {wsStatus}
     {onToggleLive}
-    onActivate={onActivateItem}
+    onSelect={selectItem}
     onInsert={onInsertItem}
     {onDeleteItem}
     {onDuplicateItem}
@@ -197,8 +228,9 @@
       <div class="card text-center text-surface-400 py-20">Select a page or interaction to get started.</div>
     {:else}
       <div class="sticky top-0 z-10 -mx-1 px-1 py-2 mb-3 flex flex-wrap items-center gap-2 bg-surface-50/90 dark:bg-surface-950/90 backdrop-blur supports-[backdrop-filter]:bg-surface-50/70 dark:supports-[backdrop-filter]:bg-surface-950/70">
-        <button onclick={() => onNavigate('prev')} class="btn-secondary text-sm" aria-label="Previous item">Previous</button>
-        <button onclick={() => onNavigate('next')} class="btn-secondary text-sm" aria-label="Next item">Next</button>
+        <button onclick={() => { const ids = sortedItems.map((i: any) => i.id); const idx = ids.indexOf(selectedItemId || ''); if (idx > 0) selectItem(ids[idx - 1]); }} class="btn-secondary text-sm" aria-label="Previous item">Previous</button>
+        <button onclick={() => { const ids = sortedItems.map((i: any) => i.id); const idx = ids.indexOf(selectedItemId || ''); if (idx >= 0 && idx < ids.length - 1) selectItem(ids[idx + 1]); }} class="btn-secondary text-sm" aria-label="Next item">Next</button>
+        <button onclick={presentSelected} class="btn-primary text-sm" disabled={!selectedItemId}>Present</button>
 
         {#if activeMeta}
           <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold {activeMeta.ring}">
@@ -267,10 +299,12 @@
       </div>
 
       {#if previewVariant}
-        <div class="card p-4 sm:p-5 {previewVariant === 'screen' ? 'bg-slate-950' : ''}">
+        <div class="card p-4 sm:p-5">
           <PresentationLiveView
             {activeItem}
             presentationId={presentation.id}
+            sessionId={session?.id}
+            sessionCode={session?.unique_code || ''}
             {responses}
             variant={previewVariant}
             readOnly

@@ -31,6 +31,7 @@ from sqlalchemy.orm import selectinload
 import json
 
 from app.auth import get_current_user
+from app.services.guest_view import merge_slide_content_json
 from app.config import get_settings
 from app.database import get_db
 from app.rate_limit import check_rate_limit
@@ -1250,7 +1251,8 @@ async def update_timeline_item(
     if item.item_type == TimelineItemType.PAGE or item.slide_id is None:
         raise HTTPException(status_code=400, detail="Cannot edit content of a presentation page")
 
-    content_json = dict(payload.content_json)
+    existing = dict(item.slide.content_json) if item.slide is not None else {}
+    content_json = merge_slide_content_json(existing, payload.content_json)
     if item.item_type == TimelineItemType.RATING:
         content_json["mode"] = "rating_only"
 
