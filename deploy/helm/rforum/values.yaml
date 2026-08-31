@@ -86,9 +86,6 @@ frontend:
     periodSeconds: 10
     timeoutSeconds: 3
     failureThreshold: 3
-  podDisruptionBudget:
-    enabled: true
-    maxUnavailable: 1
 
 # ── Bundled PostgreSQL (StatefulSet) ─────────────────────────────────────
 # Disable and fill in `externalDatabase` to point at a managed/external
