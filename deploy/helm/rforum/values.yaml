@@ -103,7 +103,6 @@ postgresql:
   persistence:
     enabled: true
     size: 10Gi
-    storageClass: ""
   resources:
     requests:
       cpu: 250m
@@ -124,7 +123,6 @@ redis:
   persistence:
     enabled: true
     size: 1Gi
-    storageClass: ""
   resources:
     requests:
       cpu: 100m
@@ -214,7 +212,6 @@ storage:
   persistence:
     enabled: true
     size: 20Gi
-    storageClass: ""
     accessMode: ReadWriteOnce
   s3:
     bucket: ""

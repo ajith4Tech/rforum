@@ -7,9 +7,6 @@ metadata:
     {{- include "rforum.componentLabels" (dict "root" . "component" "redis") | nindent 4 }}
 spec:
   accessModes: ["ReadWriteOnce"]
-  {{- if .Values.redis.persistence.storageClass }}
-  storageClassName: {{ .Values.redis.persistence.storageClass }}
-  {{- end }}
   resources:
     requests:
       storage: {{ .Values.redis.persistence.size }}
