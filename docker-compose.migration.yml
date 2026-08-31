@@ -1,0 +1,150 @@
+# Full-stack Compose for a compute-only host move (Postgres + Redis + backend +
+# frontend + edge proxy). Not used for local dev — see docker-compose.yml.
+#
+#   cp .env.migration.example .env.migration   # then fill in real values
+#   docker compose --env-file .env.migration -f docker-compose.migration.yml up -d
+#
+# FLAG: this file does not declare `networks:` / external networks. Compose
+# creates a project-local default network. Do not add an `external: true`
+# network named after the old EC2 host. If you run this on a machine that
+# already has another Compose project called `rforum`, change `name:` below.
+name: rforum-migration
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-rforum}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.migration}
+      POSTGRES_DB: ${POSTGRES_DB:-rforum}
+    # Bind to loopback only — restore_db.sh talks to 127.0.0.1; do not publish
+    # Postgres on 0.0.0.0.
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # AOF + named volume matches deploy/helm/rforum/templates/redis.yaml so
+    # rate-limit counters survive a host reboot. Redis is not the system of
+    # record for business data (app/rate_limit.py, WS pub/sub).
+    command: ["redis-server", "--appendonly", "yes", "--dir", "/data"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  uploads-init:
+    image: busybox:1.37
+    restart: "no"
+    volumes:
+      - uploads:/data/uploads
+    # Backend image runs as uid 10001 (app/Dockerfile). Named volumes are
+    # root-owned by default; without this, STORAGE_ROOT writes fail.
+    command: ["chown", "-R", "10001:10001", "/data/uploads"]
+
+  backend:
+    build:
+      context: .
+      dockerfile: app/Dockerfile
+    image: rforum-backend:1.0.0
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      uploads-init:
+        condition: service_completed_successfully
+    environment:
+      DB_USER: ${POSTGRES_USER:-rforum}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.migration}
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: ${POSTGRES_DB:-rforum}
+      REDIS_URL: redis://redis:6379/0
+      SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env.migration}
+      INVITE_CODE: ${INVITE_CODE:?Set INVITE_CODE in .env.migration}
+      CORS_ORIGINS: ${CORS_ORIGINS:?Set CORS_ORIGINS in .env.migration}
+      SUPER_ADMIN_EMAIL: ${SUPER_ADMIN_EMAIL:-}
+      SUPER_ADMIN_BOOTSTRAP_TOKEN: ${SUPER_ADMIN_BOOTSTRAP_TOKEN:-}
+      ORG_DISPLAY_NAME: ${ORG_DISPLAY_NAME:-}
+      STORAGE_PROVIDER: ${STORAGE_PROVIDER:-s3}
+      STORAGE_ROOT: /data/uploads
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_REGION: ${S3_REGION:-eu-north-1}
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
+      S3_PREFIX: ${S3_PREFIX:-}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      S3_MAX_RETRIES: ${S3_MAX_RETRIES:-3}
+    volumes:
+      - uploads:/data/uploads
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        export DATABASE_URL="postgresql+asyncpg://$${DB_USER}:$${DB_PASSWORD}@$${DB_HOST}:$${DB_PORT}/$${DB_NAME}"
+        exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2 --loop uvloop --http httptools --backlog 512
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=5)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: rforum-frontend:1.0.0
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/healthz | grep -q ok"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  proxy:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+    ports:
+      - "80:80"
+    volumes:
+      - ./deploy/nginx/migration-proxy.conf:/etc/nginx/conf.d/default.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/api/health | grep -q ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  pgdata:
+  redisdata:
+  uploads:

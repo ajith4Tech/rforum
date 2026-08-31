@@ -1,22 +1,31 @@
 services:
   db:
+    # Major pin matches deploy/helm/rforum/values.yaml (postgresql.image.tag).
+    # The "16-alpine" tag still floats on 16.x patch releases — same major is
+    # what dump/restore needs. Do not change this to `latest`.
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_USER: rforum
       POSTGRES_PASSWORD: rforum
       POSTGRES_DB: rforum
     ports:
+      # Host 5433 (not 5432) so this does not collide with a native Postgres
+      # on the developer machine. Not an EC2 address — any host is fine.
       - "5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U rforum"]
+      test: ["CMD-SHELL", "pg_isready -U rforum -d rforum"]
       interval: 5s
       timeout: 5s
       retries: 5
 
   redis:
+    # Major pin matches deploy/helm/rforum/values.yaml (redis.image.tag).
+    # "7-alpine" still floats on 7.x patches. Do not change this to `latest`.
     image: redis:7-alpine
+    restart: unless-stopped
     ports:
       - "6379:6379"
     healthcheck:
@@ -24,6 +33,13 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+
+# FLAG (left commented — do not silently enable): a full api service does not
+# belong in this *dev* file. Production-shaped Postgres+Redis+backend+frontend
+# +proxy lives in docker-compose.migration.yml. If you uncomment the block
+# below, note that `build.context: ./app` is stale — app/Dockerfile expects
+# the repository root as context (`docker build -f app/Dockerfile .`), and
+# `./app:/app` is a bind mount that only works on a checkout of this repo.
 #
 #  api:
 #    build:
