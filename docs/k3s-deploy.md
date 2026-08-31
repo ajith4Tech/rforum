@@ -6,16 +6,15 @@ This is the exact command sequence for a fresh Ubuntu VM. The chart lives at
 after install.
 
 Reference VM: 4 vCPU / 8GB (double the 2 vCPU / 3.7GB host the 500-guest k6
-load test was validated against — see `values-production.yaml`). Scale
-`values-production.yaml` down if your VM is smaller.
+load test was validated against). Scale the resource requests/limits in
+`values.yaml` down if your VM is smaller.
 
 ## 1. Install k3s
 
 ```bash
 # Traefik is disabled — this chart's Ingress is tuned for ingress-nginx
-# (see "Why ingress-nginx, not Traefik" below). If you'd rather keep
-# Traefik, drop --disable=traefik and set ingress.controller=traefik when
-# installing the chart later.
+# only. Do not keep Traefik enabled; the chart no longer emits Traefik
+# annotations.
 curl -sfL https://get.k3s.io | sh -s - --disable=traefik
 
 sudo cat /var/lib/rancher/k3s/server/node-token   # only if you'll join other nodes later
@@ -60,8 +59,8 @@ ingress-nginx exposes both as plain per-Ingress annotations
 `.../proxy-body-size`) — a direct, auditable translation of the existing
 config. Traefik has no equivalent per-Ingress-object timeout annotation
 (it's a static/dynamic entrypoint setting), so the same tuning would require
-a k3s-specific `HelmChartConfig` resource instead. Both paths are supported
-by the chart (`ingress.controller: nginx|traefik`); this doc uses nginx.
+a k3s-specific `HelmChartConfig` resource instead. This chart only emits
+ingress-nginx annotations.
 
 ```bash
 helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
@@ -142,14 +141,12 @@ Alternatively, pre-create your own Kubernetes Secrets and point
 `app.existingSecret` / `postgresql.auth.existingSecret` at them instead —
 see `values.yaml` for the expected keys.
 
-## 8. Configure `values-production.yaml`
+## 8. Configure `values.yaml`
 
-Edit `deploy/helm/rforum/values-production.yaml`:
+Edit `deploy/helm/rforum/values.yaml`:
 
 - `ingress.host` → your real hostname (replaces `rforum.example.com`)
-- `storage.s3.bucket` / `storage.s3.region` if using S3 storage; otherwise
-  delete the `storage:` block from this overlay to keep the local-PVC
-  default from `values.yaml`
+- `storage.s3.bucket` / `storage.s3.region` if using S3 storage
 - `image.backend.tag` / `image.frontend.tag` if you didn't build `1.0.0`
 
 ## 9. Install
@@ -157,7 +154,7 @@ Edit `deploy/helm/rforum/values-production.yaml`:
 ```bash
 helm upgrade --install rforum deploy/helm/rforum \
   --namespace rforum \
-  -f deploy/helm/rforum/values-production.yaml \
+  -f deploy/helm/rforum/values.yaml \
   -f /tmp/rforum-secrets.yaml
 ```
 
@@ -206,7 +203,7 @@ release without a full upgrade:
 
 ```bash
 helm upgrade rforum deploy/helm/rforum -n rforum \
-  -f deploy/helm/rforum/values-production.yaml -f /tmp/rforum-secrets.yaml
+  -f deploy/helm/rforum/values.yaml -f /tmp/rforum-secrets.yaml
 ```
 
 ## 13. Configure DNS

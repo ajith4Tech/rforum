@@ -1,4 +1,3 @@
-{{- if .Values.postgresql.enabled }}
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -19,11 +18,6 @@ spec:
       serviceAccountName: {{ include "rforum.serviceAccountName" . }}
       securityContext:
         fsGroup: 999
-      {{- if not .Values.postgresql.persistence.enabled }}
-      volumes:
-        - name: data
-          emptyDir: {}
-      {{- end }}
       containers:
         - name: postgresql
           image: "{{ .Values.postgresql.image.repository }}:{{ .Values.postgresql.image.tag }}"
@@ -63,17 +57,11 @@ spec:
             timeoutSeconds: 5
           resources:
             {{- toYaml .Values.postgresql.resources | nindent 12 }}
-  {{- if .Values.postgresql.persistence.enabled }}
   volumeClaimTemplates:
     - metadata:
         name: data
       spec:
         accessModes: ["ReadWriteOnce"]
-        {{- if .Values.postgresql.persistence.storageClass }}
-        storageClassName: {{ .Values.postgresql.persistence.storageClass }}
-        {{- end }}
         resources:
           requests:
             storage: {{ .Values.postgresql.persistence.size }}
-  {{- end }}
-{{- end }}

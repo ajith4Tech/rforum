@@ -1,4 +1,3 @@
-{{- if .Values.postgresql.enabled }}
 apiVersion: v1
 kind: Service
 metadata:
@@ -13,4 +12,3 @@ spec:
     - name: postgresql
       port: 5432
       targetPort: postgresql
-{{- end }}

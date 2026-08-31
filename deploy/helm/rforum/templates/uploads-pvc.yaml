@@ -1,4 +1,3 @@
-{{- if .Values.storage.persistence.enabled }}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -14,10 +13,6 @@ metadata:
     helm.sh/resource-policy: keep
 spec:
   accessModes: [{{ .Values.storage.persistence.accessMode | quote }}]
-  {{- if .Values.storage.persistence.storageClass }}
-  storageClassName: {{ .Values.storage.persistence.storageClass }}
-  {{- end }}
   resources:
     requests:
       storage: {{ .Values.storage.persistence.size }}
-{{- end }}

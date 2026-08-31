@@ -1,5 +1,3 @@
-{{- if .Values.redis.enabled }}
-{{- if .Values.redis.persistence.enabled }}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -8,14 +6,10 @@ metadata:
     {{- include "rforum.componentLabels" (dict "root" . "component" "redis") | nindent 4 }}
 spec:
   accessModes: ["ReadWriteOnce"]
-  {{- if .Values.redis.persistence.storageClass }}
-  storageClassName: {{ .Values.redis.persistence.storageClass }}
-  {{- end }}
   resources:
     requests:
       storage: {{ .Values.redis.persistence.size }}
 ---
-{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -75,12 +69,8 @@ spec:
             {{- toYaml .Values.redis.resources | nindent 12 }}
       volumes:
         - name: data
-          {{- if .Values.redis.persistence.enabled }}
           persistentVolumeClaim:
             claimName: {{ include "rforum.redis.fullname" . }}
-          {{- else }}
-          emptyDir: {}
-          {{- end }}
 ---
 apiVersion: v1
 kind: Service
@@ -95,4 +85,3 @@ spec:
     - name: redis
       port: 6379
       targetPort: redis
-{{- end }}

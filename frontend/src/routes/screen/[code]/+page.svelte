@@ -1,16 +1,17 @@
 <script lang="ts">
-  import { joinSession, listResponses, getPageImageUrl, startSession, clearResponses, getScreenControl } from '$lib/api';
+  import { joinSession, listResponses, startSession, clearResponses, getScreenControl } from '$lib/api';
   import { RforumWebSocket } from '$lib/ws';
+  import type { ConnectionStatus as WsStatus } from '$lib/ws';
   import { onMount, onDestroy } from 'svelte';
   import { theme } from '$lib/theme';
-  import { BarChart3, MessageSquare, AlignLeft, FileText, Orbit, Cloud, Maximize2, Trash2 } from 'lucide-svelte';
+  import { BarChart3, MessageSquare, AlignLeft, Cloud, Orbit, Maximize2 } from 'lucide-svelte';
   import JoinScreen from '$lib/components/JoinScreen.svelte';
   import QRModal from '$lib/components/QRModal.svelte';
   import QRCode from '$lib/components/QRCode.svelte';
-  import PageImageViewer from '$lib/components/PageImageViewer.svelte';
   import PresentationLiveView from '$lib/components/timeline/PresentationLiveView.svelte';
   import ContentSlideCanvas from '$lib/components/ContentSlideCanvas.svelte';
   import { upsertTimelineItemFromWs } from '$lib/timelineTypes';
+  import { getFitTitleStyle, mergeResponsesById, responsesForSlide } from '$lib/fitTitle';
 
   let code = $state('');
   let session: any = $state(null);
@@ -27,6 +28,7 @@
   );
   const hasActiveContent = $derived(session?.presentation_id ? !!activeTimelineItem : !!activeSlide);
   let ws: RforumWebSocket | null = $state(null);
+  let lastWsStatus: WsStatus = 'disconnected';
   let loading = $state(true);
   let error = $state('');
   let guestUrl = $state('');
@@ -100,18 +102,31 @@
   }
 
   async function handleClearResponses() {
-    if (!activeSlide || isClearingResponses) return;
+    const slide = session?.presentation_id ? activeTimelineItem?.slide : activeSlide;
+    if (!slide || isClearingResponses) return;
     if (!confirm('Are you sure you want to clear all responses for this slide?')) return;
     
     isClearingResponses = true;
     try {
-      await clearResponses(activeSlide.id);
-      // The clear_responses websocket message will handle clearing the responses
+      await clearResponses(slide.id);
     } catch (e: any) {
       console.error('[screen] Error clearing responses:', e);
       alert('Failed to clear responses: ' + (e.message || 'Unknown error'));
     } finally {
       isClearingResponses = false;
+    }
+  }
+
+  async function refetchScreenResponses() {
+    try {
+      if (session?.presentation_id) {
+        const slideId = activeTimelineItem?.slide?.id;
+        timelineResponses = slideId ? responsesForSlide(await listResponses(slideId), slideId) : [];
+      } else if (activeSlide?.id) {
+        responses = responsesForSlide(await listResponses(activeSlide.id), activeSlide.id);
+      }
+    } catch {
+      // Keep last known responses if reconnect refetch fails.
     }
   }
 
@@ -125,6 +140,11 @@
     // Always connect WS so the screen auto-recovers when the session starts.
     // role: 'screen' marks this connection as strictly read-only.
     ws = new RforumWebSocket(code, { role: 'screen' });
+    ws.onStatusChange((s) => {
+      const wasReconnecting = lastWsStatus === 'reconnecting';
+      lastWsStatus = s;
+      if (s === 'connected' && wasReconnecting) void refetchScreenResponses();
+    });
     ws.onMessage(queueMessage);
     ws.connect();
     void pollScreenControl();
@@ -137,7 +157,7 @@
       const active = session.slides?.find((s: any) => s.is_active);
       if (active) {
         activeSlide = { ...active, type: active.type?.toUpperCase() };
-        responses = await listResponses(active.id);
+        responses = responsesForSlide(await listResponses(active.id), active.id);
       }
 
       if (session.presentation_id && session.timeline) {
@@ -145,7 +165,7 @@
         const items = [...(presentationTimeline.items || [])].sort((a: any, b: any) => a.order - b.order);
         const activeItem = items.find((i: any) => i.id === presentationTimeline.active_timeline_item_id);
         if (activeItem?.slide) {
-          timelineResponses = await listResponses(activeItem.slide.id);
+          timelineResponses = responsesForSlide(await listResponses(activeItem.slide.id), activeItem.slide.id);
         }
       }
     } catch (e: any) {
@@ -175,7 +195,7 @@
       }
       if (msg.data.slide) {
         try {
-          timelineResponses = await listResponses(msg.data.slide.id);
+          timelineResponses = responsesForSlide(await listResponses(msg.data.slide.id), msg.data.slide.id);
         } catch (err) {
           console.error('[screen] Failed to load responses for new timeline item:', err);
           timelineResponses = [];
@@ -230,19 +250,11 @@
         }
       }
     } else if (msg.event === 'new_response') {
-      // Only add response if it's for the current slide
       if (msg.data && activeSlide && msg.data.slide_id === activeSlide.id) {
-        // Check if response already exists to prevent duplicates
-        const exists = responses.some((r) => r.id === msg.data.id);
-        if (!exists) {
-          responses = [...responses, msg.data];
-        }
+        responses = mergeResponsesById(responses, [msg.data]);
       }
       if (msg.data && activeTimelineItem?.slide && msg.data.slide_id === activeTimelineItem.slide.id) {
-        const timelineExists = timelineResponses.some((r) => r.id === msg.data.id);
-        if (!timelineExists) {
-          timelineResponses = [...timelineResponses, msg.data];
-        }
+        timelineResponses = mergeResponsesById(timelineResponses, [msg.data]);
       }
     } else if (msg.event === 'upvote') {
       // Update the response with new upvote count
@@ -312,26 +324,12 @@
         showQRModal = !showQRModal;
       }
     } else if (msg.event === 'clear_responses') {
-      // Clear responses if it's for the current slide
-      if (msg.data?.slide_id === activeSlide?.id) {
-        responses = [];
-      }
-    }
-  }
-
-  function getFitTitleStyle(text: string, type: 'title' | 'question' = 'title'): string {
-    const len = (text || '').trim().length;
-    if (!len) return '';
-    if (type === 'question') {
-      if (len < 30) return 'font-size: clamp(1.35rem, 3vw, 2.2rem); line-height: 1.15; word-break: break-word; overflow-wrap: anywhere;';
-      if (len < 70) return 'font-size: clamp(1.1rem, 2.4vw, 1.8rem); line-height: 1.18; word-break: break-word; overflow-wrap: anywhere;';
-      if (len < 120) return 'font-size: clamp(0.95rem, 1.9vw, 1.4rem); line-height: 1.24; word-break: break-word; overflow-wrap: anywhere;';
-      return 'font-size: clamp(0.82rem, 1.55vw, 1.1rem); line-height: 1.28; word-break: break-word; overflow-wrap: anywhere;';
-    } else {
-      if (len < 24) return 'font-size: clamp(1.8rem, 4vw, 3rem); line-height: 1.1; word-break: break-word; overflow-wrap: anywhere;';
-      if (len < 56) return 'font-size: clamp(1.35rem, 2.9vw, 2.2rem); line-height: 1.15; word-break: break-word; overflow-wrap: anywhere;';
-      if (len < 110) return 'font-size: clamp(1.05rem, 2vw, 1.55rem); line-height: 1.22; word-break: break-word; overflow-wrap: anywhere;';
-      return 'font-size: clamp(0.85rem, 1.55vw, 1.1rem); line-height: 1.28; word-break: break-word; overflow-wrap: anywhere;';
+      const clearedId = msg.data?.slide_id;
+      if (!clearedId) return;
+      if (clearedId === activeSlide?.id) responses = [];
+      if (clearedId === activeTimelineItem?.slide?.id) timelineResponses = [];
+      responses = responses.filter((r) => r.slide_id !== clearedId);
+      timelineResponses = timelineResponses.filter((r) => r.slide_id !== clearedId);
     }
   }
 
@@ -382,8 +380,8 @@
   />
 {:else}
   <!-- LIVE PRESENTATION SCREEN (Theme Aware) -->
-  <div class="min-h-screen flex flex-col {$theme === 'dark' ? 'bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900'} font-sans select-none overflow-hidden transition-colors">
-    <header class="grid min-h-[94px] grid-cols-[1fr_auto_1fr] items-center gap-4 border-b {$theme === 'dark' ? 'border-slate-800 bg-slate-950' : 'border-slate-200 bg-white'} px-5 py-3 sm:px-8">
+  <div class="h-screen flex flex-col {$theme === 'dark' ? 'bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900'} font-sans select-none overflow-hidden transition-colors">
+    <header class="grid min-h-[72px] flex-shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-4 border-b {$theme === 'dark' ? 'border-slate-800 bg-slate-950' : 'border-slate-200 bg-white'} px-5 py-2 sm:px-8">
       <div class="flex items-center gap-2.5">
         <Orbit class="h-6 w-6 text-purple-600 dark:text-purple-400" />
         <span class="font-heading text-lg font-extrabold tracking-wide text-slate-900 dark:text-white">Rforum</span>
@@ -409,10 +407,9 @@
     </header>
 
     <!-- Main Presentation Workspace Stage -->
-    <main class="flex-1 flex flex-col items-center justify-center p-3 sm:p-5 overflow-hidden relative">
-      <!-- Centered Mascot Branding (below navbar, centered above slide stage) -->
-      <div class="flex items-center justify-center py-5 flex-shrink-0">
-        <img src="/logo-mascot.webp" alt="Rforum Mascot" class="w-16 h-16 sm:w-20 sm:h-20 object-contain opacity-90 hover:opacity-100 transition-opacity" />
+    <main class="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <div class="flex flex-shrink-0 items-center justify-center py-1">
+        <img src="/logo-mascot.webp" alt="Rforum Mascot" class="h-8 w-8 object-contain opacity-70 sm:h-9 sm:w-9" />
       </div>
 
       {#if error}
@@ -438,19 +435,22 @@
         </div>
 
       {:else if session?.presentation_id}
-        <div class="aspect-[16/9] {$theme === 'dark' ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'} rounded-2xl shadow-2xl border p-6 sm:p-12 flex flex-col justify-between overflow-hidden my-auto presentation-stage" style="width: min(calc((100vh - 16rem) * 16 / 9), calc(100vw - 1.5rem)); height: min(calc(100vh - 16rem), calc((100vw - 1.5rem) * 9 / 16));">
+        <div class="flex min-h-0 flex-1 items-center justify-center px-2 pb-2" style="container-type: size;">
+          <div class="overflow-hidden rounded-xl border p-3 sm:p-4 presentation-stage {$theme === 'dark' ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'}" style="width: min(100cqw, calc(100cqh * 16 / 9)); height: min(100cqh, calc(100cqw * 9 / 16));">
           <PresentationLiveView
             activeItem={activeTimelineItem}
             presentationId={session.presentation_id}
+            sessionId={session.id}
             sessionCode={code}
             responses={timelineResponses}
             variant="screen"
           />
+          </div>
         </div>
 
       {:else}
-        <!-- True 16:9 Presentation Stage Container -->
-        <div class="aspect-[16/9] {$theme === 'dark' ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'} rounded-2xl shadow-2xl border p-6 sm:p-12 flex flex-col justify-between overflow-hidden my-auto presentation-stage transition-colors" style="width: min(calc((100vh - 16rem) * 16 / 9), calc(100vw - 1.5rem)); height: min(calc(100vh - 16rem), calc((100vw - 1.5rem) * 9 / 16));">
+        <div class="flex min-h-0 flex-1 items-center justify-center px-2 pb-2" style="container-type: size;">
+          <div class="overflow-hidden rounded-xl border p-3 sm:p-4 presentation-stage transition-colors {$theme === 'dark' ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'}" style="width: min(100cqw, calc(100cqh * 16 / 9)); height: min(100cqh, calc(100cqw * 9 / 16));">
 
           <!-- POLL SLIDE -->
           {#if activeSlide.type === 'POLL'}
@@ -568,10 +568,11 @@
                 </div>
               {/if}
             </div>
-          {:else if activeSlide.type === 'CONTENT'}
+          {:else if activeSlide.type?.toUpperCase() === 'CONTENT'}
             <ContentSlideCanvas slide={activeSlide} sessionId={session.id} sessionCode={code} variant="screen" />
           {/if}
 
+          </div>
         </div>
       {/if}
     </main>

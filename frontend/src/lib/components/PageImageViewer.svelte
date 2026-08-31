@@ -23,6 +23,6 @@
   } = $props();
 </script>
 
-{#key page}
+{#key `${src}:${page}`}
   <img {src} {alt} class={imgClass} {draggable} loading="lazy" decoding="async" onload={onLoad} onerror={onError} />
 {/key}

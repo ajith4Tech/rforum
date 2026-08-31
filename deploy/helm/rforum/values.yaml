@@ -1,7 +1,16 @@
-# Default values for rforum — sized for a small/fresh k3s VM and zero
-# external dependencies (bundled Postgres+Redis, local disk storage,
-# self-signed-friendly ingress). See values-production.yaml for a larger-VM,
-# S3-backed overlay matching the currently-deployed rforum.t4gc.in config.
+# Production values for rforum — sized for a 4 vCPU / 8GB VM (double the
+# 2 vCPU / 3.7GB host the 500-guest k6 load test was validated against)
+# and matching the rforum.t4gc.in shape: bundled Postgres+Redis, S3-backed
+# uploads with a local PVC read fallback, ingress-nginx + TLS.
+#
+#   helm upgrade --install rforum deploy/helm/rforum \
+#     -f deploy/helm/rforum/values.yaml \
+#     -f my-secrets.yaml \
+#     --namespace rforum --create-namespace
+#
+# Secrets (app.secretKey, postgresql.auth.password, storage.s3.secretAccessKey,
+# etc.) are intentionally NOT set here — supply them via a separate
+# --set/-f file or existingSecret, never commit real values into this file.
 
 nameOverride: ""
 fullnameOverride: ""
@@ -11,15 +20,15 @@ imagePullSecrets: []
 image:
   # Set to a registry prefix (e.g. "registry.example.com/") if pushing built
   # images to a registry. Leave empty when images are built locally and
-  # imported directly into containerd on each k3s node (see docs/deploy.md).
+  # imported directly into containerd on each k3s node (see docs/k3s-deploy.md).
   registry: ""
   backend:
     repository: rforum-backend
-    tag: "latest"
+    tag: "1.0.0"
     pullPolicy: IfNotPresent
   frontend:
     repository: rforum-frontend
-    tag: "latest"
+    tag: "1.0.0"
     pullPolicy: IfNotPresent
 
 # ── Backend (FastAPI/Uvicorn) ────────────────────────────────────────────
@@ -46,11 +55,11 @@ backend:
 
   resources:
     requests:
-      cpu: 500m
-      memory: 512Mi
+      cpu: "1"
+      memory: 1Gi
     limits:
-      cpu: "2"
-      memory: 1536Mi
+      cpu: "3"
+      memory: 3Gi
 
   probes:
     path: /api/health
@@ -65,50 +74,30 @@ backend:
   # active WS mid-session is the one thing this chart must not regress.
   terminationGracePeriodSeconds: 30
 
-  podDisruptionBudget:
-    enabled: true
-    maxUnavailable: 1
-
-  autoscaling:
-    # Disabled by default — see the replicaCount note above. CPU-based HPA is
-    # safe to enable once you've load-tested beyond one replica, since the
-    # WS fan-out and rate limiting are both already Redis-backed (shared
-    # state), not in-process.
-    enabled: false
-    minReplicas: 1
-    maxReplicas: 4
-    targetCPUUtilizationPercentage: 70
-
   # Extra environment variables merged in verbatim (name/value pairs).
   extraEnv: []
 
 # ── Frontend (static SvelteKit build served by nginx) ───────────────────
 frontend:
-  replicaCount: 2
+  replicaCount: 1
   service:
     port: 8080
   resources:
     requests:
-      cpu: 100m
-      memory: 64Mi
+      cpu: 200m
+      memory: 128Mi
     limits:
-      cpu: 500m
-      memory: 256Mi
+      cpu: "1"
+      memory: 512Mi
   probes:
     path: /healthz
     initialDelaySeconds: 5
     periodSeconds: 10
     timeoutSeconds: 3
     failureThreshold: 3
-  podDisruptionBudget:
-    enabled: true
-    maxUnavailable: 1
 
 # ── Bundled PostgreSQL (StatefulSet) ─────────────────────────────────────
-# Disable and fill in `externalDatabase` to point at a managed/external
-# Postgres instead.
 postgresql:
-  enabled: true
   image:
     repository: postgres
     tag: "16-alpine"
@@ -116,14 +105,35 @@ postgresql:
     username: rforum
     database: rforum
     # Password is required — supply via --set postgresql.auth.password=...,
-    # via values-production.yaml, or (recommended) set auth.existingSecret to
+    # via a secrets values file, or (recommended) set auth.existingSecret to
     # a Secret you created out-of-band containing key "postgres-password".
     password: ""
     existingSecret: ""
   persistence:
-    enabled: true
-    size: 10Gi
-    storageClass: ""
+    size: 50Gi
+  resources:
+    requests:
+      cpu: "1"
+      memory: 1Gi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+  # pool_size=20 + max_overflow=10 per uvicorn worker (app/database.py) × 2
+  # workers × 1 replica = up to 60 pooled connections — comfortably inside
+  # Postgres's default max_connections=100. Re-check this arithmetic before
+  # raising backend.replicaCount or backend.workers.
+
+# ── Bundled Redis (pub/sub fan-out + rate-limit counters) ────────────────
+# Redis holds no durable business data (WS pub/sub is transient,
+# rate-limit counters are short-TTL fixed windows — app/rate_limit.py) so
+# persistence here is a "don't reset counters/lose in-flight messages on
+# pod restart" nicety, not a correctness requirement.
+redis:
+  image:
+    repository: redis
+    tag: "7-alpine"
+  persistence:
+    size: 2Gi
   resources:
     requests:
       cpu: 250m
@@ -131,45 +141,6 @@ postgresql:
     limits:
       cpu: "1"
       memory: 1Gi
-
-externalDatabase:
-  host: ""
-  port: 5432
-  database: rforum
-  username: rforum
-  existingSecret: ""
-  existingSecretPasswordKey: "postgres-password"
-
-# ── Bundled Redis (pub/sub fan-out + rate-limit counters) ────────────────
-# Disable and fill in `externalRedis` to point at a managed/external Redis
-# instead. Redis holds no durable business data (WS pub/sub is transient,
-# rate-limit counters are short-TTL fixed windows — app/rate_limit.py) so
-# persistence here is a "don't reset counters/lose in-flight messages on
-# pod restart" nicety, not a correctness requirement.
-redis:
-  enabled: true
-  image:
-    repository: redis
-    tag: "7-alpine"
-  persistence:
-    enabled: true
-    size: 1Gi
-    storageClass: ""
-  resources:
-    requests:
-      cpu: 100m
-      memory: 128Mi
-    limits:
-      cpu: 500m
-      memory: 512Mi
-
-externalRedis:
-  host: ""
-  port: 6379
-  # rforum has no REDIS_PASSWORD setting today (app/config.py REDIS_URL is a
-  # single connection string) — if your external Redis requires auth, bake
-  # the credential into `externalRedis.url` instead and leave host/port unset.
-  url: ""
 
 # ── Application configuration (app/config.py Settings) ──────────────────
 app:
@@ -230,8 +201,8 @@ app:
     responsePerIpWindowSeconds: 60
 
   # JWT signing secret (app/config.py SECRET_KEY). MUST be overridden — see
-  # README in this chart directory / NOTES.txt. Prefer `existingSecret` over
-  # setting this in plain values for anything beyond local testing.
+  # NOTES.txt. Prefer `existingSecret` over setting this in plain values for
+  # anything beyond local testing.
   secretKey: ""
   # Name of a pre-created Secret to source SECRET_KEY (and, when S3 storage
   # is enabled, AWS credentials) from instead of the values above. Expected
@@ -242,17 +213,15 @@ app:
 
 # ── Presentation/upload storage (app/storage/) ───────────────────────────
 storage:
-  # "local" (default — zero external dependencies, backed by the PVC below)
-  # or "s3" (app/storage/s3.py; local PVC still mounted and used as a
-  # fallback read path for anything not yet in the bucket — see
-  # app/storage/fallback.py, which is exactly how the current production
-  # deployment is configured after its S3 migration).
-  backend: local
+  # New writes go to S3; reads fall back to the local PVC for anything
+  # uploaded before the S3 switchover (app/storage/fallback.py). Fill in
+  # storage.s3.bucket and supply credentials via app.existingSecret (keys
+  # aws-access-key-id / aws-secret-access-key) rather than
+  # storage.s3.secretAccessKey directly.
+  backend: s3
   root: /data/uploads
   persistence:
-    enabled: true
-    size: 20Gi
-    storageClass: ""
+    size: 30Gi
     accessMode: ReadWriteOnce
   s3:
     bucket: ""
@@ -281,28 +250,20 @@ migrations:
 
 serviceAccount:
   create: true
-  annotations: {}
   name: ""
 
 # ── Ingress ───────────────────────────────────────────────────────────────
 ingress:
   enabled: true
-  # "nginx" (ingress-nginx) or "traefik" (k3s's bundled controller) — picks
-  # the annotation set in templates/ingress.yaml. nginx is the default
-  # because it's a direct, well-documented translation of the hand-tuned
-  # nginx.conf already validated at 500 concurrent guests (proxy timeouts,
-  # body size, WS upgrade headers); Traefik's per-route timeout knobs aren't
-  # expressible as plain Ingress annotations. See docs/deploy.md.
-  controller: nginx
-  # Leave empty to default to `ingress.controller`'s name (the common case:
-  # ingress-nginx installs as class "nginx", k3s's bundled Traefik as class
-  # "traefik"). Set explicitly only if your controller uses a custom class name.
-  className: ""
+  # ingress-nginx class. Timeouts and body size below are a direct
+  # translation of the hand-tuned nginx.conf already validated at 500
+  # concurrent guests (proxy timeouts, body size, WS upgrade headers).
+  className: nginx
   host: rforum.example.com
   annotations: {}
   tls:
-    enabled: false
-    secretName: ""
+    enabled: true
+    secretName: rforum-tls
   # Matches the current prod nginx `client_max_body_size 25m` (app enforces
   # UPLOAD_MAX_MB=20 itself; the proxy limit carries headroom above that).
   maxBodySizeMb: 25

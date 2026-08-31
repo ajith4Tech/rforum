@@ -1,17 +1,10 @@
 {{- if .Values.ingress.enabled }}
-{{- $root := . }}
-{{- $isNginx := eq .Values.ingress.controller "nginx" }}
 ---
 # Long-lived WebSocket path, split into its own Ingress object because
 # ingress-nginx annotations (proxy-read-timeout/proxy-send-timeout) apply to
 # the whole Ingress resource, not per-path — and /ws/ needs an 86400s read
 # timeout (matching the current bare-metal nginx.conf) while /api/ should
-# keep a normal short timeout. Traefik has no equivalent per-Ingress
-# annotation for this; WebSocket upgrade itself still works out of the box
-# since Traefik proxies the Upgrade header automatically, but long-idle
-# connections are subject to Traefik's entrypoint-level idle timeout
-# (default 180s) unless raised via a k3s Traefik HelmChartConfig — see
-# docs/deploy.md.
+# keep a normal short timeout.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -19,18 +12,14 @@ metadata:
   labels:
     {{- include "rforum.labels" . | nindent 4 }}
   annotations:
-    {{- if $isNginx }}
     nginx.ingress.kubernetes.io/proxy-read-timeout: {{ .Values.ingress.wsTimeoutSeconds | quote }}
     nginx.ingress.kubernetes.io/proxy-send-timeout: {{ .Values.ingress.wsTimeoutSeconds | quote }}
     nginx.ingress.kubernetes.io/proxy-connect-timeout: "10"
-    {{- else }}
-    traefik.ingress.kubernetes.io/router.entrypoints: websecure
-    {{- end }}
     {{- with .Values.ingress.annotations }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
 spec:
-  ingressClassName: {{ .Values.ingress.className | default .Values.ingress.controller }}
+  ingressClassName: {{ .Values.ingress.className | default "nginx" }}
   {{- if .Values.ingress.tls.enabled }}
   tls:
     - hosts: [{{ .Values.ingress.host }}]
@@ -59,18 +48,14 @@ metadata:
   labels:
     {{- include "rforum.labels" . | nindent 4 }}
   annotations:
-    {{- if $isNginx }}
     nginx.ingress.kubernetes.io/proxy-body-size: {{ printf "%vm" .Values.ingress.maxBodySizeMb | quote }}
     nginx.ingress.kubernetes.io/proxy-read-timeout: {{ .Values.ingress.apiTimeoutSeconds | quote }}
     nginx.ingress.kubernetes.io/proxy-send-timeout: {{ .Values.ingress.apiTimeoutSeconds | quote }}
-    {{- else }}
-    traefik.ingress.kubernetes.io/router.entrypoints: websecure
-    {{- end }}
     {{- with .Values.ingress.annotations }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
 spec:
-  ingressClassName: {{ .Values.ingress.className | default .Values.ingress.controller }}
+  ingressClassName: {{ .Values.ingress.className | default "nginx" }}
   {{- if .Values.ingress.tls.enabled }}
   tls:
     - hosts: [{{ .Values.ingress.host }}]

@@ -16,6 +16,7 @@
    */
   import { submitResponse, upvoteResponse } from '$lib/api';
   import { BarChart3, MessageSquare, AlignLeft, Cloud, Star, Send, ChevronUp, CheckCircle2 } from 'lucide-svelte';
+  import { getFitTitleStyle } from '$lib/fitTitle';
 
   let {
     slide,
@@ -60,21 +61,6 @@
     return (value || '').replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
   }
   const displayPrompt = $derived(plainText(promptText || ''));
-
-  function getFitTitleStyle(text: string, type: 'title' | 'question' = 'title'): string {
-    const len = (text || '').trim().length;
-    if (!len) return '';
-    if (type === 'question') {
-      if (len < 30) return 'font-size: clamp(1.35rem, 3vw, 2.2rem); line-height: 1.15; word-break: break-word; overflow-wrap: anywhere;';
-      if (len < 70) return 'font-size: clamp(1.1rem, 2.4vw, 1.8rem); line-height: 1.18; word-break: break-word; overflow-wrap: anywhere;';
-      if (len < 120) return 'font-size: clamp(0.95rem, 1.9vw, 1.4rem); line-height: 1.24; word-break: break-word; overflow-wrap: anywhere;';
-      return 'font-size: clamp(0.82rem, 1.55vw, 1.1rem); line-height: 1.28; word-break: break-word; overflow-wrap: anywhere;';
-    }
-    if (len < 24) return 'font-size: clamp(1.8rem, 4vw, 3rem); line-height: 1.1; word-break: break-word; overflow-wrap: anywhere;';
-    if (len < 56) return 'font-size: clamp(1.35rem, 2.9vw, 2.2rem); line-height: 1.15; word-break: break-word; overflow-wrap: anywhere;';
-    if (len < 110) return 'font-size: clamp(1.05rem, 2vw, 1.55rem); line-height: 1.22; word-break: break-word; overflow-wrap: anywhere;';
-    return 'font-size: clamp(0.85rem, 1.55vw, 1.1rem); line-height: 1.28; word-break: break-word; overflow-wrap: anywhere;';
-  }
 
   // ── Guest submission state ──────────────────────────
   // "Already responded" is persisted per-guest so a page refresh doesn't
@@ -272,7 +258,7 @@
 {#if variant === 'guest'}
   <div class="text-center mb-4">
     <svelte:component this={typeIcon} class="w-10 h-10 text-purple-600 mx-auto mb-2" />
-    <h1 class="text-2xl font-bold text-slate-900 dark:text-white">{displayPrompt}</h1>
+    <h1 class="font-heading font-bold text-slate-900 dark:text-white leading-tight" style={getFitTitleStyle(displayPrompt, 'question')}>{displayPrompt}</h1>
   </div>
 
   {#if slide.type === 'POLL'}
@@ -472,7 +458,7 @@
     </div>
 
     {#if !editing}
-      <p class="text-base font-medium text-surface-200">{displayPrompt}</p>
+      <p class="font-heading font-medium text-surface-800 dark:text-surface-100" style={getFitTitleStyle(displayPrompt, 'question')}>{displayPrompt}</p>
     {:else if slide.type === 'POLL'}
       <input class="input-field" type="text" bind:value={editQuestion} placeholder="Poll question" />
       <div class="space-y-2">

@@ -56,6 +56,10 @@ _EXT_TO_MIME: dict[str, str] = {
     ".txt":  "text/plain",
     ".odp":  "application/vnd.oasis.opendocument.presentation",
     ".odt":  "application/vnd.oasis.opendocument.text",
+    ".png":  "image/png",
+    ".jpg":  "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
 }
 
 # MIME types that should never be allowed regardless of extension

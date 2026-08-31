@@ -43,7 +43,8 @@ class Settings(BaseSettings):
     # JSON-only env parsing for list fields, which otherwise raises
     # SettingsError on a plain comma-separated value.
     UPLOAD_ALLOWED_EXTENSIONS: Annotated[list[str], NoDecode] = [
-        ".pdf", ".ppt", ".pptx", ".doc", ".docx", ".txt", ".odp", ".odt"
+        ".pdf", ".ppt", ".pptx", ".doc", ".docx", ".txt", ".odp", ".odt",
+        ".png", ".jpg", ".jpeg", ".webp",
     ]
 
     @field_validator("UPLOAD_ALLOWED_EXTENSIONS", mode="before")
