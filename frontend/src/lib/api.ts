@@ -582,9 +582,9 @@ export async function activateTimelineItem(sessionId: string, itemId: string): P
  */
 const withAssetAuth = (url: string, sessionCode?: string) => {
   const params = new URLSearchParams();
+  if (sessionCode) params.set('code', sessionCode);
   const token = getToken();
   if (token) params.set('token', token);
-  else if (sessionCode) params.set('code', sessionCode);
   const qs = params.toString();
   return qs ? `${url}?${qs}` : url;
 };

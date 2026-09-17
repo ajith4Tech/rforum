@@ -430,9 +430,22 @@
       const item = (timeline?.items || []).find((i: any) => i.id === itemId);
       if (item?.slide?.id) await loadTimelineResponses(item.slide.id);
       else timelineResponses = [];
+      // While the session is live, selecting a slide in Deck View IS the
+      // presentation action — it must go out to guests/screen immediately,
+      // not wait for a separate Present click. Mirrors PresentationWorkspace's
+      // selectItem so both surfaces behave identically once live. PAGE items
+      // always have a slide_id-free timeline item shape, so guard on the
+      // presence of an activatable id rather than item?.slide — activation
+      // is keyed by timeline_item_id, not slide_id, for this path.
+      if (session?.is_live && item && itemId !== timeline?.active_timeline_item_id) {
+        await activatePresentationItem(itemId);
+      }
       return;
     }
     await loadResponses(itemId);
+    if (session?.is_live && itemId !== activeSlideId) {
+      await activateSlide(itemId);
+    }
   }
 
   function openPresentation() {
@@ -440,15 +453,22 @@
   }
 
   async function startPresentation(itemId: string | null = null) {
+    // Go live FIRST and wait for it to commit. Guest/screen image requests
+    // are authorized via Session.is_live (see _authorize_presentation_asset /
+    // _authorize_slide_asset in the backend) — activating and broadcasting
+    // the first slide before is_live is actually true in the DB opens a race
+    // where a guest's image request lands in that gap and gets a 401
+    // (renders as a broken-image icon). The moderator's own view never
+    // notices this since it authenticates via JWT, not the is_live check.
+    if (!session?.is_live) {
+      await toggleLive();
+    }
     const targetId = itemId || previewItemId || timeline?.active_timeline_item_id || activeSlideId;
     if (targetId) {
       if (session?.presentation_id) await activatePresentationItem(targetId);
       else await activateSlide(targetId);
     }
     openPresentation();
-    if (!session?.is_live) {
-      await toggleLive();
-    }
   }
 
   async function toggleLive() {
@@ -614,18 +634,40 @@
     });
   }
 
-  function getDefaultContent(type: string): object {
+  function getDefaultContent(type: string, layout?: string): object {
     switch (type) {
       case 'POLL':
-        return { question: 'Your question?', options: ['Option A', 'Option B', 'Option C'] };
+        return { question: 'Your question?', options: ['Option A', 'Option B', 'Option C'], interaction_type: 'POLL' };
+      case 'MULTIPLE_CHOICE':
+        return { question: 'Choose one option:', options: ['Option A', 'Option B', 'Option C', 'Option D'], interaction_type: 'MULTIPLE_CHOICE', mode: 'multiple_choice' };
+      case 'QUIZ':
+        return { question: 'Quiz Question?', options: ['Option A', 'Option B', 'Option C', 'Option D'], correct_answer: 'Option A', reveal_answer: false, interaction_type: 'QUIZ', mode: 'quiz' };
       case 'QNA':
-        return { prompt: 'Ask me anything!' };
+        return { prompt: 'Ask me anything!', interaction_type: 'QNA' };
       case 'FEEDBACK':
-        return { prompt: 'Share your thoughts...' };
+        return { prompt: 'Share your thoughts...', interaction_type: 'FEEDBACK' };
+      case 'RATING':
+        return { prompt: 'Rate this presentation', mode: 'rating_only', interaction_type: 'RATING' };
+      case 'SCALE':
+        return { prompt: 'Rate on a scale from 1 to 10:', min: 1, max: 10, step: 1, min_label: 'Strongly disagree', max_label: 'Strongly agree', interaction_type: 'SCALE', mode: 'scale' };
+      case 'SURVEY':
+        return {
+          prompt: 'Audience Survey',
+          questions: [
+            { prompt: 'How relevant was this session?', response_type: 'single_choice', options: ['Very relevant', 'Somewhat relevant', 'Not relevant'] },
+            { prompt: 'Rate the presentation (1–10):', response_type: 'scale', min: 1, max: 10, labels: '1 = Poor, 10 = Excellent' },
+            { prompt: 'Any suggestions for improvement?', response_type: 'text' }
+          ],
+          interaction_type: 'SURVEY',
+          mode: 'survey'
+        };
       case 'CONTENT':
-        return { title: 'New Slide', body: '<p>Start typing your content here.</p>', layout: 'title_content' };
+        if (layout === 'video') {
+          return { title: 'Video Presentation', subtitle: 'Watch the video', video_url: '', layout: 'video', settings: { play_on_participant_devices: false } };
+        }
+        return { title: 'New Slide', body: '<p>Start typing your content here.</p>', layout: layout || 'title_content' };
       case 'WORD_CLOUD':
-        return { prompt: 'What comes to mind?' };
+        return { prompt: 'What comes to mind?', interaction_type: 'WORD_CLOUD' };
       default:
         return {};
     }
@@ -640,11 +682,15 @@
 
   async function activateSlide(slideId: string) {
     if (slideId !== activeSlideId && !confirmDiscardUnsavedChanges()) return;
-    await updateSlide(sessionId, slideId, { is_active: true });
+    const updated = await updateSlide(sessionId, slideId, { is_active: true });
     slides = slides.map((s) => ({ ...s, is_active: s.id === slideId }));
     activeSlideId = slideId;
     previewItemId = slideId;
     void loadResponses(slideId);
+    // Every other mutation in this file broadcasts over WS after the PATCH
+    // resolves — this one didn't, so activating a legacy (non-timeline)
+    // slide never reached guests/screen at all, live or not.
+    ws?.send('slide_change', { slide_id: slideId, slide: updated, activation: true });
   }
 
   function startEditing(slideId: string) {
@@ -1114,8 +1160,16 @@
   }
 
   async function handleInsertTimelineItem(itemType: string, position: number) {
+    let backendItemType: 'POLL' | 'QNA' | 'WORD_CLOUD' | 'FEEDBACK' | 'RATING' = 'POLL';
+    if (itemType === 'QNA') backendItemType = 'QNA';
+    else if (itemType === 'WORD_CLOUD') backendItemType = 'WORD_CLOUD';
+    else if (itemType === 'RATING') backendItemType = 'RATING';
+    else if (itemType === 'FEEDBACK' || itemType === 'SCALE' || itemType === 'SURVEY') backendItemType = 'FEEDBACK';
+    else backendItemType = 'POLL';
+
+    const contentJson = getDefaultContent(itemType);
     await withSaveState(async () => {
-      const created = await insertTimelineItem(sessionId, itemType, position);
+      const created = await insertTimelineItem(sessionId, backendItemType, position, contentJson as Record<string, unknown>);
       await loadPresentationData();
       pushCreatedTimelineItemUndo(created, position, 'Insert interaction');
     });
@@ -1128,6 +1182,23 @@
       await withSaveState(async () => {
         const updated = await updateTimelineItem(sessionId, itemId, cj);
         timeline = { ...timeline, items: timeline.items.map((i: any) => (i.id === updated.id ? updated : i)) };
+        // Same gap that legacy activateSlide had before it was fixed: this
+        // only persisted to the DB + updated the moderator's own local
+        // state — nothing told already-connected guests/screen. Reuses the
+        // exact WS shape activate_timeline_item's backend publish already
+        // uses (timeline_item_id/item_type/page/slide), which guest/screen
+        // clients already know how to merge via upsertTimelineItemFromWs —
+        // so this needed zero backend changes and zero new event types.
+        // This is what makes Quiz's "Reveal Answer" (and any other live
+        // content edit — Poll options, Scale config, Survey questions)
+        // actually reach connected guests instead of only showing up after
+        // a manual refresh.
+        ws?.send('slide_change', {
+          timeline_item_id: itemId,
+          item_type: updated.item_type,
+          page: updated.page ?? null,
+          slide: updated.slide ?? null
+        });
       });
     }
     await apply(contentJson);
@@ -1136,6 +1207,29 @@
       undo: async () => { await apply(prevContentJson); },
       redo: async () => { await apply(contentJson); }
     });
+  }
+
+  /** Flip a Quiz slide's reveal_answer from the normal moderator view
+   * (DeckView's toolbar), not just from inside the Editor. Handles both
+   * architectures the rest of this file already distinguishes throughout —
+   * presentation-timeline sessions reuse handleUpdateTimelineItemContent
+   * (which already broadcasts), legacy slide sessions PATCH + broadcast
+   * directly, matching the exact pattern activateSlide/savePollSlide etc.
+   * already use for legacy content edits. */
+  async function handleToggleQuizReveal(itemId: string) {
+    if (session?.presentation_id) {
+      const item = (timeline?.items || []).find((i: any) => i.id === itemId);
+      const cj = item?.slide?.content_json || {};
+      await handleUpdateTimelineItemContent(itemId, { ...cj, reveal_answer: !cj.reveal_answer });
+    } else {
+      const slide = slides.find((s) => s.id === itemId);
+      if (!slide) return;
+      const cj = slide.content_json || {};
+      const nextContentJson = { ...cj, reveal_answer: !cj.reveal_answer };
+      const updated = await updateSlide(sessionId, itemId, { content_json: nextContentJson });
+      slides = slides.map((s) => (s.id === itemId ? updated : s));
+      ws?.send('slide_change', { slide_id: itemId, slide: updated, activation: false });
+    }
   }
 
   async function handleDeleteTimelineItem(itemId: string) {
@@ -1269,6 +1363,7 @@
         onToggleLive={toggleLive}
         onRefreshPresentation={refreshPresentationScreen}
         onMaximizeQr={maximizePresentationQr}
+        onToggleRevealAnswer={handleToggleQuizReveal}
       />
     {:else if session?.presentation_id}
         <PresentationWorkspace
@@ -1312,14 +1407,21 @@
             onSelectSlide={(id) => selectSlide(id)}
             onCreateSlide={async (type, layout) => {
               try {
-                const defaultContent = getDefaultContent(type);
+                let backendType = 'CONTENT';
+                if (type === 'POLL' || type === 'MULTIPLE_CHOICE' || type === 'QUIZ') backendType = 'POLL';
+                else if (type === 'QNA') backendType = 'QNA';
+                else if (type === 'WORD_CLOUD') backendType = 'WORD_CLOUD';
+                else if (type === 'FEEDBACK' || type === 'RATING' || type === 'SCALE' || type === 'SURVEY') backendType = 'FEEDBACK';
+                else backendType = 'CONTENT';
+
+                const defaultContent = getDefaultContent(type, layout);
                 const finalContent = {
                   ...defaultContent,
-                  layout: layout || (type === 'CONTENT' ? 'title_content' : 'interactive')
+                  layout: layout || (backendType === 'CONTENT' ? 'title_content' : 'interactive')
                 };
                 await withSaveState(async () => {
                   const newSlide = await createSlide(sessionId, {
-                    type,
+                    type: backendType,
                     order: slides.length,
                     content_json: finalContent
                   });

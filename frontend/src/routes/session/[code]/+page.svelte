@@ -5,6 +5,7 @@
   import { theme, toggleTheme } from '$lib/theme';
   import { onMount, onDestroy } from 'svelte';
   import PresentationLiveView from '$lib/components/timeline/PresentationLiveView.svelte';
+  import InteractionView from '$lib/components/timeline/InteractionView.svelte';
   import ContentSlideCanvas from '$lib/components/ContentSlideCanvas.svelte';
   import { upsertTimelineItemFromWs } from '$lib/timelineTypes';
   import { getFitTitleStyle, mergeResponsesById, responsesForSlide } from '$lib/fitTitle';
@@ -467,7 +468,7 @@
           activeItem={activeTimelineItem}
           presentationId={session.presentation_id}
           sessionId={session.id}
-          sessionCode={code}
+          sessionCode={code || session?.unique_code || ''}
           responses={timelineResponses}
           variant="guest"
           {guestId}
@@ -475,186 +476,17 @@
       </div>
     {:else}
       <div class="w-full max-w-lg animate-fade-in mt-6">
-        <!-- Poll Slide -->
-        {#if activeSlide.type === 'POLL'}
-          <div class="text-center mb-4">
-            <BarChart3 class="w-10 h-10 text-purple-600 mx-auto mb-2" />
-            <h1 class="font-heading font-bold text-slate-900 dark:text-white leading-tight" style={getFitTitleStyle(activeSlide.content_json?.question, 'question')}>{activeSlide.content_json?.question}</h1>
-          </div>
-
-          {#if submitted}
-            <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 text-center animate-slide-up" role="status" aria-live="polite">
-              <CheckCircle2 class="w-12 h-12 text-emerald-500 mx-auto mb-3" />
-              <p class="font-semibold text-slate-900 dark:text-white">Vote submitted!</p>
-              <p class="text-sm text-slate-500 mt-1">You chose: {selectedOption}</p>
-            </div>
-          {:else}
-            <div class="space-y-2">
-              {#each activeSlide.content_json?.options || [] as option}
-                <button
-                  onclick={() => handlePollVote(option)}
-                  aria-pressed={selectedOption === option}
-                  class="w-full rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4
-                         hover:border-purple-400 dark:hover:border-purple-500/50 hover:bg-purple-50 dark:hover:bg-purple-500/5
-                         transition-all duration-200 text-left text-lg font-medium text-slate-900 dark:text-white
-                         active:scale-[0.98] cursor-pointer"
-                >
-                  {option}
-                </button>
-              {/each}
-            </div>
-          {/if}
-        {/if}
-
-        <!-- Q&A Slide -->
-        {#if activeSlide.type === 'QNA'}
-          <div class="text-center mb-4">
-            <MessageSquare class="w-10 h-10 text-purple-600 mx-auto mb-2" />
-            <h1 class="font-heading font-bold text-slate-900 dark:text-white leading-tight" style={getFitTitleStyle(activeSlide.content_json?.prompt, 'question')}>{activeSlide.content_json?.prompt}</h1>
-          </div>
-
-          <form onsubmit={(event) => { event.preventDefault(); handleTextSubmit(); }} class="space-y-2 mb-4">
-            <input
-              type="text"
-              bind:value={guestName}
-              placeholder="Your name (optional)"
-              class="w-full rounded-xl px-4 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition"
-            />
-            <div class="flex gap-2">
-              <input
-                type="text"
-                bind:value={inputValue}
-                placeholder="Type your question..."
-                class="flex-1 rounded-xl px-4 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition"
-              />
-              <button type="submit" class="btn-primary p-2" disabled={isSubmitting} aria-label="Submit question">
-                <Send class="w-5 h-5" />
-              </button>
-            </div>
-          </form>
-
-          {#if thankYou}
-            <div class="flex items-center justify-center gap-2 mb-4 text-sm text-emerald-500 animate-fade-in" role="status" aria-live="polite">
-              <CheckCircle2 class="w-4 h-4" />
-              Thanks for submitting your question!
-            </div>
-          {/if}
-
-          {#if actionError}
-            <p class="text-red-500 text-sm mb-4 text-center" role="alert">{actionError}</p>
-          {/if}
-
-          <div class="space-y-3 max-h-[50vh] overflow-y-auto">
-            {#each [...responses].sort((a, b) => b.upvotes - a.upvotes) as response (response.id)}
-              <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 flex items-start gap-3 animate-slide-up">
-                <button
-                  onclick={() => handleUpvote(response.id)}
-                  aria-label={`Upvote (${response.upvotes} votes)`}
-                  class="flex flex-col items-center text-slate-400 hover:text-purple-600 transition-colors shrink-0"
-                >
-                  <ChevronUp class="w-5 h-5" />
-                  <span class="text-xs font-bold">{response.upvotes}</span>
-                </button>
-                <div>
-                  <p class="text-slate-700 dark:text-slate-200 text-sm">{response.value}</p>
-                  {#if response.name}
-                    <p class="text-xs text-slate-500 mt-1">{response.name}</p>
-                  {/if}
-                </div>
-              </div>
-            {/each}
-          </div>
-        {/if}
-
-        <!-- Feedback Slide -->
-        {#if activeSlide.type === 'FEEDBACK'}
-          <div class="text-center mb-4">
-            <AlignLeft class="w-10 h-10 text-purple-600 mx-auto mb-2" />
-            <h1 class="font-heading font-bold text-slate-900 dark:text-white leading-tight" style={getFitTitleStyle(activeSlide.content_json?.prompt, 'question')}>{activeSlide.content_json?.prompt}</h1>
-          </div>
-
-          {#if submitted}
-            <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 text-center animate-slide-up" role="status" aria-live="polite">
-              <CheckCircle2 class="w-12 h-12 text-emerald-500 mx-auto mb-3" />
-              <p class="font-semibold text-slate-900 dark:text-white">Thanks for your feedback!</p>
-            </div>
-          {:else}
-            <form onsubmit={(event) => { event.preventDefault(); handleTextSubmit(); }}>
-              <input
-                type="text"
-                bind:value={guestName}
-                placeholder="Your name (optional)"
-                class="w-full rounded-xl px-4 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition mb-2"
-              />
-              <textarea
-                bind:value={inputValue}
-                placeholder="Share your thoughts..."
-                rows="4"
-                class="w-full rounded-xl px-4 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition mb-2 resize-none"
-              ></textarea>
-              <div class="flex items-center gap-2 mb-3">
-                <label for="feedback-rating" class="text-sm text-slate-500 dark:text-slate-400">Rating</label>
-                <input
-                  id="feedback-rating"
-                  type="number"
-                  min="1"
-                  max="5"
-                  bind:value={feedbackRating}
-                  class="w-24 rounded-xl px-4 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition"
-                />
-              </div>
-              <button type="submit" class="btn-primary w-full flex items-center justify-center gap-2" disabled={isSubmitting}>
-                <Send class="w-4 h-4" />
-                Submit
-              </button>
-            </form>
-          {/if}
-        {/if}
-
-        <!-- Word Cloud Slide -->
-        {#if activeSlide.type === 'WORD_CLOUD'}
-          <div class="text-center mb-4">
-            <Cloud class="w-10 h-10 text-purple-600 mx-auto mb-2" />
-            <h1 class="font-heading font-bold text-slate-900 dark:text-white leading-tight" style={getFitTitleStyle(activeSlide.content_json?.prompt, 'question')}>{activeSlide.content_json?.prompt}</h1>
-          </div>
-
-          <form onsubmit={(event) => { event.preventDefault(); handleTextSubmit(); }} class="space-y-2 mb-4">
-            <input
-              type="text"
-              bind:value={guestName}
-              placeholder="Your name (optional)"
-              class="w-full rounded-xl px-4 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition"
-            />
-            <div class="flex gap-2">
-              <input
-                type="text"
-                bind:value={inputValue}
-                placeholder="Type your answer..."
-                class="flex-1 rounded-xl px-4 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition"
-              />
-              <button type="submit" class="btn-primary p-2" disabled={isSubmitting} aria-label="Submit answer">
-                <Send class="w-5 h-5" />
-              </button>
-            </div>
-          </form>
-
-          {#if thankYou}
-            <div class="flex items-center justify-center gap-2 text-sm text-emerald-500 animate-fade-in" role="status" aria-live="polite">
-              <CheckCircle2 class="w-4 h-4" />
-              Thanks for your answer!
-            </div>
-          {/if}
-
-          {#if actionError}
-            <p class="text-red-500 text-sm text-center" role="alert">{actionError}</p>
-          {/if}
-        {/if}
-
-        <!-- Content Slide -->
         {#if activeSlide.type?.toUpperCase() === 'CONTENT'}
           <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 animate-fade-in min-h-[16rem]">
-            <ContentSlideCanvas slide={activeSlide} sessionId={session?.id} sessionCode={code} variant="screen" />
+            <ContentSlideCanvas slide={activeSlide} sessionId={session?.id} sessionCode={code} variant="guest" />
           </div>
+        {:else}
+          <InteractionView
+            slide={activeSlide}
+            responses={responses}
+            variant="guest"
+            {guestId}
+          />
         {/if}
       </div>
     {/if}

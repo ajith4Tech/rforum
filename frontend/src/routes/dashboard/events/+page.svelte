@@ -4,9 +4,10 @@
     createEvent,
     updateEvent,
     deleteEvent,
-    setEventSessions
+    setEventSessions,
+    createSession
   } from '$lib/api';
-  import { getEvents, getSessions, invalidateEvents } from '$lib/dataCache';
+  import { getEvents, getSessions, invalidateEvents, invalidateSessions } from '$lib/dataCache';
   import { Calendar, Plus, Search, X } from 'lucide-svelte';
   import { onMount, tick } from 'svelte';
   import { debounce } from '$lib/debounce';
@@ -37,6 +38,10 @@
   let newEventDescription = $state('');
   let creatingEvent = $state(false);
   let savingEventId = $state<string | null>(null);
+  // Tracks which event's inline "create a new session" is in flight, so
+  // only that event's card shows a loading state — separate from
+  // savingEventId (which covers the existing select + Add flow).
+  let creatingSessionForEventId = $state<string | null>(null);
   let eventSelections: Record<string, string[]> = $state({});
   let addSessionSelections: Record<string, string> = $state({});
   let showCreateEvent = $state(false);
@@ -58,13 +63,14 @@
     );
   }
 
+  async function loadSessionsForDropdown() {
+    const result = await getSessions({ limit: DROPDOWN_LIMIT });
+    sessions = result.items;
+  }
+
   onMount(async () => {
     try {
-      const [sessionsResult] = await Promise.all([
-        getSessions({ limit: DROPDOWN_LIMIT }),
-        loadEvents()
-      ]);
-      sessions = sessionsResult.items;
+      await Promise.all([loadSessionsForDropdown(), loadEvents()]);
     } catch {
       goto('/login');
     } finally {
@@ -185,6 +191,32 @@
     if (next.length === current.length) return;
     eventSelections = { ...eventSelections, [eventId]: next };
     await handleSaveEventSessions(eventId);
+  }
+
+  /** Create a brand-new session and attach it to this event, without ever
+      leaving the Events page — the flow the PM's feedback asked for. Reuses
+      the existing createSession API (same one the Sessions page itself
+      uses) and the existing handleSaveEventSessions attach step, so this is
+      additive glue rather than a new attach mechanism. */
+  async function handleCreateAndAddSession(eventId: string, title: string, moderatorName: string) {
+    creatingSessionForEventId = eventId;
+    try {
+      const newSession = await createSession(title, eventId, moderatorName || null, []);
+      const current = eventSelections[eventId] || [];
+      eventSelections = { ...eventSelections, [eventId]: [...current, newSession.id] };
+      // createSession() bypasses the cache layer entirely — without this,
+      // loadSessionsForDropdown() below would serve the stale cached
+      // sessions list (missing the one just created) until a hard reload
+      // clears the in-memory cache Map. This was the actual "need a
+      // refresh to see it" bug.
+      invalidateSessions();
+      await loadSessionsForDropdown();
+      await handleSaveEventSessions(eventId);
+    } catch (e: any) {
+      alert(e.message);
+    } finally {
+      creatingSessionForEventId = null;
+    }
   }
 
   async function handleDeleteEvent(id: string) {
@@ -335,6 +367,7 @@
               sessions={getSelectedSessions(event.id)}
               availableSessions={getAvailableSessions(event.id)}
               saving={savingEventId === event.id}
+              creatingSession={creatingSessionForEventId === event.id}
               addSessionSelection={addSessionSelections[event.id] || ''}
               onEdit={startEditEvent}
               onTogglePublish={handleTogglePublish}
@@ -342,6 +375,7 @@
               onAddSession={handleAddSession}
               onRemoveSession={handleRemoveSession}
               onAddSessionSelectionChange={(eid, val) => addSessionSelections = { ...addSessionSelections, [eid]: val }}
+              onCreateAndAddSession={handleCreateAndAddSession}
             />
           </div>
         {/each}
