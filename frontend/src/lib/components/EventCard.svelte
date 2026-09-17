@@ -8,6 +8,7 @@
     sessions = [],
     availableSessions = [],
     saving = false,
+    creatingSession = false,
     addSessionSelection = '',
     onEdit,
     onTogglePublish,
@@ -15,11 +16,14 @@
     onAddSession,
     onRemoveSession,
     onAddSessionSelectionChange,
+    onCreateAndAddSession,
   }: {
     event: any;
     sessions?: any[];
     availableSessions?: any[];
     saving?: boolean;
+    /** True while a new session created inline (see below) is being created + attached. */
+    creatingSession?: boolean;
     addSessionSelection?: string;
     onEdit?: (event: any) => void;
     onTogglePublish?: (eventId: string, current: boolean) => void;
@@ -27,10 +31,36 @@
     onAddSession?: (eventId: string) => void;
     onRemoveSession?: (eventId: string, sessionId: string) => void;
     onAddSessionSelectionChange?: (eventId: string, value: string) => void;
+    /** Create a brand-new session and attach it to this event in one step —
+        lets the moderator skip the separate Sessions page entirely. */
+    onCreateAndAddSession?: (eventId: string, title: string, moderatorName: string) => void | Promise<void>;
   } = $props();
 
   function formatDate(dateStr: string) {
     return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  }
+
+  // ── Inline "create a new session" — self-contained, doesn't touch the
+  // existing select/Add flow above it at all. ──
+  let showCreateSessionForm = $state(false);
+  let newSessionTitle = $state('');
+  let newSessionModerator = $state('');
+
+  function cancelCreateSession() {
+    showCreateSessionForm = false;
+    newSessionTitle = '';
+    newSessionModerator = '';
+  }
+
+  async function submitCreateSession() {
+    if (!newSessionTitle.trim() || creatingSession) return;
+    await onCreateAndAddSession?.(event.id, newSessionTitle.trim(), newSessionModerator.trim());
+    // Only clear the form on success — if onCreateAndAddSession throws, the
+    // caller's own error handling (alert) runs and this line is skipped, so
+    // the moderator's typed title/moderator aren't lost on a failed attempt.
+    showCreateSessionForm = false;
+    newSessionTitle = '';
+    newSessionModerator = '';
   }
 </script>
 
@@ -121,5 +151,47 @@
         {saving ? 'Saving...' : 'Add'}
       </button>
     </div>
+
+    {#if onCreateAndAddSession}
+      {#if !showCreateSessionForm}
+        <button
+          type="button"
+          class="text-xs text-brand-500 hover:text-brand-400 font-medium pt-0.5"
+          onclick={() => (showCreateSessionForm = true)}
+        >
+          + Create a new session for this event
+        </button>
+      {:else}
+        <div class="rounded-xl border border-surface-200 p-3 space-y-2">
+          <input
+            type="text"
+            class="input-field !py-2 text-sm w-full"
+            placeholder="Session title"
+            bind:value={newSessionTitle}
+            onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); submitCreateSession(); } }}
+          />
+          <input
+            type="text"
+            class="input-field !py-2 text-sm w-full"
+            placeholder="Moderator name (optional)"
+            bind:value={newSessionModerator}
+            onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); submitCreateSession(); } }}
+          />
+          <div class="flex flex-col-reverse sm:flex-row gap-2 justify-end">
+            <button type="button" class="btn-secondary text-xs" onclick={cancelCreateSession} disabled={creatingSession}>
+              Cancel
+            </button>
+            <button
+              type="button"
+              class="btn-primary text-xs"
+              disabled={creatingSession || !newSessionTitle.trim()}
+              onclick={submitCreateSession}
+            >
+              {creatingSession ? 'Creating…' : 'Create & add'}
+            </button>
+          </div>
+        </div>
+      {/if}
+    {/if}
   </div>
 </div>

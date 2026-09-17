@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { BarChart3, MessageSquare, Cloud, AlignLeft, Star, Plus } from 'lucide-svelte';
+  import { BarChart3, MessageSquare, Cloud, AlignLeft, Star, Plus, ListChecks, HelpCircle, Sliders, ClipboardList } from 'lucide-svelte';
 
   let {
     position,
@@ -28,10 +28,14 @@
 
   const options = [
     { type: 'POLL', label: 'Poll', icon: BarChart3 },
+    { type: 'MULTIPLE_CHOICE', label: 'Multiple Choice', icon: ListChecks },
+    { type: 'QUIZ', label: 'Quiz', icon: HelpCircle },
     { type: 'QNA', label: 'Q&A', icon: MessageSquare },
-    { type: 'WORD_CLOUD', label: 'Word Cloud', icon: Cloud },
+    { type: 'RATING', label: 'Rating', icon: Star },
+    { type: 'SCALE', label: 'Scale', icon: Sliders },
     { type: 'FEEDBACK', label: 'Feedback', icon: AlignLeft },
-    { type: 'RATING', label: 'Rating', icon: Star }
+    { type: 'WORD_CLOUD', label: 'Word Cloud', icon: Cloud },
+    { type: 'SURVEY', label: 'Survey', icon: ClipboardList }
   ];
 
   function pick(type: string) {

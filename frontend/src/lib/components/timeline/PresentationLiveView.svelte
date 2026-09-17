@@ -58,7 +58,7 @@
         slide={activeItem.slide}
         sessionId={sessionId || activeItem.slide?.session_id || ''}
         {sessionCode}
-        variant="screen"
+        variant={variant === 'guest' ? 'guest' : 'screen'}
       />
     {:else if activeItem?.slide}
       <InteractionView slide={activeItem.slide} {responses} {variant} {guestId} {readOnly} />

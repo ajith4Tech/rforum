@@ -2,6 +2,7 @@
   import { getPageImageUrl } from '$lib/api';
   import PageImageViewer from '$lib/components/PageImageViewer.svelte';
   import { getFitTitleStyle } from '$lib/fitTitle';
+  import { Video, Tv, Play } from 'lucide-svelte';
 
   let {
     slide,
@@ -12,7 +13,7 @@
     slide: any;
     sessionId?: string;
     sessionCode?: string;
-    variant?: 'screen' | 'deck';
+    variant?: 'screen' | 'deck' | 'guest';
   } = $props();
 
   const layout = $derived(slide?.content_json?.layout || 'title_content');
@@ -20,6 +21,8 @@
   const subtitle = $derived(slide?.content_json?.subtitle || '');
   const body = $derived(slide?.content_json?.body || '');
   const body2 = $derived(slide?.content_json?.body2 || '');
+  const videoUrl = $derived(slide?.content_json?.video_url || slide?.content_json?.url || '');
+  const playOnDevices = $derived(Boolean(slide?.content_json?.settings?.play_on_participant_devices));
   const resolvedSessionId = $derived(sessionId || slide?.session_id || '');
   const filePage = $derived(slide?.content_json?.file_page || 1);
   const hasImage = $derived(Boolean(slide?.content_json?.file_url || slide?.content_json?.has_file));
@@ -28,9 +31,96 @@
       ? getPageImageUrl(resolvedSessionId, slide.id, filePage, sessionCode)
       : ''
   );
+
+  function getEmbedUrl(rawUrl: string): { type: 'iframe' | 'video'; url: string } {
+    if (!rawUrl) return { type: 'video', url: '' };
+    const u = rawUrl.trim();
+    // YouTube
+    const ytMatch = u.match(/(?:youtube\.com\/(?:watch\?v=|embed\/|v\/)|youtu\.be\/)([\w-]{11})/i);
+    if (ytMatch) {
+      return { type: 'iframe', url: `https://www.youtube.com/embed/${ytMatch[1]}?autoplay=0&rel=0` };
+    }
+    // Vimeo
+    const vimeoMatch = u.match(/vimeo\.com\/(?:video\/)?(\d+)/i);
+    if (vimeoMatch) {
+      return { type: 'iframe', url: `https://player.vimeo.com/video/${vimeoMatch[1]}` };
+    }
+    return { type: 'video', url: u };
+  }
+  const embed = $derived(getEmbedUrl(videoUrl));
 </script>
 
-{#if layout === 'image_text'}
+{#if layout === 'video'}
+  {#if variant === 'guest' && !playOnDevices}
+    <!-- Guest view: No auto-play, directed to main screen -->
+    <div class="mx-auto flex h-full max-w-lg flex-col items-center justify-center p-6 text-center animate-fade-in my-auto">
+      <div class="relative mb-6">
+        <div class="absolute -inset-2 rounded-full bg-purple-500/20 blur-lg"></div>
+        <div class="relative flex h-20 w-20 items-center justify-center rounded-2xl border border-purple-500/30 bg-purple-500/10 text-purple-600 dark:text-purple-400">
+          <Tv class="h-10 w-10" />
+        </div>
+      </div>
+      <span class="inline-flex items-center gap-1.5 rounded-full border border-purple-500/20 bg-purple-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-purple-600 dark:text-purple-400 mb-3">
+        <Video class="w-3.5 h-3.5" /> Video Presentation
+      </span>
+      {#if title}
+        <h1 class="font-heading text-xl sm:text-2xl font-bold text-slate-900 dark:text-white leading-tight mb-2" style={getFitTitleStyle(title, 'title')}>
+          {title}
+        </h1>
+      {/if}
+      <p class="text-base font-semibold text-slate-800 dark:text-slate-200 mt-2">
+        Watch the video on the main screen
+      </p>
+      {#if subtitle}
+        <p class="text-sm text-slate-500 dark:text-slate-400 mt-1">{subtitle}</p>
+      {/if}
+    </div>
+  {:else}
+    <!-- Screen / Projector / Moderator Preview -->
+    <div class="flex h-full w-full flex-col gap-3 overflow-hidden">
+      {#if title}
+        <div class="flex-shrink-0 text-center">
+          <h1 class="font-heading font-extrabold text-slate-900 dark:text-slate-100 leading-tight text-xl sm:text-2xl" style={getFitTitleStyle(title, 'title')}>
+            {title}
+          </h1>
+          {#if subtitle}
+            <p class="text-sm text-slate-500 dark:text-slate-400 mt-0.5">{subtitle}</p>
+          {/if}
+        </div>
+      {/if}
+      <div class="flex-1 min-h-0 flex items-center justify-center w-full">
+        {#if !videoUrl}
+          <div class="flex flex-col items-center justify-center p-8 rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/40 text-center">
+            <Video class="w-10 h-10 text-slate-400 mb-2" />
+            <p class="text-sm text-slate-500">No video URL configured</p>
+          </div>
+        {:else if embed.type === 'iframe'}
+          <div class="relative w-full h-full max-w-4xl mx-auto rounded-2xl overflow-hidden shadow-2xl bg-black flex items-center justify-center aspect-video">
+            <iframe
+              src={embed.url}
+              title={title || 'Video player'}
+              class="w-full h-full border-0 rounded-2xl"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              allowfullscreen
+            ></iframe>
+          </div>
+        {:else}
+          <div class="relative w-full h-full max-w-4xl mx-auto rounded-2xl overflow-hidden shadow-2xl bg-black flex items-center justify-center">
+            <video
+              src={embed.url}
+              controls
+              class="w-full h-full object-contain rounded-2xl max-h-full"
+              preload="metadata"
+            >
+              <track kind="captions" />
+              Your browser does not support the video tag.
+            </video>
+          </div>
+        {/if}
+      </div>
+    </div>
+  {/if}
+{:else if layout === 'image_text'}
   <div class={`grid h-full grid-cols-1 gap-5 overflow-hidden lg:grid-cols-12 ${variant === 'deck' ? 'p-0' : ''}`}>
     <div class="flex h-full items-center justify-center overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950/40 lg:col-span-5">
       {#if hasImage && pageImageSrc}

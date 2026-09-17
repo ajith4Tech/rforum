@@ -104,10 +104,24 @@
   function selectItem(itemId: string) {
     selectedItemId = itemId;
     onSelectItem?.(itemId);
+    // While the session is live, selecting a slide IS the presentation
+    // action — it must go out to guests/screen immediately, not wait for a
+    // separate "Present" click. Before a session goes live, selection stays
+    // preview-only so the moderator can browse/prep without pushing slides
+    // to an audience that isn't there yet.
+    if (session?.is_live && itemId !== liveItemId) {
+      onActivateItem(itemId);
+    }
   }
 
   function presentSelected() {
-    if (selectedItemId) onActivateItem(selectedItemId);
+    // Present's job is to open the audience-facing Presentation Screen —
+    // slide activation now happens on selection itself (see selectItem
+    // above), so this no longer needs to touch onActivateItem at all.
+    // A named window target means repeat clicks focus the same already-open
+    // tab instead of spawning a new one every time.
+    if (!session?.unique_code) return;
+    window.open(`/screen/${session.unique_code}`, 'rforum_presentation_screen');
   }
 
   let editingItemId: string | null = $state(null);
@@ -230,7 +244,7 @@
       <div class="sticky top-0 z-10 -mx-1 px-1 py-2 mb-3 flex flex-wrap items-center gap-2 bg-surface-50/90 dark:bg-surface-950/90 backdrop-blur supports-[backdrop-filter]:bg-surface-50/70 dark:supports-[backdrop-filter]:bg-surface-950/70">
         <button onclick={() => { const ids = sortedItems.map((i: any) => i.id); const idx = ids.indexOf(selectedItemId || ''); if (idx > 0) selectItem(ids[idx - 1]); }} class="btn-secondary text-sm" aria-label="Previous item">Previous</button>
         <button onclick={() => { const ids = sortedItems.map((i: any) => i.id); const idx = ids.indexOf(selectedItemId || ''); if (idx >= 0 && idx < ids.length - 1) selectItem(ids[idx + 1]); }} class="btn-secondary text-sm" aria-label="Next item">Next</button>
-        <button onclick={presentSelected} class="btn-primary text-sm" disabled={!selectedItemId}>Present</button>
+        <button onclick={presentSelected} class="btn-primary text-sm">Present</button>
 
         {#if activeMeta}
           <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold {activeMeta.ring}">

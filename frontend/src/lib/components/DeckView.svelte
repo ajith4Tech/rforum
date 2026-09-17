@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { FileText, Maximize2, MonitorPlay, Pencil, Radio, RefreshCw, Users, BarChart3, Cloud, MessageSquare } from 'lucide-svelte';
+  import { FileText, Maximize2, MonitorPlay, Pencil, Radio, RefreshCw, Users, BarChart3, Cloud, MessageSquare, Eye, EyeOff } from 'lucide-svelte';
   import { getPresentationPageImageUrl } from '$lib/api';
   import PageImageViewer from '$lib/components/PageImageViewer.svelte';
   import PresentationLiveView from '$lib/components/timeline/PresentationLiveView.svelte';
@@ -7,16 +7,21 @@
   import ConnectionStatus from '$lib/components/ConnectionStatus.svelte';
   import ContentSlideCanvas from '$lib/components/ContentSlideCanvas.svelte';
   import { getFitTitleStyle, responsesForSlide } from '$lib/fitTitle';
+  import { metaForItem } from '$lib/timelineTypes';
   import type { ConnectionStatus as WsStatus } from '$lib/ws';
 
   let {
     session, presentation = null, timeline = null, slides = [], activeSlideId = null,
     responses = [], wsStatus = 'disconnected' as WsStatus, onSelect, onEdit, onPresent, onToggleLive,
-    onRefreshPresentation = undefined, onMaximizeQr = undefined
+    onRefreshPresentation = undefined, onMaximizeQr = undefined, onToggleRevealAnswer = undefined
   }: {
     session: any; presentation?: any; timeline?: any; slides?: any[]; activeSlideId?: string | null;
     responses?: any[]; wsStatus?: WsStatus; onSelect: (id: string) => void; onEdit: () => void;
     onPresent: (itemId: string | null) => void; onToggleLive: () => void; onRefreshPresentation?: () => void; onMaximizeQr?: () => void;
+    /** Toggle a Quiz slide's reveal_answer from the normal moderator view —
+        not just the Editor. Only shown when the currently selected slide is
+        a Quiz (see isQuizSelected below). */
+    onToggleRevealAnswer?: (itemId: string) => void;
   } = $props();
 
   const items = $derived(timeline ? [...(timeline.items || [])].sort((a: any, b: any) => a.order - b.order) : [...slides].sort((a: any, b: any) => (a.order ?? 0) - (b.order ?? 0)));
@@ -31,16 +36,22 @@
   const visibleResponses = $derived(responsesForSlide(responses, selectedSlide?.id));
   const promptText = $derived(selectedSlide?.content_json?.question || selectedSlide?.content_json?.prompt || 'Audience responses');
 
+  // Same detection InteractionView.svelte itself uses — a Quiz slide is a
+  // POLL-type slide (legacy) or POLL-family timeline item (presentation)
+  // whose content_json carries interaction_type/mode "QUIZ"/"quiz".
+  const isQuizSelected = $derived(Boolean(
+    selectedSlide?.content_json &&
+    (selectedSlide.content_json.interaction_type === 'QUIZ' || selectedSlide.content_json.mode === 'quiz')
+  ));
+  const quizRevealed = $derived(Boolean(selectedSlide?.content_json?.reveal_answer));
+
   const label = (item: any) => {
     const slide = item.slide || item;
     if (item.item_type === 'PAGE') return `Page ${item.page?.page_number ?? ''}`;
     const c = slide?.content_json || {};
-    return c.title || c.question || c.prompt || slide?.type || 'Slide';
+    return c.title || c.question || c.prompt || metaForItem(item).label || slide?.type || 'Slide';
   };
-  const icon = (item: any) => {
-    const type = (item.slide || item)?.type?.toUpperCase();
-    return type === 'POLL' ? BarChart3 : type === 'WORD_CLOUD' ? Cloud : type === 'QNA' ? MessageSquare : FileText;
-  };
+  const icon = (item: any) => metaForItem(item).icon;
 
   function selectItem(id: string) {
     selectedItemId = id;
@@ -62,6 +73,16 @@
       <button class="flex items-center gap-2 {session?.is_live ? 'rounded-xl px-4 py-2.5 text-sm font-semibold border border-red-200 bg-red-50 text-red-600 hover:bg-red-100 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-400 dark:hover:bg-red-950/50' : 'btn-secondary'}" onclick={onToggleLive}><Radio class="w-4 h-4" />{session?.is_live ? 'End session' : 'Go live'}</button>
       <button class="btn-secondary flex items-center gap-2" onclick={onEdit}><Pencil class="w-4 h-4" />Edit</button>
       <button class="btn-primary flex items-center gap-2" onclick={() => onPresent(selectedId)}><MonitorPlay class="w-4 h-4" />Present</button>
+      {#if isQuizSelected && onToggleRevealAnswer}
+        <button
+          class="btn-secondary flex items-center gap-2"
+          onclick={() => selectedId && onToggleRevealAnswer?.(selectedId)}
+          aria-label={quizRevealed ? 'Hide quiz answer' : 'Reveal quiz answer'}
+          title={quizRevealed ? 'Hide quiz answer' : 'Reveal quiz answer'}
+        >
+          {#if quizRevealed}<EyeOff class="w-4 h-4" />Hide Answer{:else}<Eye class="w-4 h-4" />Reveal Answer{/if}
+        </button>
+      {/if}
       {#if onRefreshPresentation}
         <button class="btn-secondary flex items-center justify-center" onclick={onRefreshPresentation} aria-label="Refresh presentation screen" title="Refresh presentation screen"><RefreshCw class="h-4 w-4" /></button>
       {/if}
