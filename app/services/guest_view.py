@@ -19,15 +19,17 @@ _PRESERVED_FILE_KEYS = (
 
 def strip_slide_content_json(content_json: dict) -> dict:
     """
-    Remove raw upload paths from a slide's content_json before it reaches a
-    guest. Guests only ever see rendered content through the page-image
-    endpoints, never the original file path/name.
+    Remove raw upload paths and unrevealed quiz answers from a slide's content_json
+    before it reaches a guest. Guests only ever see rendered content through the page-image
+    endpoints, never the original file path/name, and never see quiz answers pre-reveal.
     """
     cj = dict(content_json or {})
     if "file_url" in cj:
         cj["has_file"] = True
         del cj["file_url"]
     cj.pop("file_name", None)
+    if not cj.get("reveal_answer"):
+        cj.pop("correct_answer", None)
     return cj
 
 

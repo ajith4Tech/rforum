@@ -31,6 +31,10 @@ SERVER_ID = str(uuid.uuid4())
 # event names directly, any guest could forge a fake response/upvote that
 # appears live to the moderator and every other viewer without ever hitting
 # the DB, rate limits, or validation.
+#
+# "presence_count" is also NOT here — it is a server-generated broadcast
+# (see ConnectionManager._broadcast_presence) reflecting actual connected
+# sockets, never something a client sends or relays.
 ALLOWED_WS_EVENTS = frozenset({
     "slide_change", "page_change", "session_update", "screen_control", "heartbeat",
 })
@@ -88,16 +92,29 @@ class ConnectionManager:
     One shared Redis pubsub task per session code (not per connection).
     With 80 audience members in one session this means 1 Redis subscription
     instead of 80, and JSON is serialised once and fanned out to all sockets.
+
+    Each connection's resolved role ("moderator" / "screen" / "guest") is
+    tracked alongside it so presence counts (see _broadcast_presence) can
+    report audience size without including the moderator's own connection
+    or read-only screen displays.
+
+    NOTE: presence counts are per-process, same tradeoff already accepted
+    for SERVER_ID/_page_render_locks-style in-memory state elsewhere in this
+    app — correct as long as the backend runs a single replica (the
+    documented/load-tested configuration; see docs/k3s-deploy.md). Running
+    multiple backend replicas would undercount, since each process only
+    sees its own share of connections. Move to a Redis-backed counter
+    (INCR/DECR per session, read via GET) if/when replicaCount > 1.
     """
 
     def __init__(self) -> None:
-        self._connections: dict[str, set[WebSocket]] = {}
+        self._connections: dict[str, dict[WebSocket, str]] = {}
         self._pubsub_tasks: dict[str, asyncio.Task] = {}
 
-    async def connect(self, session_code: str, websocket: WebSocket, redis: Redis) -> None:
+    async def connect(self, session_code: str, websocket: WebSocket, redis: Redis, role: str) -> None:
         await websocket.accept()
         if session_code not in self._connections:
-            self._connections[session_code] = set()
+            self._connections[session_code] = {}
             # Shared pubsub listener — started once per session, not per
             # socket. _listen owns subscribing (and re-subscribing) itself,
             # so a failure there can never leave this freshly-registered
@@ -107,18 +124,33 @@ class ConnectionManager:
                 name=f"pubsub:{session_code}",
             )
             self._pubsub_tasks[session_code] = task
-        self._connections[session_code].add(websocket)
+        self._connections[session_code][websocket] = role
+        await self._broadcast_presence(session_code)
 
     async def disconnect(self, session_code: str, websocket: WebSocket) -> None:
         bucket = self._connections.get(session_code)
         if not bucket:
             return
-        bucket.discard(websocket)
-        if not bucket:
+        bucket.pop(websocket, None)
+        if bucket:
+            await self._broadcast_presence(session_code)
+        else:
             del self._connections[session_code]
             task = self._pubsub_tasks.pop(session_code, None)
             if task:
                 task.cancel()
+
+    def _guest_count(self, session_code: str) -> int:
+        bucket = self._connections.get(session_code)
+        if not bucket:
+            return 0
+        return sum(1 for role in bucket.values() if role == "guest")
+
+    async def _broadcast_presence(self, session_code: str) -> None:
+        await self.broadcast(session_code, {
+            "event": "presence_count",
+            "data": {"count": self._guest_count(session_code)},
+        })
 
     async def broadcast(self, session_code: str, message: dict) -> None:
         bucket = self._connections.get(session_code)
@@ -223,7 +255,7 @@ async def websocket_endpoint(websocket: WebSocket, session_code: str):
         websocket.query_params.get("token"),
         websocket.query_params.get("role"),
     )
-    await manager.connect(session_code, websocket, redis)
+    await manager.connect(session_code, websocket, redis, role)
     try:
         while True:
             try:
