@@ -60,10 +60,41 @@ const buildHeaders = (opts: { auth?: boolean; json?: boolean } = {}) => {
   return headers;
 };
 
+function formatApiErrorDetail(detail: unknown): string {
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    const messages = detail
+      .map((item) => formatApiErrorDetail(item))
+      .filter((msg) => msg.trim().length > 0);
+    return messages.join('; ');
+  }
+  if (detail && typeof detail === 'object') {
+    const record = detail as Record<string, unknown>;
+    const msg = typeof record.msg === 'string' ? record.msg : '';
+    const loc = Array.isArray(record.loc)
+      ? record.loc.map((part) => String(part)).join('.')
+      : '';
+    if (msg && loc) return `${loc}: ${msg}`;
+    if (msg) return msg;
+    if (typeof record.detail === 'string') return record.detail;
+    try {
+      return JSON.stringify(detail);
+    } catch {
+      return String(detail);
+    }
+  }
+  return String(detail ?? '');
+}
+
 const extractError = async (response: Response) => {
   try {
     const data = await response.json();
-    return (data && (data.detail || data.message)) || response.statusText;
+    const detail = data?.detail ?? data?.message;
+    if (detail !== undefined) {
+      const formatted = formatApiErrorDetail(detail);
+      if (formatted.trim()) return formatted;
+    }
+    return response.statusText;
   } catch {
     return response.statusText;
   }

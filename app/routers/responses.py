@@ -1,5 +1,6 @@
 import json
 import logging
+import math
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -58,6 +59,11 @@ async def submit_response(
     if not slide.session.is_live:
         raise HTTPException(status_code=403, detail="Session is not live")
 
+    content_json = slide.content_json or {}
+    interaction_type = str(content_json.get("interaction_type") or "").upper()
+    mode = str(content_json.get("mode") or "").lower()
+    is_scale = interaction_type == "SCALE" or mode == "scale"
+
     # Rate limit: per-guest cap on submissions per slide per minute. guest_identifier
     # is client-supplied, so also cap per-IP-per-slide — otherwise rotating the
     # identifier trivially bypasses the per-guest limit (ballot-stuffing on polls).
@@ -94,6 +100,43 @@ async def submit_response(
 
     # Default name to "Guest" if empty or None
     response_data = payload.model_dump()
+
+    if is_scale:
+        min_value = content_json.get("min", 1)
+        max_value = content_json.get("max", 10)
+        step_value = content_json.get("step", 1)
+        try:
+            min_num = float(min_value)
+            max_num = float(max_value)
+            step_num = float(step_value)
+            selected = float(response_data.get("value"))
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=422, detail="scale value must be numeric")
+
+        if min_num > max_num:
+            min_num, max_num = max_num, min_num
+
+        if selected < min_num or selected > max_num:
+            raise HTTPException(
+                status_code=422,
+                detail=f"scale value must be between {min_num:g} and {max_num:g}",
+            )
+
+        if step_num > 0:
+            step_offset = (selected - min_num) / step_num
+            if not math.isclose(step_offset, round(step_offset), rel_tol=0, abs_tol=1e-9):
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"scale value must follow step {step_num:g}",
+                )
+
+        # Scale submissions should not be treated as FEEDBACK rating(1-5).
+        response_data["rating"] = None
+    elif response_data.get("rating") is not None:
+        rating = response_data["rating"]
+        if rating < 1 or rating > 5:
+            raise HTTPException(status_code=422, detail="rating must be between 1 and 5")
+
     if not response_data.get("name") or not response_data.get("name").strip():
         response_data["name"] = "Guest"
     else:

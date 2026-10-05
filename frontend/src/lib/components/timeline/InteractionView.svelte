@@ -237,8 +237,7 @@
         slide.id,
         String(scaleRating),
         guestId,
-        trimmedName !== 'Guest' ? trimmedName : undefined,
-        scaleRating
+        trimmedName !== 'Guest' ? trimmedName : undefined
       );
       submitted = true;
       markResponded(slide.id, String(scaleRating));

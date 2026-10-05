@@ -442,15 +442,6 @@ class ResponseCreate(BaseModel):
     name: str | None = Field(None, max_length=100)
     rating: int | None = None
 
-    @field_validator("rating")
-    @classmethod
-    def validate_rating(cls, value: int | None) -> int | None:
-        if value is None:
-            return value
-        if value < 1 or value > 5:
-            raise ValueError("rating must be between 1 and 5")
-        return value
-
 
 class ResponseOut(BaseModel):
     id: uuid.UUID

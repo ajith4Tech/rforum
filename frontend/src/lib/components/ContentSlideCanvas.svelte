@@ -35,15 +35,16 @@
   function getEmbedUrl(rawUrl: string): { type: 'iframe' | 'video'; url: string } {
     if (!rawUrl) return { type: 'video', url: '' };
     const u = rawUrl.trim();
+    const controlsParam = variant === 'deck' ? '1' : '0';
     // YouTube
     const ytMatch = u.match(/(?:youtube\.com\/(?:watch\?v=|embed\/|v\/)|youtu\.be\/)([\w-]{11})/i);
     if (ytMatch) {
-      return { type: 'iframe', url: `https://www.youtube.com/embed/${ytMatch[1]}?autoplay=0&rel=0` };
+      return { type: 'iframe', url: `https://www.youtube.com/embed/${ytMatch[1]}?autoplay=0&rel=0&controls=${controlsParam}&disablekb=${variant === 'deck' ? '0' : '1'}` };
     }
     // Vimeo
     const vimeoMatch = u.match(/vimeo\.com\/(?:video\/)?(\d+)/i);
     if (vimeoMatch) {
-      return { type: 'iframe', url: `https://player.vimeo.com/video/${vimeoMatch[1]}` };
+      return { type: 'iframe', url: `https://player.vimeo.com/video/${vimeoMatch[1]}?controls=${controlsParam}` };
     }
     return { type: 'video', url: u };
   }
@@ -108,8 +109,8 @@
           <div class="relative w-full h-full max-w-4xl mx-auto rounded-2xl overflow-hidden shadow-2xl bg-black flex items-center justify-center">
             <video
               src={embed.url}
-              controls
-              class="w-full h-full object-contain rounded-2xl max-h-full"
+              controls={variant === 'deck'}
+              class="w-full h-full object-contain rounded-2xl max-h-full {variant === 'deck' ? '' : 'pointer-events-none'}"
               preload="metadata"
             >
               <track kind="captions" />

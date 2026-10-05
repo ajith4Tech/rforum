@@ -114,25 +114,56 @@
       {/if}
     </aside>
 
-    <div class="flex min-h-0 min-w-0 flex-col px-0 py-4 xl:px-5">
-      <div class="flex min-h-0 flex-1 items-center justify-center" style="container-type: size;">
-        <div class="overflow-hidden rounded-xl bg-white shadow-lg ring-1 ring-surface-200 dark:bg-surface-900 dark:ring-surface-800" style="width: min(100cqw, calc(100cqh * 16 / 9)); height: min(100cqh, calc(100cqw * 9 / 16)); min-height: 14rem;">
-          {#if !selected}
-            <div class="flex h-full items-center justify-center px-6 text-center text-sm text-surface-500">This session has no slides yet. Open Edit to add a deck.</div>
-          {:else if selected?.item_type === 'PAGE'}
-            <PageImageViewer src={getPresentationPageImageUrl(presentation.id, selected.page.page_number)} page={selected.page.page_number} alt={label(selected)} imgClass="h-full w-full object-contain" />
-          {:else if selectedSlide?.type?.toUpperCase() === 'CONTENT'}
-            <div class="h-full overflow-hidden p-4 sm:p-6">
-              <ContentSlideCanvas slide={selectedSlide} sessionId={session?.id} sessionCode={session?.unique_code || ''} variant="deck" />
-            </div>
-          {:else if isTimeline && selected?.slide}
-            <div class="h-full overflow-auto p-4 sm:p-6"><PresentationLiveView activeItem={selected} presentationId={presentation.id} sessionId={session?.id} sessionCode={session?.unique_code || ''} responses={visibleResponses} variant="screen" readOnly /></div>
-          {:else if selectedSlide}
-            <div class="h-full overflow-auto p-4 sm:p-6"><InteractionView slide={selectedSlide} responses={visibleResponses} variant="screen" readOnly /></div>
-          {/if}
-        </div>
+    <div class="flex min-h-0 min-w-0 flex-1 items-center justify-center overflow-hidden px-0 py-4 lg:px-5">
+  <div class="relative w-full max-w-full aspect-video max-h-full overflow-hidden rounded-xl bg-white shadow-lg ring-1 ring-surface-200 dark:bg-surface-900 dark:ring-surface-800">
+    {#if !selected}
+      <div class="flex h-full items-center justify-center px-6 text-center text-sm text-surface-500">
+        This session has no slides yet. Open Edit to add a deck.
       </div>
-    </div>
+
+    {:else if selected?.item_type === 'PAGE'}
+      <PageImageViewer
+        src={getPresentationPageImageUrl(presentation.id, selected.page.page_number)}
+        page={selected.page.page_number}
+        alt={label(selected)}
+        imgClass="h-full w-full object-contain"
+      />
+
+    {:else if selectedSlide?.type?.toUpperCase() === 'CONTENT'}
+      <div class="h-full w-full overflow-hidden p-4 sm:p-6">
+        <ContentSlideCanvas
+          slide={selectedSlide}
+          sessionId={session?.id}
+          sessionCode={session?.unique_code || ''}
+          variant="deck"
+        />
+      </div>
+
+    {:else if isTimeline && selected?.slide}
+      <div class="h-full w-full overflow-auto p-4 sm:p-6">
+        <PresentationLiveView
+          activeItem={selected}
+          presentationId={presentation.id}
+          sessionId={session?.id}
+          sessionCode={session?.unique_code || ''}
+          responses={visibleResponses}
+          variant="screen"
+          readOnly
+        />
+      </div>
+
+    {:else if selectedSlide}
+      <div class="h-full w-full overflow-auto p-4 sm:p-6">
+        <InteractionView
+          slide={selectedSlide}
+          responses={visibleResponses}
+          variant="screen"
+          readOnly
+        />
+      </div>
+    {/if}
+  </div>
+</div>
 
     <aside class="max-h-[min(78vh,52rem)] overflow-y-auto border-surface-200 py-4 pl-0 dark:border-surface-800 xl:border-l xl:pl-5">
       <div class="flex items-center justify-between">
