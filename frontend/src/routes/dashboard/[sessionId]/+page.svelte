@@ -8,6 +8,7 @@
   import { page } from '$app/stores';
   import { RforumWebSocket } from '$lib/ws';
   import type { ConnectionStatus as WsStatus } from '$lib/ws';
+  import type { VideoControlPayload } from '$lib/components/ContentSlideCanvas.svelte';
   import { token } from '$lib/stores';
   import { get } from 'svelte/store';
   import { onMount, onDestroy } from 'svelte';
@@ -338,6 +339,17 @@
       slideResponses = slideResponses.filter((r) => r.slide_id !== clearedId);
       timelineResponses = timelineResponses.filter((r) => r.slide_id !== clearedId);
     }
+    // video_control events are sent BY the moderator; we intentionally do not
+    // process them here — the screen is the only consumer.
+  }
+
+  /**
+   * Called by DeckView/ContentSlideCanvas when the moderator interacts with an
+   * embedded video player.  Broadcasts a `video_control` WS event so the
+   * projector screen can mirror the action.
+   */
+  function handleVideoControl(payload: VideoControlPayload) {
+    ws?.send('video_control', payload);
   }
 
   async function saveDeckEditor() {
@@ -1364,6 +1376,7 @@
         onRefreshPresentation={refreshPresentationScreen}
         onMaximizeQr={maximizePresentationQr}
         onToggleRevealAnswer={handleToggleQuizReveal}
+        onVideoControl={handleVideoControl}
       />
     {:else if session?.presentation_id}
         <PresentationWorkspace

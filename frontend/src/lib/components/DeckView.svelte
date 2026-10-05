@@ -6,6 +6,7 @@
   import InteractionView from '$lib/components/timeline/InteractionView.svelte';
   import ConnectionStatus from '$lib/components/ConnectionStatus.svelte';
   import ContentSlideCanvas from '$lib/components/ContentSlideCanvas.svelte';
+  import type { VideoControlPayload } from '$lib/components/ContentSlideCanvas.svelte';
   import { getFitTitleStyle, responsesForSlide } from '$lib/fitTitle';
   import { metaForItem } from '$lib/timelineTypes';
   import type { ConnectionStatus as WsStatus } from '$lib/ws';
@@ -13,7 +14,8 @@
   let {
     session, presentation = null, timeline = null, slides = [], activeSlideId = null,
     responses = [], wsStatus = 'disconnected' as WsStatus, onSelect, onEdit, onPresent, onToggleLive,
-    onRefreshPresentation = undefined, onMaximizeQr = undefined, onToggleRevealAnswer = undefined
+    onRefreshPresentation = undefined, onMaximizeQr = undefined, onToggleRevealAnswer = undefined,
+    onVideoControl = undefined,
   }: {
     session: any; presentation?: any; timeline?: any; slides?: any[]; activeSlideId?: string | null;
     responses?: any[]; wsStatus?: WsStatus; onSelect: (id: string) => void; onEdit: () => void;
@@ -22,6 +24,9 @@
         not just the Editor. Only shown when the currently selected slide is
         a Quiz (see isQuizSelected below). */
     onToggleRevealAnswer?: (itemId: string) => void;
+    /** Called when the moderator interacts with an embedded video player so
+     *  the action can be broadcast to the main screen. */
+    onVideoControl?: (payload: VideoControlPayload) => void;
   } = $props();
 
   const items = $derived(timeline ? [...(timeline.items || [])].sort((a: any, b: any) => a.order - b.order) : [...slides].sort((a: any, b: any) => (a.order ?? 0) - (b.order ?? 0)));
@@ -136,6 +141,7 @@
           sessionId={session?.id}
           sessionCode={session?.unique_code || ''}
           variant="deck"
+          {onVideoControl}
         />
       </div>
 
@@ -149,6 +155,7 @@
           responses={visibleResponses}
           variant="screen"
           readOnly
+          {onVideoControl}
         />
       </div>
 

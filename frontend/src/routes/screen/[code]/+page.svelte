@@ -2,6 +2,7 @@
   import { joinSession, listResponses, startSession, clearResponses, getScreenControl } from '$lib/api';
   import { RforumWebSocket } from '$lib/ws';
   import type { ConnectionStatus as WsStatus } from '$lib/ws';
+  import type { VideoControlPayload } from '$lib/components/ContentSlideCanvas.svelte';
   import { onMount, onDestroy } from 'svelte';
   import { theme } from '$lib/theme';
   import { BarChart3, MessageSquare, AlignLeft, Cloud, Orbit, Maximize2 } from 'lucide-svelte';
@@ -58,6 +59,11 @@
   // every guest connect/disconnect for this session. null until the first
   // count arrives, so the header can omit it rather than flash "0 joined".
   let guestCount: number | null = $state(null);
+
+  // Latest video_control command received from the moderator. ContentSlideCanvas
+  // (and PresentationLiveView) watch this via $effect and apply it only when
+  // the slide_id matches the currently displayed slide.
+  let videoCommand: VideoControlPayload | null = $state(null);
 
   // Refresh does window.location.reload(), which wipes in-memory
   // lastScreenControlId. Redis keeps the command for 15s and onMount polls
@@ -372,6 +378,11 @@
       if (clearedId === activeTimelineItem?.slide?.id) timelineResponses = [];
       responses = responses.filter((r) => r.slide_id !== clearedId);
       timelineResponses = timelineResponses.filter((r) => r.slide_id !== clearedId);
+    } else if (msg.event === 'video_control') {
+      // Only accept commands from the moderator (role is enforced server-side).
+      // Replace any pending command immediately — stale commands are irrelevant
+      // because ContentSlideCanvas reacts synchronously via $effect.
+      if (msg.data?.slide_id) videoCommand = msg.data as VideoControlPayload;
     }
   }
 
@@ -496,6 +507,7 @@
             sessionCode={code || session?.unique_code || ''}
             responses={timelineResponses}
             variant="screen"
+            {videoCommand}
           />
           </div>
         </div>
@@ -504,7 +516,7 @@
         <div class="flex min-h-0 flex-1 items-center justify-center px-2 pb-2" style="container-type: size;">
           <div class="overflow-hidden rounded-xl border p-3 sm:p-4 presentation-stage transition-colors {$theme === 'dark' ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'}" style="width: min(100cqw, calc(100cqh * 16 / 9)); height: min(100cqh, calc(100cqw * 9 / 16));">
           {#if activeSlide.type?.toUpperCase() === 'CONTENT'}
-            <ContentSlideCanvas slide={activeSlide} sessionId={session?.id} sessionCode={code} variant="screen" />
+            <ContentSlideCanvas slide={activeSlide} sessionId={session?.id} sessionCode={code} variant="screen" {videoCommand} />
           {:else}
             <InteractionView slide={activeSlide} responses={responses} variant="screen" readOnly />
           {/if}

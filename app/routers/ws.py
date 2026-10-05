@@ -37,11 +37,15 @@ SERVER_ID = str(uuid.uuid4())
 # sockets, never something a client sends or relays.
 ALLOWED_WS_EVENTS = frozenset({
     "slide_change", "page_change", "session_update", "screen_control", "heartbeat",
+    "video_control",
 })
 
 # Control events that only an authenticated session owner (or admin) may relay.
 # Everyone else connecting to a session code is a guest or a read-only screen.
-MODERATOR_ONLY_EVENTS = frozenset({"slide_change", "page_change", "session_update", "screen_control"})
+MODERATOR_ONLY_EVENTS = frozenset({
+    "slide_change", "page_change", "session_update", "screen_control",
+    "video_control",
+})
 
 # Maximum raw message size accepted from a client (64 KB)
 MAX_WS_MESSAGE_BYTES = 65_536

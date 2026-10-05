@@ -10,6 +10,7 @@
   import { getPresentationPageImageUrl } from '$lib/api';
   import PageImageViewer from '$lib/components/PageImageViewer.svelte';
   import ContentSlideCanvas from '$lib/components/ContentSlideCanvas.svelte';
+  import type { VideoControlPayload } from '$lib/components/ContentSlideCanvas.svelte';
   import InteractionView from './InteractionView.svelte';
 
   let {
@@ -20,7 +21,11 @@
     responses = [],
     variant = 'guest',
     guestId = '',
-    readOnly = false
+    readOnly = false,
+    // Deck variant: called when the moderator performs a video playback action.
+    onVideoControl = undefined,
+    // Screen variant: incoming video command to mirror on the embedded player.
+    videoCommand = undefined,
   }: {
     activeItem: any;
     presentationId: string;
@@ -30,6 +35,8 @@
     variant?: 'guest' | 'screen';
     guestId?: string;
     readOnly?: boolean;
+    onVideoControl?: (payload: VideoControlPayload) => void;
+    videoCommand?: VideoControlPayload | null;
   } = $props();
 
   const isContentSlide = $derived(activeItem?.slide?.type?.toUpperCase() === 'CONTENT');
@@ -59,6 +66,8 @@
         sessionId={sessionId || activeItem.slide?.session_id || ''}
         {sessionCode}
         variant={variant === 'guest' ? 'guest' : 'screen'}
+        {onVideoControl}
+        {videoCommand}
       />
     {:else if activeItem?.slide}
       <InteractionView slide={activeItem.slide} {responses} {variant} {guestId} {readOnly} />

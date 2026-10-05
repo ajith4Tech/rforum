@@ -2,19 +2,37 @@
   import { getPageImageUrl } from '$lib/api';
   import PageImageViewer from '$lib/components/PageImageViewer.svelte';
   import { getFitTitleStyle } from '$lib/fitTitle';
-  import { Video, Tv, Play } from 'lucide-svelte';
+  import { Video, Tv } from 'lucide-svelte';
 
   let {
     slide,
     sessionId,
     sessionCode = '',
-    variant = 'screen'
+    variant = 'screen',
+    // Deck variant: called when the moderator performs a playback action.
+    onVideoControl = undefined,
+    // Screen/guest variant: incoming video command object to mirror.
+    videoCommand = undefined,
   }: {
     slide: any;
     sessionId?: string;
     sessionCode?: string;
     variant?: 'screen' | 'deck' | 'guest';
+    onVideoControl?: (payload: VideoControlPayload) => void;
+    videoCommand?: VideoControlPayload | null;
   } = $props();
+
+  export type VideoControlPayload = {
+    /** ID of the slide this command belongs to — screen must ignore foreign slide IDs. */
+    slide_id: string;
+    action: 'play' | 'pause' | 'seek' | 'volume';
+    /** Playback position in seconds (for seek / play-from-position). */
+    position?: number;
+    /** Volume 0‒1 (for volume). */
+    volume?: number;
+    /** Whether audio is muted (sent alongside volume). */
+    muted?: boolean;
+  };
 
   const layout = $derived(slide?.content_json?.layout || 'title_content');
   const title = $derived(slide?.content_json?.title || '');
@@ -32,23 +50,301 @@
       : ''
   );
 
-  function getEmbedUrl(rawUrl: string): { type: 'iframe' | 'video'; url: string } {
-    if (!rawUrl) return { type: 'video', url: '' };
+  // ─── Embed type detection ───────────────────────────────────────────────────
+  type EmbedResult = { type: 'iframe'; url: string; provider: 'youtube' | 'vimeo' } | { type: 'video'; url: string; provider: 'native' };
+
+  function getEmbedUrl(rawUrl: string): EmbedResult {
+    if (!rawUrl) return { type: 'video', url: '', provider: 'native' };
     const u = rawUrl.trim();
     const controlsParam = variant === 'deck' ? '1' : '0';
     // YouTube
     const ytMatch = u.match(/(?:youtube\.com\/(?:watch\?v=|embed\/|v\/)|youtu\.be\/)([\w-]{11})/i);
     if (ytMatch) {
-      return { type: 'iframe', url: `https://www.youtube.com/embed/${ytMatch[1]}?autoplay=0&rel=0&controls=${controlsParam}&disablekb=${variant === 'deck' ? '0' : '1'}` };
+      // enablejsapi=1 is required so the YT IFrame API can control / observe this player.
+      return {
+        type: 'iframe',
+        provider: 'youtube',
+        url: `https://www.youtube.com/embed/${ytMatch[1]}?autoplay=0&rel=0&controls=${controlsParam}&disablekb=${variant === 'deck' ? '0' : '1'}&enablejsapi=1`,
+      };
     }
     // Vimeo
     const vimeoMatch = u.match(/vimeo\.com\/(?:video\/)?(\d+)/i);
     if (vimeoMatch) {
-      return { type: 'iframe', url: `https://player.vimeo.com/video/${vimeoMatch[1]}?controls=${controlsParam}` };
+      return {
+        type: 'iframe',
+        provider: 'vimeo',
+        url: `https://player.vimeo.com/video/${vimeoMatch[1]}?controls=${controlsParam}`,
+      };
     }
-    return { type: 'video', url: u };
+    return { type: 'video', url: u, provider: 'native' };
   }
   const embed = $derived(getEmbedUrl(videoUrl));
+
+  // ─── Native <video> element refs ────────────────────────────────────────────
+  let nativeVideoEl: HTMLVideoElement | null = $state(null);
+
+  // ─── iframe ref (shared for YouTube & Vimeo) ────────────────────────────────
+  let iframeEl: HTMLIFrameElement | null = $state(null);
+
+  // ─── YouTube IFrame API player instance ─────────────────────────────────────
+  let ytPlayer: any = null;
+  let ytReady = false;
+
+  // ─── Vimeo Player instance ──────────────────────────────────────────────────
+  let vimeoPlayer: any = null;
+
+  // ─── Throttle / dedupe helpers ───────────────────────────────────────────────
+  /** True while we are programmatically applying an incoming command so we
+   *  don't echo it back out as a new event. */
+  let applyingCommand = false;
+
+  function sendVideoControl(payload: Omit<VideoControlPayload, 'slide_id'>) {
+    if (applyingCommand) return;
+    if (!onVideoControl || !slide?.id) return;
+    onVideoControl({ slide_id: slide.id, ...payload });
+  }
+
+  // ─── Native video event handlers ─────────────────────────────────────────────
+  function onNativePlay() {
+    sendVideoControl({ action: 'play', position: nativeVideoEl?.currentTime ?? 0 });
+  }
+  function onNativePause() {
+    sendVideoControl({ action: 'pause', position: nativeVideoEl?.currentTime ?? 0 });
+  }
+  function onNativeSeeked() {
+    sendVideoControl({ action: 'seek', position: nativeVideoEl?.currentTime ?? 0 });
+  }
+  function onNativeVolumeChange() {
+    sendVideoControl({
+      action: 'volume',
+      volume: nativeVideoEl?.volume ?? 1,
+      muted: nativeVideoEl?.muted ?? false,
+    });
+  }
+
+  function attachNativeListeners(el: HTMLVideoElement) {
+    el.addEventListener('play', onNativePlay);
+    el.addEventListener('pause', onNativePause);
+    el.addEventListener('seeked', onNativeSeeked);
+    el.addEventListener('volumechange', onNativeVolumeChange);
+  }
+
+  function detachNativeListeners(el: HTMLVideoElement) {
+    el.removeEventListener('play', onNativePlay);
+    el.removeEventListener('pause', onNativePause);
+    el.removeEventListener('seeked', onNativeSeeked);
+    el.removeEventListener('volumechange', onNativeVolumeChange);
+  }
+
+  // ─── YouTube IFrame API setup ────────────────────────────────────────────────
+  // We load the API script once globally and store pending ready-callbacks.
+  declare global {
+    interface Window {
+      YT: any;
+      onYouTubeIframeAPIReady: (() => void) | undefined;
+      _ytApiLoading: boolean;
+      _ytReadyCallbacks: (() => void)[];
+      Vimeo: any;
+    }
+  }
+
+  function ensureYtApi(cb: () => void) {
+    if (typeof window === 'undefined') return;
+    if (window.YT?.Player) { cb(); return; }
+    if (!window._ytReadyCallbacks) window._ytReadyCallbacks = [];
+    window._ytReadyCallbacks.push(cb);
+    if (!window._ytApiLoading) {
+      window._ytApiLoading = true;
+      const prev = window.onYouTubeIframeAPIReady;
+      window.onYouTubeIframeAPIReady = () => {
+        prev?.();
+        (window._ytReadyCallbacks || []).forEach((fn) => fn());
+        window._ytReadyCallbacks = [];
+      };
+      const s = document.createElement('script');
+      s.src = 'https://www.youtube.com/iframe_api';
+      document.head.appendChild(s);
+    }
+  }
+
+  function initYtPlayer(iframe: HTMLIFrameElement) {
+    ensureYtApi(() => {
+      if (!iframe.isConnected) return;
+      ytPlayer = new window.YT.Player(iframe, {
+        events: {
+          onReady: () => { ytReady = true; },
+          onStateChange: (e: any) => {
+            if (variant !== 'deck' || !onVideoControl) return;
+            const YT_STATES = window.YT.PlayerState;
+            if (e.data === YT_STATES.PLAYING) {
+              sendVideoControl({ action: 'play', position: ytPlayer.getCurrentTime?.() ?? 0 });
+            } else if (e.data === YT_STATES.PAUSED) {
+              sendVideoControl({ action: 'pause', position: ytPlayer.getCurrentTime?.() ?? 0 });
+            } else if (e.data === YT_STATES.ENDED) {
+              sendVideoControl({ action: 'pause', position: 0 });
+            }
+          },
+        },
+      });
+    });
+  }
+
+  // ─── Vimeo Player API setup ──────────────────────────────────────────────────
+  function ensureVimeoApi(cb: () => void) {
+    if (typeof window === 'undefined') return;
+    if (window.Vimeo?.Player) { cb(); return; }
+    const existing = document.getElementById('vimeo-player-api');
+    if (!existing) {
+      const s = document.createElement('script');
+      s.id = 'vimeo-player-api';
+      s.src = 'https://player.vimeo.com/api/player.js';
+      s.onload = cb;
+      document.head.appendChild(s);
+    } else {
+      // Script tag exists but not yet loaded — poll briefly
+      const poll = setInterval(() => {
+        if (window.Vimeo?.Player) { clearInterval(poll); cb(); }
+      }, 100);
+    }
+  }
+
+  function initVimeoPlayer(iframe: HTMLIFrameElement) {
+    ensureVimeoApi(() => {
+      if (!iframe.isConnected) return;
+      vimeoPlayer = new window.Vimeo.Player(iframe);
+      if (variant === 'deck' && onVideoControl) {
+        vimeoPlayer.on('play', (data: any) => {
+          sendVideoControl({ action: 'play', position: data.seconds ?? 0 });
+        });
+        vimeoPlayer.on('pause', (data: any) => {
+          sendVideoControl({ action: 'pause', position: data.seconds ?? 0 });
+        });
+        vimeoPlayer.on('seeked', (data: any) => {
+          sendVideoControl({ action: 'seek', position: data.seconds ?? 0 });
+        });
+        vimeoPlayer.on('volumechange', (data: any) => {
+          sendVideoControl({ action: 'volume', volume: data.volume, muted: data.muted });
+        });
+      }
+    });
+  }
+
+  // ─── Apply incoming command to native video (screen variant) ─────────────────
+  function applyCommandToNative(cmd: VideoControlPayload) {
+    if (!nativeVideoEl) return;
+    applyingCommand = true;
+    try {
+      if (cmd.action === 'play') {
+        if (cmd.position !== undefined) nativeVideoEl.currentTime = cmd.position;
+        nativeVideoEl.play().catch(() => {/* autoplay policy — safe to ignore */});
+      } else if (cmd.action === 'pause') {
+        if (cmd.position !== undefined) nativeVideoEl.currentTime = cmd.position;
+        nativeVideoEl.pause();
+      } else if (cmd.action === 'seek') {
+        if (cmd.position !== undefined) nativeVideoEl.currentTime = cmd.position;
+      } else if (cmd.action === 'volume') {
+        if (cmd.volume !== undefined) nativeVideoEl.volume = cmd.volume;
+        if (cmd.muted !== undefined) nativeVideoEl.muted = cmd.muted;
+      }
+    } finally {
+      // Release the guard after a tick so the resulting media events don't
+      // echo back as a new outbound control.
+      setTimeout(() => { applyingCommand = false; }, 0);
+    }
+  }
+
+  // ─── Apply incoming command to YouTube player (screen variant) ───────────────
+  function applyCommandToYt(cmd: VideoControlPayload) {
+    if (!ytPlayer || !ytReady) return;
+    applyingCommand = true;
+    try {
+      if (cmd.action === 'play') {
+        if (cmd.position !== undefined) ytPlayer.seekTo?.(cmd.position, true);
+        ytPlayer.playVideo?.();
+      } else if (cmd.action === 'pause') {
+        if (cmd.position !== undefined) ytPlayer.seekTo?.(cmd.position, true);
+        ytPlayer.pauseVideo?.();
+      } else if (cmd.action === 'seek') {
+        if (cmd.position !== undefined) ytPlayer.seekTo?.(cmd.position, true);
+      } else if (cmd.action === 'volume') {
+        if (cmd.muted !== undefined) {
+          cmd.muted ? ytPlayer.mute?.() : ytPlayer.unMute?.();
+        }
+        if (cmd.volume !== undefined) ytPlayer.setVolume?.(Math.round(cmd.volume * 100));
+      }
+    } finally {
+      setTimeout(() => { applyingCommand = false; }, 0);
+    }
+  }
+
+  // ─── Apply incoming command to Vimeo player (screen variant) ─────────────────
+  function applyCommandToVimeo(cmd: VideoControlPayload) {
+    if (!vimeoPlayer) return;
+    applyingCommand = true;
+    const finish = () => { setTimeout(() => { applyingCommand = false; }, 0); };
+    if (cmd.action === 'play') {
+      const p = cmd.position !== undefined
+        ? vimeoPlayer.setCurrentTime(cmd.position).then(() => vimeoPlayer.play())
+        : vimeoPlayer.play();
+      p.catch(() => {}).finally(finish);
+    } else if (cmd.action === 'pause') {
+      const p = cmd.position !== undefined
+        ? vimeoPlayer.setCurrentTime(cmd.position).then(() => vimeoPlayer.pause())
+        : vimeoPlayer.pause();
+      p.catch(() => {}).finally(finish);
+    } else if (cmd.action === 'seek') {
+      if (cmd.position !== undefined) {
+        vimeoPlayer.setCurrentTime(cmd.position).catch(() => {}).finally(finish);
+      } else { finish(); }
+    } else if (cmd.action === 'volume') {
+      const tasks = [];
+      if (cmd.volume !== undefined) tasks.push(vimeoPlayer.setVolume(cmd.volume));
+      if (cmd.muted !== undefined) tasks.push(vimeoPlayer.setMuted(cmd.muted));
+      Promise.allSettled(tasks).finally(finish);
+    } else {
+      finish();
+    }
+  }
+
+  // ─── Reactive: apply incoming videoCommand ────────────────────────────────────
+  $effect(() => {
+    const cmd = videoCommand;
+    if (!cmd || variant === 'deck') return;
+    // Ignore commands for a different slide.
+    if (cmd.slide_id !== slide?.id) return;
+
+    if (embed.provider === 'native') {
+      applyCommandToNative(cmd);
+    } else if (embed.provider === 'youtube') {
+      applyCommandToYt(cmd);
+    } else if (embed.provider === 'vimeo') {
+      applyCommandToVimeo(cmd);
+    }
+  });
+
+  // ─── Reactive: (re)attach native video listeners ──────────────────────────────
+  $effect(() => {
+    const el = nativeVideoEl;
+    if (!el || variant !== 'deck') return;
+    attachNativeListeners(el);
+    return () => detachNativeListeners(el);
+  });
+
+  // ─── Reactive: (re)initialize iframe player when iframe mounts ───────────────
+  $effect(() => {
+    const iframe = iframeEl;
+    if (!iframe) return;
+    if (embed.provider === 'youtube' && (variant === 'deck' || variant === 'screen')) {
+      initYtPlayer(iframe);
+    } else if (embed.provider === 'vimeo' && (variant === 'deck' || variant === 'screen')) {
+      initVimeoPlayer(iframe);
+    }
+    return () => {
+      ytPlayer = null;
+      ytReady = false;
+      vimeoPlayer = null;
+    };
+  });
 </script>
 
 {#if layout === 'video'}
@@ -98,6 +394,7 @@
         {:else if embed.type === 'iframe'}
           <div class="relative w-full h-full max-w-4xl mx-auto rounded-2xl overflow-hidden shadow-2xl bg-black flex items-center justify-center aspect-video">
             <iframe
+              bind:this={iframeEl}
               src={embed.url}
               title={title || 'Video player'}
               class="w-full h-full border-0 rounded-2xl"
@@ -108,6 +405,7 @@
         {:else}
           <div class="relative w-full h-full max-w-4xl mx-auto rounded-2xl overflow-hidden shadow-2xl bg-black flex items-center justify-center">
             <video
+              bind:this={nativeVideoEl}
               src={embed.url}
               controls={variant === 'deck'}
               class="w-full h-full object-contain rounded-2xl max-h-full {variant === 'deck' ? '' : 'pointer-events-none'}"
