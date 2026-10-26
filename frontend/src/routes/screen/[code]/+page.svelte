@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { joinSession, listResponses, startSession, clearResponses, getScreenControl } from '$lib/api';
+  import { joinSession, listResponses, startSession, clearResponses, getScreenControl, getPresentationPageImageUrl, getPageImageUrl } from '$lib/api';
   import { RforumWebSocket } from '$lib/ws';
   import type { ConnectionStatus as WsStatus } from '$lib/ws';
   import type { VideoControlPayload } from '$lib/components/ContentSlideCanvas.svelte';
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount, onDestroy, untrack } from 'svelte';
   import { theme } from '$lib/theme';
   import { BarChart3, MessageSquare, AlignLeft, Cloud, Orbit, Maximize2 } from 'lucide-svelte';
   import JoinScreen from '$lib/components/JoinScreen.svelte';
@@ -46,6 +46,9 @@
   const slideProgressPct = $derived(slideTotal > 0 && slideIndex > 0 ? Math.round((slideIndex / slideTotal) * 100) : 0);
   let ws: RforumWebSocket | null = $state(null);
   let lastWsStatus: WsStatus = 'disconnected';
+  // Shown in the header: the projector must never claim "Live" while it can't
+  // receive the presenter's changes.
+  let wsStatus: WsStatus = $state('disconnected');
   let loading = $state(true);
   let error = $state('');
   let guestUrl = $state('');
@@ -170,17 +173,28 @@
    * its responses) from the server. Used on first load, when the session goes
    * live after this screen was opened, and after a WS reconnect — slide
    * changes broadcast while the socket was down are never replayed. */
+  /** Responses for a slide; on failure (e.g. offline, with the session itself
+   * served from the offline cache) keep what we already had for that slide
+   * rather than failing the whole state load. */
+  async function fetchSlideResponses(slideId: string, previous: any[]): Promise<any[]> {
+    try {
+      return responsesForSlide(await listResponses(slideId), slideId);
+    } catch {
+      return responsesForSlide(previous, slideId);
+    }
+  }
+
   async function loadSessionState() {
     const fresh = await joinSession(code);
     const active = fresh.slides?.find((s: any) => s.is_active);
-    const nextResponses = active ? responsesForSlide(await listResponses(active.id), active.id) : [];
+    const nextResponses = active ? await fetchSlideResponses(active.id, responses) : [];
     let nextTimeline: any = null;
     let nextTimelineResponses: any[] = [];
     if (fresh.presentation_id && fresh.timeline) {
       nextTimeline = fresh.timeline;
       const activeItem = (nextTimeline.items || []).find((i: any) => i.id === nextTimeline.active_timeline_item_id);
       if (activeItem?.slide) {
-        nextTimelineResponses = responsesForSlide(await listResponses(activeItem.slide.id), activeItem.slide.id);
+        nextTimelineResponses = await fetchSlideResponses(activeItem.slide.id, timelineResponses);
       }
     }
     session = fresh;
@@ -191,9 +205,59 @@
     timelineResponses = nextTimelineResponses;
   }
 
+  // ── Look-ahead image prefetch ──────────────────────────────────────
+  // Warm the next few slides' rendered images: transitions stay instant on a
+  // slow network, and the service worker keeps them for an outage (see
+  // src/service-worker.ts). Same URLs (and the same code-based authorization)
+  // the slides themselves use.
+  const PREFETCH_AHEAD = 2;
+  const prefetchedUrls = new Set<string>();
+  function imageUrlFor(slide: any): string | null {
+    const cj = slide?.content_json;
+    if (!slide?.id || !session?.id || !(cj?.has_file || cj?.file_url)) return null;
+    return getPageImageUrl(session.id, slide.id, cj.file_page || 1, code);
+  }
+  function prefetchUpcoming() {
+    if (typeof window === 'undefined' || !session) return;
+    const urls: string[] = [];
+    if (session.presentation_id && presentationTimeline) {
+      const items = timelineOrderedItems;
+      const start = items.findIndex((i: any) => i.id === presentationTimeline.active_timeline_item_id);
+      for (const item of items.slice(start + 1, start + 1 + PREFETCH_AHEAD)) {
+        if (item.item_type === 'PAGE' && item.page) {
+          urls.push(getPresentationPageImageUrl(session.presentation_id, item.page.page_number, code));
+        } else {
+          const url = imageUrlFor(item.slide);
+          if (url) urls.push(url);
+        }
+      }
+    } else {
+      const start = orderedLegacySlides.findIndex((sl: any) => sl.id === activeSlide?.id);
+      for (const slide of orderedLegacySlides.slice(start + 1, start + 1 + PREFETCH_AHEAD)) {
+        const url = imageUrlFor(slide);
+        if (url) urls.push(url);
+      }
+    }
+    for (const url of urls) {
+      if (prefetchedUrls.has(url)) continue;
+      prefetchedUrls.add(url);
+      const img = new Image();
+      img.decoding = 'async';
+      img.onerror = () => prefetchedUrls.delete(url); // allow a later retry
+      img.src = url;
+    }
+  }
+  $effect(() => {
+    void activeTimelineItem?.id;
+    void activeSlide?.id;
+    void session?.id;
+    untrack(prefetchUpcoming);
+  });
+
   onMount(async () => {
+    // Session codes are uppercase server-side (WS endpoint, screen-control key).
     code = typeof window !== 'undefined'
-      ? window.location.pathname.split('/').pop() || ''
+      ? (window.location.pathname.split('/').pop() || '').toUpperCase()
       : '';
     guestUrl = typeof window !== 'undefined' ? `${window.location.origin}/session/${code}` : '';
     lastScreenControlId = readSeenScreenControlId(code);
@@ -203,8 +267,10 @@
     // role: 'screen' marks this connection as strictly read-only.
     ws = new RforumWebSocket(code, { role: 'screen' });
     ws.onStatusChange((s) => {
-      const wasReconnecting = lastWsStatus === 'reconnecting';
+      // Any interruption (retrying or browser-offline) needs an authoritative resync.
+      const wasReconnecting = lastWsStatus === 'reconnecting' || lastWsStatus === 'offline';
       lastWsStatus = s;
+      wsStatus = s;
       // Resync through the message queue so it can't interleave with (and
       // be overwritten by, or overwrite) live messages arriving meanwhile.
       if (s === 'connected' && wasReconnecting) queueMessage({ event: '__resync' });
@@ -444,7 +510,7 @@
       <div class="text-center">
         <p class="max-w-[16rem] truncate text-sm font-bold text-slate-900 dark:text-white sm:text-base">{session?.title || 'Presentation'}</p>
         <p class="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-          {#if session?.moderator_name}{session.moderator_name}&nbsp;&middot;&nbsp;{/if}<span class="font-semibold text-emerald-500">&#9679; Live</span>{#if guestCount !== null}&nbsp;&middot;&nbsp;{guestCount} joined{/if}
+          {#if session?.moderator_name}{session.moderator_name}&nbsp;&middot;&nbsp;{/if}{#if wsStatus === 'offline'}<span class="font-semibold text-red-500">&#9679; Offline — showing last received slide</span>{:else if wsStatus === 'reconnecting'}<span class="font-semibold text-amber-500">&#9679; Reconnecting…</span>{:else}<span class="font-semibold text-emerald-500">&#9679; Live</span>{/if}{#if guestCount !== null}&nbsp;&middot;&nbsp;{guestCount} joined{/if}
         </p>
       </div>
       <div class="flex items-center justify-end">
