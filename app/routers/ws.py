@@ -308,6 +308,12 @@ async def websocket_endpoint(websocket: WebSocket, session_code: str):
                 if not isinstance(message, dict):
                     continue
                 event = message.get("event")
+                # Liveness probe: answered to the sender only (never relayed),
+                # so a client can detect a half-open connection that still
+                # looks OPEN but no longer delivers anything.
+                if event == "ping":
+                    await websocket.send_text('{"event":"pong"}')
+                    continue
                 # Drop unknown event types to prevent UI injection by guests
                 if event not in ALLOWED_WS_EVENTS:
                     continue
