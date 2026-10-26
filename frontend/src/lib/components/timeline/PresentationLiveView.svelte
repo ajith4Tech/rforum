@@ -70,7 +70,7 @@
         {videoCommand}
       />
     {:else if activeItem?.slide}
-      <InteractionView slide={activeItem.slide} {responses} {variant} {guestId} {readOnly} />
+      <InteractionView slide={activeItem.slide} {responses} {variant} {guestId} {readOnly} {sessionCode} />
     {/if}
   </div>
 {/key}

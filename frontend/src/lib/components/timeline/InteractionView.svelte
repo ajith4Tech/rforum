@@ -17,6 +17,7 @@
    *   - 'moderator'  results + inline edit form (dashboard editor style)
    */
   import { submitResponse, upvoteResponse } from '$lib/api';
+  import { submitWithQueue, pendingSubmissions, rejectedSubmissions, lastConfirmed } from '$lib/responseQueue';
   import {
     BarChart3, MessageSquare, AlignLeft, Cloud, Star, Send, ChevronUp,
     CheckCircle2, ListChecks, HelpCircle, Sliders, ClipboardList, Check, X, Plus, Trash2
@@ -28,6 +29,8 @@
     responses = [],
     variant = 'guest',
     guestId = '',
+    // Guest variant: scopes the offline submission queue and saved drafts to this session.
+    sessionCode = '',
     readOnly = false,
     editing = false,
     onToggleEdit,
@@ -36,6 +39,7 @@
   }: {
     slide: any;
     responses?: any[];
+    sessionCode?: string;
     variant?: 'guest' | 'screen' | 'moderator';
     guestId?: string;
     readOnly?: boolean;
@@ -150,6 +154,46 @@
       localStorage.setItem(respondedStorageKey(), JSON.stringify(map));
     } catch {}
   }
+  function unmarkResponded(slideId: string) {
+    if (!guestId || typeof localStorage === 'undefined') return;
+    try {
+      const map = getRespondedMap();
+      delete map[slideId];
+      localStorage.setItem(respondedStorageKey(), JSON.stringify(map));
+    } catch {}
+  }
+
+  /** Sends through the durable per-session queue when we know the session
+   * (guest pages always pass it); otherwise a plain one-shot request.
+   * Resolves 'queued' when the response is saved on this device but not yet
+   * acknowledged by the server — never presented as delivered. */
+  async function sendGuestResponse(value: string, name?: string, rating?: number): Promise<'confirmed' | 'queued'> {
+    if (!sessionCode) {
+      await submitResponse(slide.id, value, guestId, name, rating);
+      return 'confirmed';
+    }
+    const outcome = await submitWithQueue({ sessionCode, slideId: slide.id, guestId, value, name, rating });
+    return outcome.state;
+  }
+
+  // ── Draft persistence (guest) ─────────────────────────────────────
+  // Partially filled forms survive a reload, a crash or a reconnect resync.
+  // Keyed per guest + slide (slide ids are unique, so this is session-scoped),
+  // dropped once submitted, and ignored after a day.
+  const DRAFT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+  function draftKey(slideId: string) {
+    return `rforum_draft_${guestId}_${slideId}`;
+  }
+  function loadDraft(slideId: string): any | null {
+    if (!guestId || typeof localStorage === 'undefined') return null;
+    try {
+      const draft = JSON.parse(localStorage.getItem(draftKey(slideId)) || 'null');
+      if (!draft || typeof draft !== 'object' || Date.now() - (draft.savedAt || 0) > DRAFT_MAX_AGE_MS) return null;
+      return draft;
+    } catch {
+      return null;
+    }
+  }
 
   const priorResponse = $derived(variant === 'guest' && slide?.id ? getRespondedMap()[slide.id] : undefined);
   const alreadyResponded = $derived(
@@ -193,6 +237,68 @@
     inputValue = '';
     thankYou = false;
     actionError = '';
+    if (variant === 'guest' && !readOnly && currentId && !alreadyResponded) {
+      const draft = loadDraft(currentId);
+      if (draft) {
+        if (typeof draft.inputValue === 'string') inputValue = draft.inputValue;
+        if (typeof draft.guestName === 'string' && draft.guestName) guestName = draft.guestName;
+        if (typeof draft.starRating === 'number') starRating = draft.starRating;
+        if (typeof draft.scaleRating === 'number') scaleRating = draft.scaleRating;
+        if (draft.surveyAnswers && typeof draft.surveyAnswers === 'object') surveyAnswers = draft.surveyAnswers;
+        if (isMultipleChoice && Array.isArray(draft.pendingOptions)) pendingOptions = draft.pendingOptions;
+      }
+    }
+  });
+
+  // Save the in-progress form whenever it changes (guest only).
+  $effect(() => {
+    if (variant !== 'guest' || readOnly || !guestId) return;
+    const id = slide?.id;
+    if (!id) return;
+    const draft = {
+      inputValue,
+      guestName,
+      starRating,
+      scaleRating,
+      pendingOptions: [...pendingOptions],
+      surveyAnswers: { ...surveyAnswers },
+    };
+    const empty = !draft.inputValue && !draft.guestName && !draft.starRating && draft.scaleRating === null
+      && draft.pendingOptions.length === 0 && Object.keys(draft.surveyAnswers).length === 0;
+    try {
+      if (empty || submitted) localStorage.removeItem(draftKey(id));
+      else localStorage.setItem(draftKey(id), JSON.stringify({ ...draft, savedAt: Date.now() }));
+    } catch {
+      // Storage full/blocked — the form still works, it just won't survive a reload.
+    }
+  });
+
+  // ── Offline queue status (guest) ──────────────────────────────────
+  const pendingHere = $derived(
+    variant === 'guest' && slide?.id ? $pendingSubmissions.filter((e) => e.slideId === slide.id).length : 0
+  );
+  // A queued response the server later refused (slide closed, session ended…)
+  // was never delivered: undo the local "responded" state so the UI stops
+  // claiming it was sent. The guest page shows the reason.
+  const handledRejections = new Set<string>();
+  $effect(() => {
+    if (variant !== 'guest' || !slide?.id) return;
+    for (const rejection of $rejectedSubmissions) {
+      if (rejection.slideId !== slide.id || handledRejections.has(rejection.id)) continue;
+      handledRejections.add(rejection.id);
+      unmarkResponded(slide.id);
+      submitted = false;
+    }
+  });
+  const mountedAt = Date.now();
+  let showSent = $state(false);
+  let sentTimer: ReturnType<typeof setTimeout> | null = null;
+  $effect(() => {
+    const confirmed = $lastConfirmed;
+    if (variant !== 'guest' || !confirmed || confirmed.at < mountedAt || confirmed.slideId !== slide?.id) return;
+    showSent = true;
+    if (sentTimer) clearTimeout(sentTimer);
+    sentTimer = setTimeout(() => { showSent = false; }, 4000);
   });
 
   // Single choice voting (Poll / Quiz — instant submit on click)
@@ -201,7 +307,7 @@
     selectedOption = option;
     submitted = true;
     try {
-      await submitResponse(slide.id, option, guestId);
+      await sendGuestResponse(option);
       markResponded(slide.id, option);
     } catch (err: any) {
       actionError = err?.message || 'Could not submit vote';
@@ -225,7 +331,7 @@
     selectedOption = pendingOptions.join(', ');
     const payload = JSON.stringify(pendingOptions);
     try {
-      await submitResponse(slide.id, payload, guestId);
+      await sendGuestResponse(payload);
       markResponded(slide.id, payload);
     } catch (err: any) {
       actionError = err?.message || 'Could not submit answer';
@@ -239,12 +345,7 @@
     isSubmitting = true;
     try {
       const trimmedName = guestName.trim() || 'Guest';
-      await submitResponse(
-        slide.id,
-        String(scaleRating),
-        guestId,
-        trimmedName !== 'Guest' ? trimmedName : undefined
-      );
+      await sendGuestResponse(String(scaleRating), trimmedName !== 'Guest' ? trimmedName : undefined);
       submitted = true;
       markResponded(slide.id, String(scaleRating));
     } catch (err: any) {
@@ -265,12 +366,7 @@
     try {
       const trimmedName = guestName.trim() || 'Guest';
       const payloadStr = JSON.stringify({ answers: surveyAnswers });
-      await submitResponse(
-        slide.id,
-        payloadStr,
-        guestId,
-        trimmedName !== 'Guest' ? trimmedName : undefined
-      );
+      await sendGuestResponse(payloadStr, trimmedName !== 'Guest' ? trimmedName : undefined);
       submitted = true;
       markResponded(slide.id, 'survey_submitted');
     } catch (err: any) {
@@ -288,10 +384,8 @@
     isSubmitting = true;
     try {
       const trimmedName = guestName.trim() || 'Guest';
-      await submitResponse(
-        slide.id,
+      await sendGuestResponse(
         isRatingOnly ? String(starRating) : inputValue.trim(),
-        guestId,
         trimmedName !== 'Guest' ? trimmedName : undefined,
         slide.type === 'FEEDBACK' ? (isRatingOnly ? starRating : undefined) : undefined
       );
@@ -630,7 +724,7 @@
       {:else}
         <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 text-center animate-slide-up" role="status" aria-live="polite">
           <CheckCircle2 class="w-12 h-12 text-emerald-500 mx-auto mb-3" />
-          <p class="font-semibold text-slate-900 dark:text-white">{isQuiz ? 'Answer submitted!' : 'Vote submitted!'}</p>
+          <p class="font-semibold text-slate-900 dark:text-white">{pendingHere ? 'Saved on this device' : isQuiz ? 'Answer submitted!' : 'Vote submitted!'}</p>
           <p class="text-sm text-slate-500 mt-1">You chose: {selectedOption}</p>
           {#if isQuiz}<p class="text-xs text-slate-400 mt-2">Waiting for the moderator to reveal the answer…</p>{/if}
         </div>
@@ -687,7 +781,7 @@
     {#if submitted}
       <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 text-center animate-slide-up" role="status" aria-live="polite">
         <CheckCircle2 class="w-12 h-12 text-emerald-500 mx-auto mb-3" />
-        <p class="font-semibold text-slate-900 dark:text-white">Rating submitted!</p>
+        <p class="font-semibold text-slate-900 dark:text-white">{pendingHere ? 'Saved on this device' : 'Rating submitted!'}</p>
         {#if scaleRating !== null}<p class="text-sm text-slate-500 mt-1">Score: {scaleRating}</p>{/if}
       </div>
     {:else}
@@ -737,7 +831,7 @@
     {#if submitted}
       <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 text-center animate-slide-up" role="status" aria-live="polite">
         <CheckCircle2 class="w-12 h-12 text-emerald-500 mx-auto mb-3" />
-        <p class="font-semibold text-slate-900 dark:text-white">Survey submitted!</p>
+        <p class="font-semibold text-slate-900 dark:text-white">{pendingHere ? 'Saved on this device' : 'Survey submitted!'}</p>
         <p class="text-sm text-slate-500 mt-1">Thank you for sharing your responses.</p>
       </div>
     {:else}
@@ -821,7 +915,7 @@
     </form>
     {#if thankYou}
       <div class="flex items-center justify-center gap-2 mb-4 text-sm text-emerald-500 animate-fade-in" role="status" aria-live="polite">
-        <CheckCircle2 class="w-4 h-4" /> Thanks for submitting your question!
+        <CheckCircle2 class="w-4 h-4" /> {pendingHere ? 'Saved on this device — not sent yet' : 'Thanks for submitting your question!'}
       </div>
     {/if}
     {#if actionError}<p class="text-red-500 text-sm mb-4 text-center" role="alert">{actionError}</p>{/if}
@@ -853,7 +947,7 @@
     </form>
     {#if thankYou}
       <div class="flex items-center justify-center gap-2 text-sm text-emerald-500 animate-fade-in" role="status" aria-live="polite">
-        <CheckCircle2 class="w-4 h-4" /> Thanks for your answer!
+        <CheckCircle2 class="w-4 h-4" /> {pendingHere ? 'Saved on this device — not sent yet' : 'Thanks for your answer!'}
       </div>
     {/if}
     {#if actionError}<p class="text-red-500 text-sm text-center" role="alert">{actionError}</p>{/if}
@@ -863,7 +957,7 @@
     {#if submitted}
       <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 text-center animate-slide-up" role="status" aria-live="polite">
         <CheckCircle2 class="w-12 h-12 text-emerald-500 mx-auto mb-3" />
-        <p class="font-semibold text-slate-900 dark:text-white">Thanks for rating!</p>
+        <p class="font-semibold text-slate-900 dark:text-white">{pendingHere ? 'Saved on this device' : 'Thanks for rating!'}</p>
       </div>
     {:else}
       <form onsubmit={(e) => { e.preventDefault(); handleTextSubmit(); }} class="text-center space-y-4">
@@ -888,7 +982,7 @@
     {#if submitted}
       <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 text-center animate-slide-up" role="status" aria-live="polite">
         <CheckCircle2 class="w-12 h-12 text-emerald-500 mx-auto mb-3" />
-        <p class="font-semibold text-slate-900 dark:text-white">Thanks for your feedback!</p>
+        <p class="font-semibold text-slate-900 dark:text-white">{pendingHere ? 'Saved on this device' : 'Thanks for your feedback!'}</p>
       </div>
     {:else}
       <form onsubmit={(e) => { e.preventDefault(); handleTextSubmit(); }}>
@@ -902,6 +996,17 @@
         {#if actionError}<p class="text-red-500 text-sm mt-2 text-center" role="alert">{actionError}</p>{/if}
       </form>
     {/if}
+  {/if}
+
+  <!-- Delivery state of responses queued while offline (see $lib/responseQueue). -->
+  {#if pendingHere > 0}
+    <p class="mt-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-center text-sm text-amber-800 dark:border-amber-800/60 dark:bg-amber-950/30 dark:text-amber-300" role="status" aria-live="polite">
+      {pendingHere === 1 ? 'Your response is' : `${pendingHere} responses are`} saved on this device but not sent yet. It will be sent automatically when the connection returns.
+    </p>
+  {:else if showSent}
+    <p class="mt-3 rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-2 text-center text-sm text-emerald-800 dark:border-emerald-800/60 dark:bg-emerald-950/30 dark:text-emerald-300" role="status" aria-live="polite">
+      Sent — your saved response reached the presenter.
+    </p>
   {/if}
 
 <!-- ── SCREEN / PROJECTOR VARIANT ────────────────────────── -->

@@ -9,6 +9,7 @@
   import ContentSlideCanvas from '$lib/components/ContentSlideCanvas.svelte';
   import { upsertTimelineItemFromWs } from '$lib/timelineTypes';
   import { getFitTitleStyle, mergeResponsesById, responsesForSlide } from '$lib/fitTitle';
+  import { startAutoFlush, flushPending, rejectedSubmissions, dismissRejected } from '$lib/responseQueue';
   import {
     Orbit, Send, ChevronUp, BarChart3, MessageSquare, AlignLeft, CheckCircle2, Cloud, Sun, Moon
   } from 'lucide-svelte';
@@ -30,6 +31,8 @@
   const hasActiveContent = $derived(session?.presentation_id ? !!activeTimelineItem : !!activeSlide);
   let ws: RforumWebSocket | null = $state(null);
   let lastWsStatus: WsStatus = 'disconnected';
+  let wsStatus: WsStatus = $state('disconnected');
+  let stopAutoFlush: (() => void) | null = null;
   let error = $state('');
   let loading = $state(true);
   let inputValue = $state('');
@@ -148,6 +151,17 @@
     };
   }
 
+  /** Responses for a slide; on failure (e.g. offline, with the session itself
+   * served from the offline cache) keep what we already had for that slide
+   * rather than failing the whole state load. */
+  async function fetchSlideResponses(slideId: string, previous: any[]): Promise<any[]> {
+    try {
+      return responsesForSlide(await listResponses(slideId), slideId);
+    } catch {
+      return responsesForSlide(previous, slideId);
+    }
+  }
+
   /** Load the live session's current state from the server. Used on first
    * load, when the session goes live after this page was opened, and after a
    * WS reconnect — slide changes broadcast while the socket was down are
@@ -155,14 +169,14 @@
   async function loadSessionState() {
     const fresh = await joinSession(code);
     const active = normalizeSlide(fresh.slides?.find((s: any) => s.is_active));
-    const nextResponses = active ? responsesForSlide(await listResponses(active.id), active.id) : [];
+    const nextResponses = active ? await fetchSlideResponses(active.id, responses) : [];
     let nextTimeline: any = null;
     let nextTimelineResponses: any[] = [];
     if (fresh.presentation_id && fresh.timeline) {
       nextTimeline = fresh.timeline;
       const activeItem = (nextTimeline.items || []).find((i: any) => i.id === nextTimeline.active_timeline_item_id);
       if (activeItem?.slide) {
-        nextTimelineResponses = responsesForSlide(await listResponses(activeItem.slide.id), activeItem.slide.id);
+        nextTimelineResponses = await fetchSlideResponses(activeItem.slide.id, timelineResponses);
       }
     }
     const slideChanged = active?.id !== activeSlide?.id;
@@ -183,8 +197,10 @@
       localStorage.setItem('rforum_guest_id', guestId);
     }
 
+    // Session codes are uppercase server-side (join already uppercases; the
+    // WS endpoint and the per-session offline queue need the same form).
     code = typeof window !== 'undefined'
-      ? window.location.pathname.split('/').pop() || ''
+      ? (window.location.pathname.split('/').pop() || '').toUpperCase()
       : '';
 
     // Connect the WebSocket before joining (same as the screen view): join
@@ -192,8 +208,10 @@
     // page learns that it went live (session_update) if it was opened early.
     ws = new RforumWebSocket(code);
     ws.onStatusChange((s) => {
-      const wasReconnecting = lastWsStatus === 'reconnecting';
+      // Any interruption (retrying or browser-offline) needs an authoritative resync.
+      const wasReconnecting = lastWsStatus === 'reconnecting' || lastWsStatus === 'offline';
       lastWsStatus = s;
+      wsStatus = s;
       // Queued so the resync can't interleave with live messages.
       if (s === 'connected' && wasReconnecting) queueMessage({ event: '__resync' });
     });
@@ -208,12 +226,17 @@
       loading = false;
     }
 
+    // Retry responses saved on this device while offline (now, on 'online',
+    // and periodically while any are pending) — this session's only.
+    stopAutoFlush = startAutoFlush(code);
+
     // Start countdown if event has a future date
     updateCountdown();
     countdownInterval = setInterval(updateCountdown, 1000);
   });
 
   onDestroy(() => {
+    stopAutoFlush?.();
     ws?.disconnect();
     if (countdownInterval) clearInterval(countdownInterval);
   });
@@ -225,6 +248,9 @@
       } catch {
         // Keep the last known state if the resync fails; the next reconnect retries.
       }
+      // Authoritative state first, then let the server accept or refuse
+      // anything saved on this device while disconnected.
+      void flushPending(code);
       return;
     }
     // Presentation-timeline activation — distinct payload shape from the legacy
@@ -457,6 +483,21 @@
   </div>
 
   <main class="flex-1 flex flex-col items-center px-4 pt-4 sm:pt-6 md:pt-8 overflow-y-auto">
+    {#if !loading && (wsStatus === 'offline' || wsStatus === 'reconnecting')}
+      <div class="w-full max-w-lg mb-3 rounded-xl border px-3 py-2 text-sm text-center {wsStatus === 'offline' ? 'border-red-300 bg-red-50 text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300' : 'border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-800/60 dark:bg-amber-950/30 dark:text-amber-300'}" role="status" aria-live="polite">
+        {#if wsStatus === 'offline'}
+          You're offline — this may not be the current slide. Answers you submit are saved on this device and sent when you reconnect.
+        {:else}
+          Reconnecting… the slide will update automatically.
+        {/if}
+      </div>
+    {/if}
+    {#each $rejectedSubmissions as rejection (rejection.id)}
+      <div class="w-full max-w-lg mb-3 flex items-start justify-between gap-3 rounded-xl border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300" role="alert">
+        <span>A response saved while you were offline could not be delivered: {rejection.reason}</span>
+        <button type="button" class="shrink-0 font-semibold underline" onclick={() => dismissRejected(rejection.id)}>Dismiss</button>
+      </div>
+    {/each}
 
     {#if loading}
       <p class="text-slate-500">Connecting...</p>
@@ -512,6 +553,7 @@
             responses={responses}
             variant="guest"
             {guestId}
+            sessionCode={code}
           />
         {/if}
       </div>

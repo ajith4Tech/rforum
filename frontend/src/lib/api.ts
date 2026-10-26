@@ -100,17 +100,46 @@ const extractError = async (response: Response) => {
   }
 };
 
+/**
+ * Error thrown by fetchJson. Same message as before (callers that only read
+ * `.message` are unaffected); `status` is the HTTP status, or 0 when the
+ * request never got a response (offline, DNS/connection failure, timeout) —
+ * in which case the server may or may not have processed it.
+ */
+export class ApiError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+  }
+}
+
+/** True when a request failed because of connectivity, not because the server rejected it. */
+export function isConnectivityError(err: unknown): boolean {
+  if (err instanceof ApiError) {
+    // 0 = no response; 502/503/504 = proxy/server unreachable during an outage.
+    return err.status === 0 || err.status === 502 || err.status === 503 || err.status === 504;
+  }
+  return false;
+}
+
 async function fetchJson<T>(path: string, options: RequestInit = {}, auth = false): Promise<T> {
-  const res = await withTimeout(fetch(buildUrl(path), {
-    ...options,
-    headers: {
-      ...buildHeaders({ auth, json: options.body instanceof FormData ? false : true }),
-      ...(options.headers as Record<string, string> | undefined)
-    }
-  }));
+  let res: Response;
+  try {
+    res = await withTimeout(fetch(buildUrl(path), {
+      ...options,
+      headers: {
+        ...buildHeaders({ auth, json: options.body instanceof FormData ? false : true }),
+        ...(options.headers as Record<string, string> | undefined)
+      }
+    }));
+  } catch (err) {
+    throw new ApiError(err instanceof Error ? err.message : 'Network request failed', 0);
+  }
 
   if (!res.ok) {
-    throw new Error(await extractError(res));
+    throw new ApiError(await extractError(res), res.status);
   }
 
   if (res.status === 204) return undefined as T;
@@ -131,6 +160,13 @@ export const logout = () => {
     localStorage.removeItem('rforum_token');
   }
   tokenStore.set(null);
+  // Live-session caches (see src/service-worker.ts) can hold presentation
+  // images fetched while this browser was signed in — drop them on sign-out.
+  if (typeof caches !== 'undefined') {
+    void caches.keys()
+      .then((keys) => Promise.all(keys.filter((k) => k.startsWith('rforum-live-')).map((k) => caches.delete(k))))
+      .catch(() => {});
+  }
 };
 
 export async function changePassword(currentPassword: string, newPassword: string) {
@@ -325,10 +361,14 @@ export async function submitResponse(
   value: string,
   guest_identifier: string,
   name?: string,
-  rating?: number
+  rating?: number,
+  /** Stable per-submission key: a retry with the same key is stored at most
+   * once (see app/routers/responses.py). Omit for legacy fire-once calls. */
+  idempotencyKey?: string
 ) {
   return fetchJson(`/slides/${slideId}/responses/`, {
     method: 'POST',
+    headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
     body: JSON.stringify({ value, guest_identifier, name, rating })
   });
 }
