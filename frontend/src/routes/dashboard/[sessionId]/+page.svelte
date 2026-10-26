@@ -251,7 +251,7 @@
       // session's moderator (required to send slide_change/page_change/session_update)
       ws = new RforumWebSocket(session.unique_code, { token: get(token) || undefined });
       ws.onStatusChange((s) => {
-        const wasReconnecting = wsStatus === 'reconnecting' || lastWsStatus === 'reconnecting';
+        const wasReconnecting = ['reconnecting', 'offline'].includes(wsStatus) || ['reconnecting', 'offline'].includes(lastWsStatus);
         lastWsStatus = s;
         wsStatus = s;
         if (s === 'connected' && wasReconnecting) void refetchRelevantResponses();
@@ -517,7 +517,10 @@
       await sendScreenControl(sessionId, "refresh", commandId);
     } catch (error) {
       console.warn("[dashboard] HTTP screen refresh failed; falling back to WebSocket", error);
-      ws?.send("screen_control", { action: "refresh", command_id: commandId });
+      // A buffered WS message has not reached the projector yet — say so.
+      const buffered = ws?.send("screen_control", { action: "refresh", command_id: commandId }) ?? false;
+      if (!buffered) screenCommandFlash = 'Projector not reachable — try again';
+      else if (wsStatus !== 'connected') screenCommandFlash = 'Will send when reconnected';
     }
     screenCommandTimer = setTimeout(() => { screenCommandFlash = ''; }, 1500);
   }
@@ -533,7 +536,10 @@
       await sendScreenControl(sessionId, "toggle_qr", commandId);
     } catch (error) {
       console.warn("[dashboard] HTTP QR toggle failed; falling back to WebSocket", error);
-      ws?.send("screen_control", { action: "toggle_qr", command_id: commandId });
+      // A buffered WS message has not reached the projector yet — say so.
+      const buffered = ws?.send("screen_control", { action: "toggle_qr", command_id: commandId }) ?? false;
+      if (!buffered) screenCommandFlash = 'Projector not reachable — try again';
+      else if (wsStatus !== 'connected') screenCommandFlash = 'Will send when reconnected';
     }
     screenCommandTimer = setTimeout(() => { screenCommandFlash = ''; }, 1500);
   }
@@ -872,11 +878,16 @@
     if (!active) return;
     const prevContentJson = { ...active.content_json };
     const nextContentJson = { ...active.content_json, title: contentTitle, body: contentBody };
-    await withSaveState(async () => {
-      const updated = await updateSlide(sessionId, active.id, { content_json: nextContentJson });
-      slides = slides.map((s) => (s.id === active.id ? updated : s));
-      ws?.send('slide_change', { slide_id: active.id, slide: updated, activation: false });
-    });
+    try {
+      await withSaveState(async () => {
+        const updated = await updateSlide(sessionId, active.id, { content_json: nextContentJson });
+        slides = slides.map((s) => (s.id === active.id ? updated : s));
+        ws?.send('slide_change', { slide_id: active.id, slide: updated, activation: false });
+      });
+    } catch {
+      // Error shown via saveError; stay in edit mode with the unsaved text.
+      return;
+    }
     pushSlideContentUndo(active.id, prevContentJson, nextContentJson, 'Edit content slide');
     stopEditing();
   }
@@ -965,9 +976,17 @@
     }
     const prevContentJson = { ...active.content_json };
     const nextContentJson = { ...active.content_json, question: pollQuestion.trim(), options: cleanedOptions };
-    const updated = await updateSlide(sessionId, active.id, { content_json: nextContentJson });
-    slides = slides.map((s) => (s.id === active.id ? updated : s));
-    ws?.send('slide_change', { slide_id: active.id, slide: updated, activation: false });
+    // withSaveState shows the failure in the save-error banner; the edit
+    // buffer stays dirty so nothing typed is lost and Save can be retried.
+    try {
+      await withSaveState(async () => {
+        const updated = await updateSlide(sessionId, active.id, { content_json: nextContentJson });
+        slides = slides.map((s) => (s.id === active.id ? updated : s));
+        ws?.send('slide_change', { slide_id: active.id, slide: updated, activation: false });
+      });
+    } catch {
+      return;
+    }
     pushSlideContentUndo(active.id, prevContentJson, nextContentJson, 'Edit poll');
   }
 
@@ -976,9 +995,17 @@
     if (!active) return;
     const prevContentJson = { ...active.content_json };
     const nextContentJson = { ...active.content_json, prompt: qnaPrompt.trim() };
-    const updated = await updateSlide(sessionId, active.id, { content_json: nextContentJson });
-    slides = slides.map((s) => (s.id === active.id ? updated : s));
-    ws?.send('slide_change', { slide_id: active.id, slide: updated, activation: false });
+    // withSaveState shows the failure in the save-error banner; the edit
+    // buffer stays dirty so nothing typed is lost and Save can be retried.
+    try {
+      await withSaveState(async () => {
+        const updated = await updateSlide(sessionId, active.id, { content_json: nextContentJson });
+        slides = slides.map((s) => (s.id === active.id ? updated : s));
+        ws?.send('slide_change', { slide_id: active.id, slide: updated, activation: false });
+      });
+    } catch {
+      return;
+    }
     pushSlideContentUndo(active.id, prevContentJson, nextContentJson, 'Edit Q&A prompt');
   }
 
@@ -987,9 +1014,17 @@
     if (!active) return;
     const prevContentJson = { ...active.content_json };
     const nextContentJson = { ...active.content_json, prompt: feedbackPrompt.trim() };
-    const updated = await updateSlide(sessionId, active.id, { content_json: nextContentJson });
-    slides = slides.map((s) => (s.id === active.id ? updated : s));
-    ws?.send('slide_change', { slide_id: active.id, slide: updated, activation: false });
+    // withSaveState shows the failure in the save-error banner; the edit
+    // buffer stays dirty so nothing typed is lost and Save can be retried.
+    try {
+      await withSaveState(async () => {
+        const updated = await updateSlide(sessionId, active.id, { content_json: nextContentJson });
+        slides = slides.map((s) => (s.id === active.id ? updated : s));
+        ws?.send('slide_change', { slide_id: active.id, slide: updated, activation: false });
+      });
+    } catch {
+      return;
+    }
     pushSlideContentUndo(active.id, prevContentJson, nextContentJson, 'Edit feedback prompt');
   }
 
@@ -998,9 +1033,17 @@
     if (!active) return;
     const prevContentJson = { ...active.content_json };
     const nextContentJson = { ...active.content_json, prompt: wordCloudPrompt.trim() };
-    const updated = await updateSlide(sessionId, active.id, { content_json: nextContentJson });
-    slides = slides.map((s) => (s.id === active.id ? updated : s));
-    ws?.send('slide_change', { slide_id: active.id, slide: updated, activation: false });
+    // withSaveState shows the failure in the save-error banner; the edit
+    // buffer stays dirty so nothing typed is lost and Save can be retried.
+    try {
+      await withSaveState(async () => {
+        const updated = await updateSlide(sessionId, active.id, { content_json: nextContentJson });
+        slides = slides.map((s) => (s.id === active.id ? updated : s));
+        ws?.send('slide_change', { slide_id: active.id, slide: updated, activation: false });
+      });
+    } catch {
+      return;
+    }
     pushSlideContentUndo(active.id, prevContentJson, nextContentJson, 'Edit word cloud prompt');
   }
 

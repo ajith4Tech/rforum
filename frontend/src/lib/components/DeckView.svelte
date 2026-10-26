@@ -114,6 +114,16 @@
     </div>
   </header>
 
+  {#if wsStatus === 'offline' || wsStatus === 'reconnecting'}
+    <div class="mt-3 rounded-xl border px-4 py-2.5 text-sm {wsStatus === 'offline' ? 'border-red-300 bg-red-50 text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300' : 'border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-800/60 dark:bg-amber-950/30 dark:text-amber-300'}" role="status" aria-live="polite">
+      {#if wsStatus === 'offline'}
+        You're offline. Slide changes and other actions can't reach the audience or projector until you reconnect; live responses are paused.
+      {:else}
+        Reconnecting… actions made now may not reach the audience or projector, and live responses may be delayed.
+      {/if}
+    </div>
+  {/if}
+
   <div class="grid min-h-0 flex-1 gap-0 xl:grid-cols-[13.5rem_minmax(0,1fr)_18rem]">
     <aside class="max-h-[min(78vh,52rem)] overflow-y-auto border-surface-200 py-4 pr-3 dark:border-surface-800 xl:border-r">
       <p class="mb-2 text-[11px] font-semibold uppercase tracking-widest text-surface-500">Slides</p>
