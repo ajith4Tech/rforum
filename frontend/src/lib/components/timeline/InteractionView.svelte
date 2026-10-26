@@ -170,8 +170,14 @@
   let actionError = $state('');
   let isSubmitting = $state(false);
 
+  // Reset the guest form only when a different slide is shown. A live
+  // content update for the same slide (Reveal Answer, an edited option) also
+  // replaces the `slide` object, and must not wipe in-progress input.
+  let formSlideId: string | undefined = undefined;
   $effect(() => {
-    void slide?.id;
+    const currentId = slide?.id;
+    if (currentId === formSlideId) return;
+    formSlideId = currentId;
     if (isMultipleChoice) {
       const parsed = alreadyResponded ? parseMultiValue(priorResponse) : [];
       pendingOptions = parsed;

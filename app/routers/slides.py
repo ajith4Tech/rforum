@@ -394,7 +394,9 @@ async def _authorize_slide_asset(
             if user_id:
                 result = await db.execute(select(User).where(User.id == uuid.UUID(user_id)))
                 user = result.scalar_one_or_none()
-                if user is not None:
+                # Same is_active gate as get_current_user / the WS role check —
+                # a disabled account's unexpired token must not keep working here.
+                if user is not None and user.is_active:
                     session = await db.get(Session, session_uuid)
                     if session is not None and (
                         user.role == UserRole.SUPER_ADMIN or session.owner_id == user.id

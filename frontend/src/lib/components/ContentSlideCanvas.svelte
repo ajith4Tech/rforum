@@ -87,11 +87,15 @@
   let iframeEl: HTMLIFrameElement | null = $state(null);
 
   // ─── YouTube IFrame API player instance ─────────────────────────────────────
+  // ytReady / vimeoPlayer are reactive so the videoCommand $effect below re-runs
+  // once the player becomes usable: the API script + player init take a moment
+  // after the slide appears, and a play pressed by the moderator in that window
+  // would otherwise be dropped for good on the screen.
   let ytPlayer: any = null;
-  let ytReady = false;
+  let ytReady = $state(false);
 
   // ─── Vimeo Player instance ──────────────────────────────────────────────────
-  let vimeoPlayer: any = null;
+  let vimeoPlayer: any = $state.raw(null);
 
   // ─── Throttle / dedupe helpers ───────────────────────────────────────────────
   /** True while we are programmatically applying an incoming command so we
@@ -102,6 +106,42 @@
     if (applyingCommand) return;
     if (!onVideoControl || !slide?.id) return;
     onVideoControl({ slide_id: slide.id, ...payload });
+  }
+
+  // ─── Blocked playback (screen variant) ───────────────────────────────────────
+  // Browsers refuse to start playback with sound until the page has had a user
+  // gesture (autoplay policy) — a freshly opened projector tab usually has
+  // none. Instead of failing silently (or forcing mute, which would change the
+  // room's audio), show a one-click prompt that resumes at the moderator's
+  // current position. `currentPlayAttempt` identifies the latest play attempt
+  // so a rejection that arrives after a newer command is ignored.
+  let playbackBlocked = $state(false);
+  let currentPlayAttempt: VideoControlPayload | null = null;
+  let blockedPlay: { cmd: VideoControlPayload; at: number } | null = null;
+
+  function markPlaybackBlocked(cmd: VideoControlPayload) {
+    if (cmd !== currentPlayAttempt) return;
+    blockedPlay = { cmd, at: performance.now() };
+    playbackBlocked = true;
+  }
+
+  function isAutoplayRejection(err: any): boolean {
+    return err?.name === 'NotAllowedError';
+  }
+
+  function resumeBlockedPlayback() {
+    const pending = blockedPlay;
+    playbackBlocked = false;
+    blockedPlay = null;
+    if (!pending || pending.cmd !== currentPlayAttempt) return;
+    // The moderator's player kept running since the refused attempt.
+    const elapsed = (performance.now() - pending.at) / 1000;
+    const cmd: VideoControlPayload = { ...pending.cmd, position: (pending.cmd.position ?? 0) + elapsed };
+    currentPlayAttempt = cmd;
+    // Applied synchronously inside this click so it counts as user-initiated.
+    if (embed.provider === 'native') applyCommandToNative(cmd);
+    else if (embed.provider === 'youtube') applyCommandToYt(cmd);
+    else if (embed.provider === 'vimeo') applyCommandToVimeo(cmd);
   }
 
   // ─── Native video event handlers ─────────────────────────────────────────────
@@ -167,12 +207,39 @@
     }
   }
 
+  // The YouTube IFrame API has no seek event, and scrubbing while paused
+  // fires no state change — so on the moderator's deck, poll the position
+  // while paused/cued and report jumps as seeks. (Seeks while playing already
+  // arrive as BUFFERING → PLAYING with the new position.)
+  let ytSeekPoll: ReturnType<typeof setInterval> | null = null;
+  function startYtSeekPoll() {
+    stopYtSeekPoll();
+    let lastTime = ytPlayer?.getCurrentTime?.() ?? 0;
+    ytSeekPoll = setInterval(() => {
+      if (!ytPlayer) return;
+      const time = ytPlayer.getCurrentTime?.() ?? 0;
+      const state = ytPlayer.getPlayerState?.();
+      const states = window.YT?.PlayerState;
+      if (states && (state === states.PAUSED || state === states.CUED) && Math.abs(time - lastTime) > 1) {
+        sendVideoControl({ action: 'seek', position: time });
+      }
+      lastTime = time;
+    }, 500);
+  }
+  function stopYtSeekPoll() {
+    if (ytSeekPoll) clearInterval(ytSeekPoll);
+    ytSeekPoll = null;
+  }
+
   function initYtPlayer(iframe: HTMLIFrameElement) {
     ensureYtApi(() => {
       if (!iframe.isConnected) return;
       ytPlayer = new window.YT.Player(iframe, {
         events: {
-          onReady: () => { ytReady = true; },
+          onReady: () => {
+            ytReady = true;
+            if (variant === 'deck' && onVideoControl) startYtSeekPoll();
+          },
           onStateChange: (e: any) => {
             if (variant !== 'deck' || !onVideoControl) return;
             const YT_STATES = window.YT.PlayerState;
@@ -230,13 +297,17 @@
   }
 
   // ─── Apply incoming command to native video (screen variant) ─────────────────
-  function applyCommandToNative(cmd: VideoControlPayload) {
-    if (!nativeVideoEl) return;
+  function applyCommandToNative(cmd: VideoControlPayload): boolean {
+    if (!nativeVideoEl) return false;
     applyingCommand = true;
     try {
       if (cmd.action === 'play') {
         if (cmd.position !== undefined) nativeVideoEl.currentTime = cmd.position;
-        nativeVideoEl.play().catch(() => {/* autoplay policy — safe to ignore */});
+        nativeVideoEl.play().catch((err) => {
+          if (isAutoplayRejection(err)) markPlaybackBlocked(cmd);
+          // AbortError = interrupted by a newer pause/load — expected.
+          else if (err?.name !== 'AbortError') console.warn('[video] native playback failed', err);
+        });
       } else if (cmd.action === 'pause') {
         if (cmd.position !== undefined) nativeVideoEl.currentTime = cmd.position;
         nativeVideoEl.pause();
@@ -251,16 +322,29 @@
       // echo back as a new outbound control.
       setTimeout(() => { applyingCommand = false; }, 0);
     }
+    return true;
   }
 
   // ─── Apply incoming command to YouTube player (screen variant) ───────────────
-  function applyCommandToYt(cmd: VideoControlPayload) {
-    if (!ytPlayer || !ytReady) return;
+  function applyCommandToYt(cmd: VideoControlPayload): boolean {
+    // Read ytReady first so the calling $effect always tracks it.
+    if (!ytReady || !ytPlayer) return false;
     applyingCommand = true;
     try {
       if (cmd.action === 'play') {
         if (cmd.position !== undefined) ytPlayer.seekTo?.(cmd.position, true);
         ytPlayer.playVideo?.();
+        // playVideo() has no result; a refused autoplay just never reaches
+        // PLAYING/BUFFERING. Check once the player has had time to start.
+        const player = ytPlayer;
+        setTimeout(() => {
+          if (player !== ytPlayer || cmd !== currentPlayAttempt) return;
+          const state = player.getPlayerState?.();
+          const states = window.YT?.PlayerState;
+          if (states && state !== states.PLAYING && state !== states.BUFFERING && state !== states.ENDED) {
+            markPlaybackBlocked(cmd);
+          }
+        }, 2500);
       } else if (cmd.action === 'pause') {
         if (cmd.position !== undefined) ytPlayer.seekTo?.(cmd.position, true);
         ytPlayer.pauseVideo?.();
@@ -275,18 +359,22 @@
     } finally {
       setTimeout(() => { applyingCommand = false; }, 0);
     }
+    return true;
   }
 
   // ─── Apply incoming command to Vimeo player (screen variant) ─────────────────
-  function applyCommandToVimeo(cmd: VideoControlPayload) {
-    if (!vimeoPlayer) return;
+  function applyCommandToVimeo(cmd: VideoControlPayload): boolean {
+    if (!vimeoPlayer) return false;
     applyingCommand = true;
     const finish = () => { setTimeout(() => { applyingCommand = false; }, 0); };
     if (cmd.action === 'play') {
       const p = cmd.position !== undefined
         ? vimeoPlayer.setCurrentTime(cmd.position).then(() => vimeoPlayer.play())
         : vimeoPlayer.play();
-      p.catch(() => {}).finally(finish);
+      p.catch((err: any) => {
+        if (isAutoplayRejection(err)) markPlaybackBlocked(cmd);
+        else console.warn('[video] Vimeo playback failed', err);
+      }).finally(finish);
     } else if (cmd.action === 'pause') {
       const p = cmd.position !== undefined
         ? vimeoPlayer.setCurrentTime(cmd.position).then(() => vimeoPlayer.pause())
@@ -304,22 +392,37 @@
     } else {
       finish();
     }
+    return true;
   }
 
   // ─── Reactive: apply incoming videoCommand ────────────────────────────────────
+  // Each command is applied exactly once. The effect also re-runs when the
+  // `slide` object is replaced (e.g. a live content edit) — re-applying the
+  // last play/seek then would jump the projector back to a stale position.
+  let lastAppliedCommand: VideoControlPayload | null = null;
   $effect(() => {
     const cmd = videoCommand;
     if (!cmd || variant === 'deck') return;
     // Ignore commands for a different slide.
     if (cmd.slide_id !== slide?.id) return;
+    if (cmd === lastAppliedCommand) return;
 
+    // Any newer command supersedes a pending "click to play" prompt; a new
+    // play may raise it again if the browser still refuses.
+    currentPlayAttempt = cmd.action === 'play' ? cmd : null;
+    blockedPlay = null;
+    playbackBlocked = false;
+
+    let applied = false;
     if (embed.provider === 'native') {
-      applyCommandToNative(cmd);
+      applied = applyCommandToNative(cmd);
     } else if (embed.provider === 'youtube') {
-      applyCommandToYt(cmd);
+      applied = applyCommandToYt(cmd);
     } else if (embed.provider === 'vimeo') {
-      applyCommandToVimeo(cmd);
+      applied = applyCommandToVimeo(cmd);
     }
+    // Not applied = player not ready yet; the effect re-runs when it is.
+    if (applied) lastAppliedCommand = cmd;
   });
 
   // ─── Reactive: (re)attach native video listeners ──────────────────────────────
@@ -340,12 +443,27 @@
       initVimeoPlayer(iframe);
     }
     return () => {
+      stopYtSeekPoll();
       ytPlayer = null;
       ytReady = false;
       vimeoPlayer = null;
     };
   });
 </script>
+
+{#snippet playbackBlockedPrompt()}
+  {#if variant === 'screen' && playbackBlocked}
+    <button
+      type="button"
+      onclick={resumeBlockedPlayback}
+      class="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-black/70 text-white"
+    >
+      <Video class="h-10 w-10" />
+      <span class="text-lg font-semibold">The presenter started the video</span>
+      <span class="text-sm text-white/80">This browser blocked playback — click to play here</span>
+    </button>
+  {/if}
+{/snippet}
 
 {#if layout === 'video'}
   {#if variant === 'guest' && !playOnDevices}
@@ -401,6 +519,7 @@
               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
               allowfullscreen
             ></iframe>
+            {@render playbackBlockedPrompt()}
           </div>
         {:else}
           <div class="relative w-full h-full max-w-4xl mx-auto rounded-2xl overflow-hidden shadow-2xl bg-black flex items-center justify-center">
@@ -414,6 +533,7 @@
               <track kind="captions" />
               Your browser does not support the video tag.
             </video>
+            {@render playbackBlockedPrompt()}
           </div>
         {/if}
       </div>

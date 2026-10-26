@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import uuid
+from collections import deque
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from jose import JWTError, jwt
 from redis.asyncio import Redis
@@ -12,6 +13,7 @@ from app.config import get_settings
 from app.database import async_session
 from app.models import Session, User, UserRole
 from app.rate_limit import check_rate_limit
+from app.services.guest_view import strip_slide_content_json
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["websocket"])
@@ -49,6 +51,37 @@ MODERATOR_ONLY_EVENTS = frozenset({
 
 # Maximum raw message size accepted from a client (64 KB)
 MAX_WS_MESSAGE_BYTES = 65_536
+
+# "heartbeat" is the one event any role (including guests) may relay, and a
+# relay fans out to every socket in the session — unbounded, one guest could
+# make the server send N copies of every message it spams. No first-party
+# client sends it (the frontend's keepalive is a "ping", dropped above), so a
+# small per-connection budget leaves room for any legitimate use while
+# capping the amplification. The relayed copy carries no client data.
+HEARTBEAT_RELAY_LIMIT = 3
+HEARTBEAT_RELAY_WINDOW_SECONDS = 30.0
+
+
+def _audience_safe_message(message: dict) -> dict:
+    """Return the copy of `message` that non-moderator sockets may receive.
+
+    slide_change payloads embed the full slide — both when relayed from the
+    moderator's own socket and when published by the REST activation
+    endpoints — and its content_json still carries the raw upload path and,
+    for an unrevealed quiz, the correct answer. Guests and screens only ever
+    get the same stripped view the join endpoint returns
+    (strip_slide_content_json); the moderator keeps the full payload so its
+    own local copy (used to build later edits) never loses those fields.
+    """
+    if message.get("event") != "slide_change":
+        return message
+    data = message.get("data")
+    if not isinstance(data, dict) or not isinstance(data.get("slide"), dict):
+        return message
+    slide = dict(data["slide"])
+    content_json = slide.get("content_json")
+    slide["content_json"] = strip_slide_content_json(content_json if isinstance(content_json, dict) else {})
+    return {**message, "data": {**data, "slide": slide}}
 
 
 async def _get_session_by_code(session_code: str) -> Session | None:
@@ -168,16 +201,19 @@ class ConnectionManager:
         # broadcast tails. A bounded per-send timeout guarantees one bad
         # socket can't hold up the round at all.
         payload = json.dumps(message)
-        sockets = list(bucket)
+        audience_message = _audience_safe_message(message)
+        audience_payload = payload if audience_message is message else json.dumps(audience_message)
+        sockets = list(bucket.items())
 
-        async def _send(ws: WebSocket) -> WebSocket | None:
+        async def _send(ws: WebSocket, role: str) -> WebSocket | None:
             try:
-                await asyncio.wait_for(ws.send_text(payload), timeout=5.0)
+                text = payload if role == "moderator" else audience_payload
+                await asyncio.wait_for(ws.send_text(text), timeout=5.0)
                 return None
             except Exception:
                 return ws
 
-        dead = await asyncio.gather(*(_send(ws) for ws in sockets))
+        dead = await asyncio.gather(*(_send(ws, role) for ws, role in sockets))
         for ws in dead:
             if ws is not None:
                 await self.disconnect(session_code, ws)
@@ -260,6 +296,7 @@ async def websocket_endpoint(websocket: WebSocket, session_code: str):
         websocket.query_params.get("role"),
     )
     await manager.connect(session_code, websocket, redis, role)
+    heartbeat_relays: deque[float] = deque()
     try:
         while True:
             try:
@@ -287,7 +324,19 @@ async def websocket_endpoint(websocket: WebSocket, session_code: str):
                         "message": f"Unauthorized: '{event}' requires moderator role",
                     }))
                     continue
-                message.setdefault("origin", SERVER_ID)
+                if event == "heartbeat":
+                    now = asyncio.get_running_loop().time()
+                    while heartbeat_relays and now - heartbeat_relays[0] > HEARTBEAT_RELAY_WINDOW_SECONDS:
+                        heartbeat_relays.popleft()
+                    if len(heartbeat_relays) >= HEARTBEAT_RELAY_LIMIT:
+                        continue
+                    heartbeat_relays.append(now)
+                    message = {"event": "heartbeat", "data": {}}
+                # Always stamp our own SERVER_ID (never trust a client-supplied
+                # origin): _listen skips messages carrying it, so a forged or
+                # stale origin would make this process re-broadcast its own
+                # relay from Redis and every local socket would see it twice.
+                message["origin"] = SERVER_ID
                 logger.info("ws_relay session=%s role=%s event=%s", session_code, role, event)
                 await manager.broadcast(session_code, message)
                 # Local sockets already got the broadcast above — a Redis

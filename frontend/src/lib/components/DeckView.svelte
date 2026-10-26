@@ -32,8 +32,25 @@
   const items = $derived(timeline ? [...(timeline.items || [])].sort((a: any, b: any) => a.order - b.order) : [...slides].sort((a: any, b: any) => (a.order ?? 0) - (b.order ?? 0)));
   const liveId = $derived(timeline?.active_timeline_item_id || activeSlideId || null);
   let selectedItemId = $state<string | null>(null);
-  $effect(() => { if (!selectedItemId && items[0]?.id) selectedItemId = items[0].id; });
-  const selectedId = $derived(selectedItemId || items[0]?.id || null);
+  // Follow the on-screen item whenever it changes (initial load, keyboard /
+  // editor navigation, another tab), so this view — and the Present button,
+  // which presents the selected item — never sits on a different slide than
+  // the audience sees. Manual selection still works between live changes.
+  let lastLiveId: string | null = null;
+  $effect(() => {
+    if (liveId && liveId !== lastLiveId) {
+      lastLiveId = liveId;
+      selectedItemId = liveId;
+    }
+  });
+  // Fall back to the live item, then the first item, when nothing is selected
+  // or the selected item was deleted.
+  const selectedId = $derived(
+    (selectedItemId && items.some((item: any) => item.id === selectedItemId) ? selectedItemId : null)
+      || (liveId && items.some((item: any) => item.id === liveId) ? liveId : null)
+      || items[0]?.id
+      || null
+  );
   const selected = $derived(items.find((item: any) => item.id === selectedId) || items[0] || null);
   const selectedSlide = $derived(selected?.slide || selected);
   const isTimeline = $derived(!!timeline);

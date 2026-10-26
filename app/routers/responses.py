@@ -112,6 +112,10 @@ async def submit_response(
             selected = float(response_data.get("value"))
         except (TypeError, ValueError):
             raise HTTPException(status_code=422, detail="scale value must be numeric")
+        # float() accepts "nan"/"inf": NaN slips past both range comparisons
+        # below and then crashes round() in the step check (500).
+        if not all(math.isfinite(n) for n in (min_num, max_num, step_num, selected)):
+            raise HTTPException(status_code=422, detail="scale value must be numeric")
 
         if min_num > max_num:
             min_num, max_num = max_num, min_num

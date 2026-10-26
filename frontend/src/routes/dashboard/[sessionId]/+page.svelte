@@ -67,6 +67,9 @@
   let pendingLeaveUrl = $state('');
   let bypassLeaveGuard = false;
   const activeSlide = $derived(getActiveSlide());
+  // `activeSlideId` is the slide selected for editing; the slide actually on
+  // screen for the audience is the one the server marked is_active.
+  const liveSlideId = $derived(slides.find((s: any) => s.is_active)?.id ?? null);
   const activeType = $derived(activeSlide?.type?.toUpperCase());
 
   // ── Presentation Timeline (additive — only used when session.presentation_id is set) ──
@@ -284,13 +287,16 @@
     // Presentation-timeline activation — distinct payload shape from the legacy
     // slide_change (timeline_item_id instead of slide_id), same event name per design.
     if (msg.event === 'slide_change' && msg.data?.timeline_item_id !== undefined) {
+      // Content edits carry activation: false — merge the item, keep the live item.
+      const isActivation = msg.data.activation !== false;
       if (timeline) {
         timeline = {
           ...timeline,
-          active_timeline_item_id: msg.data.timeline_item_id,
+          active_timeline_item_id: isActivation ? msg.data.timeline_item_id : timeline.active_timeline_item_id,
           items: upsertTimelineItemFromWs(timeline.items || [], msg.data)
         };
       }
+      if (!isActivation) return;
       if (msg.data.slide) {
         if (!previewItemId || previewItemId === msg.data.timeline_item_id) {
           loadTimelineResponses(msg.data.slide.id);
@@ -455,7 +461,7 @@
       return;
     }
     await loadResponses(itemId);
-    if (session?.is_live && itemId !== activeSlideId) {
+    if (session?.is_live && itemId !== liveSlideId) {
       await activateSlide(itemId);
     }
   }
@@ -694,15 +700,15 @@
 
   async function activateSlide(slideId: string) {
     if (slideId !== activeSlideId && !confirmDiscardUnsavedChanges()) return;
-    const updated = await updateSlide(sessionId, slideId, { is_active: true });
+    await updateSlide(sessionId, slideId, { is_active: true });
     slides = slides.map((s) => ({ ...s, is_active: s.id === slideId }));
     activeSlideId = slideId;
     previewItemId = slideId;
     void loadResponses(slideId);
-    // Every other mutation in this file broadcasts over WS after the PATCH
-    // resolves — this one didn't, so activating a legacy (non-timeline)
-    // slide never reached guests/screen at all, live or not.
-    ws?.send('slide_change', { slide_id: slideId, slide: updated, activation: true });
+    // No WS relay here: the PATCH endpoint (app/routers/slides.py::update_slide)
+    // publishes the authoritative slide_change {activation: true} after commit,
+    // same as timeline activation. Relaying it again from this socket made every
+    // guest/screen process each activation twice.
   }
 
   function startEditing(slideId: string) {
@@ -1205,11 +1211,15 @@
         // content edit — Poll options, Scale config, Survey questions)
         // actually reach connected guests instead of only showing up after
         // a manual refresh.
+        // activation: false — this is a content edit, not a "go to this
+        // item". Without the flag, receivers treated every edit as an
+        // activation and jumped guests/screen to whichever item was edited.
         ws?.send('slide_change', {
           timeline_item_id: itemId,
           item_type: updated.item_type,
           page: updated.page ?? null,
-          slide: updated.slide ?? null
+          slide: updated.slide ?? null,
+          activation: false
         });
       });
     }
@@ -1366,7 +1376,7 @@
         {presentation}
         {timeline}
         {slides}
-        {activeSlideId}
+        activeSlideId={liveSlideId}
         responses={session?.presentation_id ? timelineResponses : slideResponses}
         {wsStatus}
         onSelect={inspectDeckItem}
@@ -1465,6 +1475,7 @@
                 await withSaveState(async () => {
                   const updated = await uploadSlideFile(sessionId, slideId, file);
                   slides = slides.map((s) => (s.id === slideId ? { ...s, ...updated } : s));
+                  ws?.send('slide_change', { slide_id: slideId, slide: updated, activation: false });
                 });
               } catch (err) {
                 console.error('Failed to upload file:', err);

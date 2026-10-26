@@ -148,17 +148,31 @@
     };
   }
 
-  async function refetchGuestResponses() {
-    try {
-      if (session?.presentation_id) {
-        const slideId = activeTimelineItem?.slide?.id;
-        timelineResponses = slideId ? responsesForSlide(await listResponses(slideId), slideId) : [];
-      } else if (activeSlide?.id) {
-        responses = responsesForSlide(await listResponses(activeSlide.id), activeSlide.id);
+  /** Load the live session's current state from the server. Used on first
+   * load, when the session goes live after this page was opened, and after a
+   * WS reconnect — slide changes broadcast while the socket was down are
+   * never replayed. */
+  async function loadSessionState() {
+    const fresh = await joinSession(code);
+    const active = normalizeSlide(fresh.slides?.find((s: any) => s.is_active));
+    const nextResponses = active ? responsesForSlide(await listResponses(active.id), active.id) : [];
+    let nextTimeline: any = null;
+    let nextTimelineResponses: any[] = [];
+    if (fresh.presentation_id && fresh.timeline) {
+      nextTimeline = fresh.timeline;
+      const activeItem = (nextTimeline.items || []).find((i: any) => i.id === nextTimeline.active_timeline_item_id);
+      if (activeItem?.slide) {
+        nextTimelineResponses = responsesForSlide(await listResponses(activeItem.slide.id), activeItem.slide.id);
       }
-    } catch {
-      // Keep last known responses if reconnect refetch fails.
     }
+    const slideChanged = active?.id !== activeSlide?.id;
+    session = fresh;
+    error = '';
+    activeSlide = active;
+    if (slideChanged) restoreSubmittedState(activeSlide);
+    responses = nextResponses;
+    presentationTimeline = nextTimeline;
+    timelineResponses = nextTimelineResponses;
   }
   
   onMount(async () => {
@@ -173,41 +187,30 @@
       ? window.location.pathname.split('/').pop() || ''
       : '';
 
+    // Connect the WebSocket before joining (same as the screen view): join
+    // only succeeds once the session is live, and the socket is how this
+    // page learns that it went live (session_update) if it was opened early.
+    ws = new RforumWebSocket(code);
+    ws.onStatusChange((s) => {
+      const wasReconnecting = lastWsStatus === 'reconnecting';
+      lastWsStatus = s;
+      // Queued so the resync can't interleave with live messages.
+      if (s === 'connected' && wasReconnecting) queueMessage({ event: '__resync' });
+    });
+    ws.onMessage(queueMessage);
+    ws.connect();
+
     try {
-      session = await joinSession(code);
-      const active = normalizeSlide(session.slides?.find((s: any) => s.is_active));
-      if (active) {
-        activeSlide = active;
-        responses = responsesForSlide(await listResponses(active.id), active.id);
-      }
-
-      if (session.presentation_id && session.timeline) {
-        presentationTimeline = session.timeline;
-        const items = [...(presentationTimeline.items || [])].sort((a: any, b: any) => a.order - b.order);
-        const activeItem = items.find((i: any) => i.id === presentationTimeline.active_timeline_item_id);
-        if (activeItem?.slide) {
-          timelineResponses = responsesForSlide(await listResponses(activeItem.slide.id), activeItem.slide.id);
-        }
-      }
-
-      // Connect WebSocket
-      ws = new RforumWebSocket(code);
-      ws.onStatusChange((s) => {
-        const wasReconnecting = lastWsStatus === 'reconnecting';
-        lastWsStatus = s;
-        if (s === 'connected' && wasReconnecting) void refetchGuestResponses();
-      });
-      ws.connect();
-      ws.onMessage(queueMessage);
-
-      // Start countdown if event has a future date
-      updateCountdown();
-      countdownInterval = setInterval(updateCountdown, 1000);
+      await loadSessionState();
     } catch (e: any) {
       error = e.message || 'Session not found';
     } finally {
       loading = false;
     }
+
+    // Start countdown if event has a future date
+    updateCountdown();
+    countdownInterval = setInterval(updateCountdown, 1000);
   });
 
   onDestroy(() => {
@@ -216,16 +219,28 @@
   });
 
   async function handleWsMessage(msg: any) {
+    if (msg.event === '__resync') {
+      try {
+        await loadSessionState();
+      } catch {
+        // Keep the last known state if the resync fails; the next reconnect retries.
+      }
+      return;
+    }
     // Presentation-timeline activation — distinct payload shape from the legacy
     // slide_change (timeline_item_id instead of slide_id), same event name per design.
     if (msg.event === 'slide_change' && msg.data?.timeline_item_id !== undefined) {
+      // Content edits carry activation: false — refresh that item's data
+      // without moving the audience off the item that is actually live.
+      const isActivation = msg.data.activation !== false;
       if (presentationTimeline) {
         presentationTimeline = {
           ...presentationTimeline,
-          active_timeline_item_id: msg.data.timeline_item_id,
+          active_timeline_item_id: isActivation ? msg.data.timeline_item_id : presentationTimeline.active_timeline_item_id,
           items: upsertTimelineItemFromWs(presentationTimeline.items || [], msg.data)
         };
       }
+      if (!isActivation) return;
       if (msg.data.slide) {
         try {
           timelineResponses = responsesForSlide(await listResponses(msg.data.slide.id), msg.data.slide.id);
@@ -239,6 +254,9 @@
       return;
     }
     if (msg.event === 'slide_change') {
+      // The moderator also broadcasts content saves (activation: false) for
+      // slides that are not live — those must not replace what is on screen.
+      if (msg.data?.activation === false && msg.data?.slide?.id !== activeSlide?.id) return;
       if (msg.data?.slide) {
         // Use the slide data embedded in the message — no HTTP round-trip needed
         const cj = { ...(msg.data.slide.content_json || {}) };
@@ -306,9 +324,17 @@
         };
       }
     } else if (msg.event === 'session_update') {
-      if (msg.data.is_live === false) {
+      if (msg.data?.is_live === false) {
         session = null;
+        activeSlide = null;
+        presentationTimeline = null;
         error = 'This session has ended.';
+      } else if (msg.data?.is_live === true) {
+        try {
+          await loadSessionState();
+        } catch (err) {
+          console.error('Failed to load session after it went live:', err);
+        }
       }
     }
   }

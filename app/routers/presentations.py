@@ -369,6 +369,29 @@ async def _publish_safe(redis: Redis, channel: str, message: str) -> None:
         logger.warning("redis_publish_failed channel=%s", channel, exc_info=True)
 
 
+async def _publish_live_resync(request: Request, session: Session) -> None:
+    """Tell connected guests/screens to reload the session after its content
+    was swapped out underneath them (replace/detach). Their cached timeline
+    still references the old presentation — page images for it are no longer
+    authorized for this session code, and the active item was cleared. The
+    guest and screen pages already reload full state on a live
+    `session_update`, landing in the "waiting for presenter" state. Only sent
+    while live: non-live sessions have no audience to update."""
+    if not session.is_live:
+        return
+    redis: Redis = request.app.state.redis
+    await _publish_safe(
+        redis,
+        f"session:{session.unique_code}",
+        json.dumps(
+            {
+                "event": "session_update",
+                "data": {"is_live": True, "reason": "presentation_changed"},
+            }
+        ),
+    )
+
+
 async def _check_presentation_write_rate_limit(request: Request, user: User) -> None:
     redis: Redis = request.app.state.redis
     allowed = await check_rate_limit(
@@ -760,6 +783,7 @@ async def replace_presentation(
             old_presentation.orphaned_since = datetime.now(timezone.utc)
 
     await db.commit()
+    await _publish_live_resync(request, session)
     refreshed_timeline = await _get_timeline_for_session(db, session.id)
     return {
         "presentation": new_presentation,
@@ -879,6 +903,7 @@ async def get_session_presentation(
 )
 async def detach_presentation(
     session_id: str,
+    request: Request,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -904,6 +929,7 @@ async def detach_presentation(
             presentation.orphaned_since = datetime.now(timezone.utc)
 
     await db.commit()
+    await _publish_live_resync(request, session)
 
 
 @router.post(
@@ -1271,6 +1297,7 @@ async def update_timeline_item(
 async def delete_timeline_item(
     session_id: str,
     item_id: str,
+    request: Request,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -1283,7 +1310,8 @@ async def delete_timeline_item(
         )
 
     timeline = await db.get(PresentationTimeline, item.timeline_id)
-    if timeline and timeline.active_timeline_item_id == item.id:
+    was_active = bool(timeline and timeline.active_timeline_item_id == item.id)
+    if was_active:
         timeline.active_timeline_item_id = None
         await _sync_active_slide(db, session.id, None)
 
@@ -1291,6 +1319,23 @@ async def delete_timeline_item(
         await db.execute(delete(Slide).where(Slide.id == item.slide_id))
     await db.execute(delete(PresentationTimelineItem).where(PresentationTimelineItem.id == item.id))
     await db.commit()
+
+    if was_active:
+        # Guests/screens are still showing the deleted item (and would get
+        # "Slide not found" on submit) — tell them nothing is live now. Same
+        # slide_change shape as activate_timeline_item; clients treat a null
+        # timeline_item_id as "no active item".
+        redis: Redis = request.app.state.redis
+        await _publish_safe(
+            redis,
+            f"session:{session.unique_code}",
+            json.dumps(
+                {
+                    "event": "slide_change",
+                    "data": {"timeline_item_id": None, "item_type": None, "page": None, "slide": None},
+                }
+            ),
+        )
 
 
 @router.post(
@@ -1395,7 +1440,9 @@ async def _authorize_presentation_asset(
             if user_id:
                 result = await db.execute(select(User).where(User.id == uuid.UUID(user_id)))
                 user = result.scalar_one_or_none()
-                if user is not None:
+                # Same is_active gate as get_current_user / the WS role check —
+                # a disabled account's unexpired token must not keep working here.
+                if user is not None and user.is_active:
                     presentation = await db.get(Presentation, pres_uuid)
                     if presentation is not None and (
                         user.role == UserRole.SUPER_ADMIN or presentation.owner_id == user.id

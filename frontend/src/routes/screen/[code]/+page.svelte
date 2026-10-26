@@ -166,17 +166,29 @@
     }
   }
 
-  async function refetchScreenResponses() {
-    try {
-      if (session?.presentation_id) {
-        const slideId = activeTimelineItem?.slide?.id;
-        timelineResponses = slideId ? responsesForSlide(await listResponses(slideId), slideId) : [];
-      } else if (activeSlide?.id) {
-        responses = responsesForSlide(await listResponses(activeSlide.id), activeSlide.id);
+  /** Load the live session's current state (active slide / timeline item and
+   * its responses) from the server. Used on first load, when the session goes
+   * live after this screen was opened, and after a WS reconnect — slide
+   * changes broadcast while the socket was down are never replayed. */
+  async function loadSessionState() {
+    const fresh = await joinSession(code);
+    const active = fresh.slides?.find((s: any) => s.is_active);
+    const nextResponses = active ? responsesForSlide(await listResponses(active.id), active.id) : [];
+    let nextTimeline: any = null;
+    let nextTimelineResponses: any[] = [];
+    if (fresh.presentation_id && fresh.timeline) {
+      nextTimeline = fresh.timeline;
+      const activeItem = (nextTimeline.items || []).find((i: any) => i.id === nextTimeline.active_timeline_item_id);
+      if (activeItem?.slide) {
+        nextTimelineResponses = responsesForSlide(await listResponses(activeItem.slide.id), activeItem.slide.id);
       }
-    } catch {
-      // Keep last known responses if reconnect refetch fails.
     }
+    session = fresh;
+    error = '';
+    activeSlide = active ? { ...active, type: active.type?.toUpperCase() } : null;
+    responses = nextResponses;
+    presentationTimeline = nextTimeline;
+    timelineResponses = nextTimelineResponses;
   }
 
   onMount(async () => {
@@ -193,7 +205,9 @@
     ws.onStatusChange((s) => {
       const wasReconnecting = lastWsStatus === 'reconnecting';
       lastWsStatus = s;
-      if (s === 'connected' && wasReconnecting) void refetchScreenResponses();
+      // Resync through the message queue so it can't interleave with (and
+      // be overwritten by, or overwrite) live messages arriving meanwhile.
+      if (s === 'connected' && wasReconnecting) queueMessage({ event: '__resync' });
     });
     ws.onMessage(queueMessage);
     ws.connect();
@@ -201,22 +215,7 @@
     screenControlPollTimer = setInterval(pollScreenControl, 2000);
 
     try {
-      session = await joinSession(code);
-
-      const active = session.slides?.find((s: any) => s.is_active);
-      if (active) {
-        activeSlide = { ...active, type: active.type?.toUpperCase() };
-        responses = responsesForSlide(await listResponses(active.id), active.id);
-      }
-
-      if (session.presentation_id && session.timeline) {
-        presentationTimeline = session.timeline;
-        const items = [...(presentationTimeline.items || [])].sort((a: any, b: any) => a.order - b.order);
-        const activeItem = items.find((i: any) => i.id === presentationTimeline.active_timeline_item_id);
-        if (activeItem?.slide) {
-          timelineResponses = responsesForSlide(await listResponses(activeItem.slide.id), activeItem.slide.id);
-        }
-      }
+      await loadSessionState();
     } catch (e: any) {
       console.error('[screen] Error in onMount:', e);
       error = e.message || 'Session not found';
@@ -232,16 +231,31 @@
   });
 
   async function handleWsMessage(msg: any) {
+    if (msg.event === '__resync') {
+      try {
+        await loadSessionState();
+      } catch {
+        // Keep the last known state if the resync fails; the next reconnect retries.
+      }
+      return;
+    }
     // Presentation-timeline activation — distinct payload shape from the legacy
     // slide_change (timeline_item_id instead of slide_id), same event name per design.
     if (msg.event === 'slide_change' && msg.data?.timeline_item_id !== undefined) {
+      // Content edits carry activation: false — refresh that item's data
+      // without moving the audience off the item that is actually live.
+      const isActivation = msg.data.activation !== false;
       if (presentationTimeline) {
         presentationTimeline = {
           ...presentationTimeline,
-          active_timeline_item_id: msg.data.timeline_item_id,
+          active_timeline_item_id: isActivation ? msg.data.timeline_item_id : presentationTimeline.active_timeline_item_id,
           items: upsertTimelineItemFromWs(presentationTimeline.items || [], msg.data)
         };
       }
+      if (!isActivation) return;
+      // A playback command belongs to the slide it was issued on; returning
+      // to that video later must start fresh, not replay a stale play/seek.
+      videoCommand = null;
       if (msg.data.slide) {
         try {
           timelineResponses = responsesForSlide(await listResponses(msg.data.slide.id), msg.data.slide.id);
@@ -256,6 +270,10 @@
     }
 
     if (msg.event === 'slide_change') {
+      // The moderator also broadcasts content saves (activation: false) for
+      // slides that are not live — those must not replace what is on screen.
+      if (msg.data?.activation === false && msg.data?.slide?.id !== activeSlide?.id) return;
+      if (msg.data?.activation !== false) videoCommand = null;
       if (msg.data?.slide) {
         // Use the slide data embedded in the message — no HTTP round-trip needed
         const cj = { ...(msg.data.slide.content_json || {}) };
@@ -328,33 +346,17 @@
       if (msg.data?.is_live === false) {
         session = null;
         activeSlide = null;
+        presentationTimeline = null;
+        videoCommand = null;
         error = 'Session has ended.';
-      } else if (msg.data?.is_live === true && session) {
-        // Session just went live - update state and load first slide if available
-        session = { ...session, is_live: true };
-        if (!activeSlide) {
-          const active = session.slides?.find((s: any) => s.is_active);
-          if (active) {
-            activeSlide = { ...active, type: active.type?.toUpperCase() };
-            const fetchedResponses = await listResponses(active.id);
-            responses = fetchedResponses;
-          }
-        }
-        if (session.presentation_id && !presentationTimeline) {
-          try {
-            const fresh = await joinSession(code);
-            session = fresh;
-            if (fresh.timeline) {
-              presentationTimeline = fresh.timeline;
-              const items = [...(fresh.timeline.items || [])].sort((a: any, b: any) => a.order - b.order);
-              const activeItem = items.find((i: any) => i.id === fresh.timeline.active_timeline_item_id);
-              if (activeItem?.slide) {
-                timelineResponses = await listResponses(activeItem.slide.id);
-              }
-            }
-          } catch (err) {
-            console.error('[screen] Failed to load presentation timeline after going live:', err);
-          }
+      } else if (msg.data?.is_live === true) {
+        // Session just went live. `session` is null here when this screen was
+        // opened before going live (join only succeeds for live sessions), so
+        // always load fresh state rather than patching the old object.
+        try {
+          await loadSessionState();
+        } catch (err) {
+          console.error('[screen] Failed to load session after going live:', err);
         }
       }
     } else if (msg.event === 'screen_control') {
