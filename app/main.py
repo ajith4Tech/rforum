@@ -108,7 +108,8 @@ app.add_middleware(
     allow_origins=settings.CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type"],
+    # Idempotency-Key: guest response retries (app/routers/responses.py).
+    allow_headers=["Authorization", "Content-Type", "Idempotency-Key"],
 )
 # Honor X-Forwarded-Proto from Traefik so slash-redirects stay https.
 # Without this, the browser blocks mixed content (http API URLs on an

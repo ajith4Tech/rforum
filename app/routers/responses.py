@@ -1,12 +1,15 @@
 import json
 import logging
 import math
+import re
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import Response as HTTPResponse
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
 from sqlalchemy import delete, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -35,11 +38,38 @@ async def _publish_safe(redis: Redis, channel: str, message: str) -> None:
         logger.warning("redis_publish_failed channel=%s", channel, exc_info=True)
 
 
+# Optional client-chosen key making a submission safe to retry (guests queue
+# responses on their device while offline and resend them on reconnect; a
+# request whose reply was lost may also have been stored already).
+IDEMPOTENCY_HEADER = "Idempotency-Key"
+_IDEMPOTENCY_KEY_RE = re.compile(r"^[A-Za-z0-9_-]{8,100}$")
+# Fixed namespace for deriving response ids from idempotency keys — never change it,
+# or retries of submissions made before the change would no longer deduplicate.
+_RESPONSE_ID_NAMESPACE = uuid.UUID("6f1d2c3e-8a4b-4f7e-9c21-5d0b7e3a9f14")
+
+
+def _idempotent_response_id(slide_uuid: uuid.UUID, guest_identifier: str, key: str) -> uuid.UUID:
+    """Deterministic Response.id for a keyed submission. Retries of the same
+    submission map to the same primary key, so the database itself rejects
+    the duplicate — no schema change, and still correct when Redis is down.
+    Scoped by slide and guest so one guest's key can never match (or replay)
+    another guest's response."""
+    return uuid.uuid5(_RESPONSE_ID_NAMESPACE, f"{slide_uuid}:{guest_identifier}:{key}")
+
+
+async def _find_replay(db: AsyncSession, response_id: uuid.UUID, slide_uuid: uuid.UUID) -> Response | None:
+    result = await db.execute(
+        select(Response).where(Response.id == response_id, Response.slide_id == slide_uuid)
+    )
+    return result.scalar_one_or_none()
+
+
 @router.post("/", response_model=ResponseOut, status_code=201)
 async def submit_response(
     slide_id: str,
     payload: ResponseCreate,
     request: Request,
+    http_response: HTTPResponse,
     db: AsyncSession = Depends(get_db),
 ):
     # Verify slide exists and is active
@@ -47,7 +77,22 @@ async def submit_response(
         slide_uuid = uuid.UUID(slide_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid slide ID format")
-    
+
+    idempotency_key = request.headers.get(IDEMPOTENCY_HEADER)
+    response_id: uuid.UUID | None = None
+    if idempotency_key is not None:
+        if not _IDEMPOTENCY_KEY_RE.match(idempotency_key):
+            raise HTTPException(status_code=422, detail=f"Invalid {IDEMPOTENCY_HEADER} header")
+        response_id = _idempotent_response_id(slide_uuid, payload.guest_identifier, idempotency_key)
+        # Checked before the active/live/rate-limit gates: a retry of a
+        # submission that was already stored must report success even if the
+        # presenter has since moved on, and must not burn rate-limit budget.
+        existing = await _find_replay(db, response_id, slide_uuid)
+        if existing is not None:
+            http_response.status_code = status.HTTP_200_OK
+            http_response.headers["Idempotent-Replay"] = "true"
+            return existing
+
     result = await db.execute(
         select(Slide).where(Slide.id == slide_uuid).options(selectinload(Slide.session))
     )
@@ -147,9 +192,23 @@ async def submit_response(
         response_data["name"] = response_data["name"].strip()
 
     response = Response(slide_id=slide_uuid, **response_data)
+    if response_id is not None:
+        response.id = response_id
     db.add(response)
-    await db.flush()
-    await db.commit()
+    try:
+        await db.flush()
+        await db.commit()
+    except IntegrityError:
+        # A concurrent retry of the same keyed submission inserted it first.
+        await db.rollback()
+        if response_id is None:
+            raise
+        existing = await _find_replay(db, response_id, slide_uuid)
+        if existing is None:
+            raise
+        http_response.status_code = status.HTTP_200_OK
+        http_response.headers["Idempotent-Replay"] = "true"
+        return existing
     # No db.refresh() needed here: expire_on_commit=False (app/database.py)
     # keeps flush()'s already-populated values (id/upvotes are Python-side
     # defaults; created_at is filled in via Postgres RETURNING on flush)
