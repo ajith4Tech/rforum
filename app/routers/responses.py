@@ -470,7 +470,8 @@ async def clear_responses(
     # live event below can still answer again after reconnecting.
     # The increment is atomic and touches only that key (see
     # _INCREMENT_CLEAR_COUNT_SQL), and it comes FIRST: its row lock makes
-    # in-flight submissions finish before the delete (or wait for this clear).
+    # in-flight submissions finish before the delete (or wait for this clear),
+    # and moderator edits lock the same row before reading it.
     cleared_count = await db.scalar(
         _INCREMENT_CLEAR_COUNT_SQL, {"key": RESPONSES_CLEARED_KEY, "slide_id": slide_uuid}
     )

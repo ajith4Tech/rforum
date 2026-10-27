@@ -153,8 +153,24 @@ async def update_slide(
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid ID format")
 
+    # Row lock until commit: content_json is read, merged and written back
+    # whole below, so a concurrent response clear (which bumps the
+    # server-owned responses_cleared key) must not interleave — the clear waits
+    # for this edit, or this read waits for the clear and sees its counter.
+    # populate_existing makes the locked read win over any identity-mapped copy.
+    # Activation also updates every slide of the session below: lock them all
+    # first, in a fixed order, so two overlapping activations (e.g. rapid Deck
+    # View clicks) queue instead of each holding its own slide and deadlocking
+    # on the other's. Clears and guest submissions lock only one slide row.
+    if payload.is_active:
+        await db.execute(
+            select(Slide.id).where(Slide.session_id == session_uuid).order_by(Slide.id).with_for_update()
+        )
     result = await db.execute(
-        select(Slide).where(Slide.id == slide_uuid, Slide.session_id == session_uuid)
+        select(Slide)
+        .where(Slide.id == slide_uuid, Slide.session_id == session_uuid)
+        .with_for_update()
+        .execution_options(populate_existing=True)
     )
     slide = result.scalar_one_or_none()
     if not slide:

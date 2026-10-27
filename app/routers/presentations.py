@@ -1281,7 +1281,18 @@ async def update_timeline_item(
     if item.item_type == TimelineItemType.PAGE or item.slide_id is None:
         raise HTTPException(status_code=400, detail="Cannot edit content of a presentation page")
 
-    existing = dict(item.slide.content_json) if item.slide is not None else {}
+    # Re-read the slide under a row lock held until commit (populate_existing
+    # replaces the copy _get_owned_item loaded without one): content_json is
+    # merged and written back whole, so a concurrent response clear (which
+    # bumps the server-owned responses_cleared key) must not interleave.
+    locked = await db.execute(
+        select(Slide)
+        .where(Slide.id == item.slide_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    slide = locked.scalar_one_or_none()
+    existing = dict(slide.content_json) if slide is not None else {}
     content_json = sanitize_slide_content_json(merge_slide_content_json(existing, payload.content_json))
     if item.item_type == TimelineItemType.RATING:
         content_json["mode"] = "rating_only"
