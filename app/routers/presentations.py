@@ -31,7 +31,7 @@ from sqlalchemy.orm import selectinload
 import json
 
 from app.auth import get_current_user
-from app.services.guest_view import merge_slide_content_json
+from app.services.guest_view import merge_slide_content_json, without_server_owned_keys
 from app.services.slide_content import quiz_content_error, sanitize_slide_content_json
 from app.config import get_settings
 from app.database import get_db
@@ -1234,7 +1234,7 @@ async def insert_timeline_item(
 
     position = min(payload.position, len(timeline.items))
     slide_type = _INTERACTION_TYPE_TO_SLIDE_TYPE[payload.item_type]
-    content_json = sanitize_slide_content_json(payload.content_json)
+    content_json = without_server_owned_keys(sanitize_slide_content_json(payload.content_json))
     if payload.item_type == TimelineItemType.RATING:
         content_json["mode"] = "rating_only"
     quiz_error = quiz_content_error(content_json)

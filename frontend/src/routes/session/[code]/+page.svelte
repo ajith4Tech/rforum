@@ -3,13 +3,14 @@
   import { RforumWebSocket } from '$lib/ws';
   import type { ConnectionStatus as WsStatus } from '$lib/ws';
   import { theme, toggleTheme } from '$lib/theme';
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount, onDestroy, untrack } from 'svelte';
   import PresentationLiveView from '$lib/components/timeline/PresentationLiveView.svelte';
   import InteractionView from '$lib/components/timeline/InteractionView.svelte';
   import ContentSlideCanvas from '$lib/components/ContentSlideCanvas.svelte';
   import { upsertTimelineItemFromWs } from '$lib/timelineTypes';
   import { getFitTitleStyle, mergeResponsesById, responsesForSlide } from '$lib/fitTitle';
   import { HiddenResponseTracker } from '$lib/hiddenResponses';
+  import { forgetAnswered, reconcileAnsweredWithClears } from '$lib/respondedState';
   import { startAutoFlush, flushPending, rejectedSubmissions, dismissRejected } from '$lib/responseQueue';
   import {
     Orbit, Send, ChevronUp, BarChart3, MessageSquare, AlignLeft, CheckCircle2, Cloud, Sun, Moon
@@ -27,6 +28,9 @@
   const hiddenResponses = new HiddenResponseTracker();
   const shownResponses = $derived(responses.filter(hiddenResponses.isShown));
   const shownTimelineResponses = $derived(timelineResponses.filter(hiddenResponses.isShown));
+  // Bumped when the moderator clears the shown slide's responses: remounts the
+  // response form so a guest who already answered can answer again.
+  let responsesResetCount = $state(0);
   const activeTimelineItem = $derived(
     presentationTimeline
       ? [...(presentationTimeline.items || [])].sort((a: any, b: any) => a.order - b.order)
@@ -104,6 +108,15 @@
         await processMessageQueue();
       }
     }
+  }
+
+  /** Run `task` in the message queue: WS messages arriving meanwhile are
+   * handled after it, on top of its result, instead of being overwritten by
+   * it (e.g. a new or unhidden response arriving during the initial load). */
+  function runSerialized(task: () => Promise<void>): Promise<void> {
+    return new Promise((resolve, reject) => {
+      queueMessage({ event: '__task', run: () => task().then(resolve, reject) });
+    });
   }
 
   function queueMessage(msg: any) {
@@ -205,6 +218,18 @@
     timelineResponses = nextTimelineResponses;
   }
   
+  // A clear this guest missed (e.g. while disconnected) shows up as a higher
+  // responses_cleared count in the slide data from a join/resync or a later
+  // slide_change: drop the stale "already answered" state and reset the form.
+  $effect(() => {
+    const id = guestId;
+    let reset = false;
+    for (const slide of [activeSlide, activeTimelineItem?.slide]) {
+      if (slide && reconcileAnsweredWithClears(id, slide)) reset = true;
+    }
+    if (reset) untrack(() => { responsesResetCount += 1; });
+  });
+
   onMount(async () => {
     // Generate guest ID
     const storedGuestId = typeof localStorage !== 'undefined' ? localStorage.getItem('rforum_guest_id') : null;
@@ -235,7 +260,7 @@
     ws.connect();
 
     try {
-      await loadSessionState();
+      await runSerialized(loadSessionState);
     } catch (e: any) {
       error = e.message || 'Session not found';
     } finally {
@@ -258,6 +283,11 @@
   });
 
   async function handleWsMessage(msg: any) {
+    if (msg.event === '__task') {
+      // Local-only (see runSerialized): a server message can't carry a function.
+      if (typeof msg.run === 'function') await msg.run();
+      return;
+    }
     if (msg.event === '__resync') {
       try {
         await loadSessionState();
@@ -285,7 +315,7 @@
       if (!isActivation) return;
       if (msg.data.slide) {
         try {
-          timelineResponses = responsesForSlide(await listResponses(msg.data.slide.id), msg.data.slide.id);
+          timelineResponses = await fetchFreshResponses(msg.data.slide.id);
         } catch (err) {
           console.error('Failed to load responses for new timeline item:', err);
           timelineResponses = [];
@@ -309,7 +339,7 @@
         inputValue = '';
         // Always reload responses for the new slide to prevent stale data
         try {
-          responses = responsesForSlide(await listResponses(msg.data.slide.id), msg.data.slide.id);
+          responses = await fetchFreshResponses(msg.data.slide.id);
         } catch (err) {
           console.error('Failed to load responses for new slide:', err);
           responses = [];
@@ -323,7 +353,7 @@
           restoreSubmittedState(activeSlide);
           inputValue = '';
           if (active) {
-            responses = responsesForSlide(await listResponses(active.id), active.id);
+            responses = await fetchFreshResponses(active.id);
           } else {
             responses = [];
           }
@@ -348,6 +378,26 @@
       if (clearedId === activeTimelineItem?.slide?.id) timelineResponses = [];
       responses = responses.filter((r) => r.slide_id !== clearedId);
       timelineResponses = timelineResponses.filter((r) => r.slide_id !== clearedId);
+      const clearedCount = msg.data?.responses_cleared;
+      if (typeof clearedCount !== 'number') {
+        // Older server without the count: this guest's earlier answer was
+        // deleted too — let them respond again.
+        forgetAnswered(guestId, clearedId);
+        if (clearedId === activeSlide?.id || clearedId === activeTimelineItem?.slide?.id) responsesResetCount += 1;
+      } else {
+        // Update the local slide copies' clear count; the reconciliation
+        // effect above then resets the form only if this guest's recorded
+        // answer predates this clear — not one still queued on this device,
+        // which the clear could not have removed.
+        const withCount = (slide: any) => ({ ...slide, content_json: { ...(slide.content_json || {}), responses_cleared: clearedCount } });
+        if (activeSlide?.id === clearedId) activeSlide = withCount(activeSlide);
+        if (presentationTimeline) {
+          presentationTimeline = {
+            ...presentationTimeline,
+            items: (presentationTimeline.items || []).map((i: any) => (i.slide?.id === clearedId ? { ...i, slide: withCount(i.slide) } : i))
+          };
+        }
+      }
     } else if (msg.event === 'response_hidden') {
       const hiddenId = msg.data?.id;
       if (!hiddenId) return;
@@ -555,15 +605,17 @@
       </div>
     {:else if session?.presentation_id}
       <div class="w-full max-w-lg animate-fade-in mt-6">
-        <PresentationLiveView
-          activeItem={activeTimelineItem}
-          presentationId={session.presentation_id}
-          sessionId={session.id}
-          sessionCode={code || session?.unique_code || ''}
-          responses={shownTimelineResponses}
-          variant="guest"
-          {guestId}
-        />
+        {#key responsesResetCount}
+          <PresentationLiveView
+            activeItem={activeTimelineItem}
+            presentationId={session.presentation_id}
+            sessionId={session.id}
+            sessionCode={code || session?.unique_code || ''}
+            responses={shownTimelineResponses}
+            variant="guest"
+            {guestId}
+          />
+        {/key}
       </div>
     {:else}
       <div class="w-full max-w-lg animate-fade-in mt-6">
@@ -572,13 +624,15 @@
             <ContentSlideCanvas slide={activeSlide} sessionId={session?.id} sessionCode={code} variant="guest" />
           </div>
         {:else}
-          <InteractionView
-            slide={activeSlide}
-            responses={shownResponses}
-            variant="guest"
-            {guestId}
-            sessionCode={code}
-          />
+          {#key responsesResetCount}
+            <InteractionView
+              slide={activeSlide}
+              responses={shownResponses}
+              variant="guest"
+              {guestId}
+              sessionCode={code}
+            />
+          {/key}
         {/if}
       </div>
     {/if}

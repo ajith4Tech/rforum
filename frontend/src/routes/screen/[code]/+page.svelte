@@ -117,6 +117,15 @@
     }
   }
 
+  /** Run `task` in the message queue: WS messages arriving meanwhile are
+   * handled after it, on top of its result, instead of being overwritten by
+   * it (e.g. a new or unhidden response arriving during the initial load). */
+  function runSerialized(task: () => Promise<void>): Promise<void> {
+    return new Promise((resolve, reject) => {
+      queueMessage({ event: '__task', run: () => task().then(resolve, reject) });
+    });
+  }
+
   function queueMessage(msg: any) {
     messageQueue.push(msg);
     processMessageQueue();
@@ -297,7 +306,7 @@
     screenControlPollTimer = setInterval(pollScreenControl, 2000);
 
     try {
-      await loadSessionState();
+      await runSerialized(loadSessionState);
     } catch (e: any) {
       console.error('[screen] Error in onMount:', e);
       error = e.message || 'Session not found';
@@ -313,6 +322,11 @@
   });
 
   async function handleWsMessage(msg: any) {
+    if (msg.event === '__task') {
+      // Local-only (see runSerialized): a server message can't carry a function.
+      if (typeof msg.run === 'function') await msg.run();
+      return;
+    }
     if (msg.event === '__resync') {
       try {
         await loadSessionState();
@@ -340,7 +354,7 @@
       videoCommand = null;
       if (msg.data.slide) {
         try {
-          timelineResponses = responsesForSlide(await listResponses(msg.data.slide.id), msg.data.slide.id);
+          timelineResponses = await fetchFreshResponses(msg.data.slide.id);
         } catch (err) {
           console.error('[screen] Failed to load responses for new timeline item:', err);
           timelineResponses = [];
@@ -367,15 +381,13 @@
         // Reload immediately with a small delay to ensure DB is updated
         try {
           await new Promise(resolve => setTimeout(resolve, 100));
-          const fetchedResponses = await listResponses(msg.data.slide.id);
-          responses = fetchedResponses;
+          responses = await fetchFreshResponses(msg.data.slide.id);
         } catch (err) {
           console.error('[screen] Failed to load responses for new slide:', err);
           // Retry once more after delay
           await new Promise(resolve => setTimeout(resolve, 200));
           try {
-            const retryResponses = await listResponses(msg.data.slide.id);
-            responses = retryResponses;
+            responses = await fetchFreshResponses(msg.data.slide.id);
           } catch (retryErr) {
             console.error('[screen] Retry also failed:', retryErr);
             responses = [];
@@ -388,8 +400,7 @@
           activeSlide = active ? { ...active, type: active.type?.toUpperCase() } : null;
           if (active) {
             await new Promise(resolve => setTimeout(resolve, 100));
-            const fetchedResponses = await listResponses(active.id);
-            responses = fetchedResponses;
+            responses = await fetchFreshResponses(active.id);
           } else {
             responses = [];
           }

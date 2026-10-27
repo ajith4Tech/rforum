@@ -24,6 +24,7 @@
   } from 'lucide-svelte';
   import { getFitTitleStyle } from '$lib/fitTitle';
   import { validQuizAnswer, quizSaveError } from '$lib/quiz';
+  import { recordAnsweredClearCount, forgetAnswered, responsesClearedCount } from '$lib/respondedState';
 
   let {
     slide,
@@ -152,34 +153,45 @@
       return {};
     }
   }
-  function markResponded(slideId: string, value: string) {
+  /** `clearCount`: the server's responses_cleared for the stored answer, or
+   * null while it is only queued — lets the guest page tell later whether a
+   * moderator clear came after this answer (see $lib/respondedState). */
+  function markResponded(slideId: string, value: string, clearCount: number | null) {
     if (!guestId || typeof localStorage === 'undefined') return;
     try {
       const map = getRespondedMap();
       map[slideId] = value;
       localStorage.setItem(respondedStorageKey(), JSON.stringify(map));
     } catch {}
+    recordAnsweredClearCount(guestId, slideId, clearCount);
   }
   function unmarkResponded(slideId: string) {
-    if (!guestId || typeof localStorage === 'undefined') return;
-    try {
-      const map = getRespondedMap();
-      delete map[slideId];
-      localStorage.setItem(respondedStorageKey(), JSON.stringify(map));
-    } catch {}
+    forgetAnswered(guestId, slideId);
   }
 
   /** Sends through the durable per-session queue when we know the session
    * (guest pages always pass it); otherwise a plain one-shot request.
    * Resolves 'queued' when the response is saved on this device but not yet
    * acknowledged by the server — never presented as delivered. */
-  async function sendGuestResponse(value: string, name?: string, rating?: number): Promise<'confirmed' | 'queued'> {
+  async function sendGuestResponse(
+    value: string,
+    name?: string,
+    rating?: number
+  ): Promise<{ slideId: string; state: 'confirmed' | 'queued'; clearCount: number | null }> {
+    // Captured before the request: the shown slide can change while it is in flight.
+    const target = slide;
+    // The server returns the clear count its stored response belongs to; an
+    // older backend doesn't, so fall back to the count known at submit time.
+    const clearCountOf = (response: any) =>
+      typeof response?.responses_cleared === 'number' ? response.responses_cleared : responsesClearedCount(target);
     if (!sessionCode) {
-      await submitResponse(slide.id, value, guestId, name, rating);
-      return 'confirmed';
+      const response = await submitResponse(target.id, value, guestId, name, rating);
+      return { slideId: target.id, state: 'confirmed', clearCount: clearCountOf(response) };
     }
-    const outcome = await submitWithQueue({ sessionCode, slideId: slide.id, guestId, value, name, rating });
-    return outcome.state;
+    const outcome = await submitWithQueue({ sessionCode, slideId: target.id, guestId, value, name, rating });
+    return outcome.state === 'confirmed'
+      ? { slideId: target.id, state: 'confirmed', clearCount: clearCountOf(outcome.response) }
+      : { slideId: target.id, state: 'queued', clearCount: null };
   }
 
   // ── Draft persistence (guest) ─────────────────────────────────────
@@ -313,8 +325,8 @@
     selectedOption = option;
     submitted = true;
     try {
-      await sendGuestResponse(option);
-      markResponded(slide.id, option);
+      const sent = await sendGuestResponse(option);
+      markResponded(sent.slideId, option, sent.clearCount);
     } catch (err: any) {
       actionError = err?.message || 'Could not submit vote';
       submitted = false;
@@ -337,8 +349,8 @@
     selectedOption = pendingOptions.join(', ');
     const payload = JSON.stringify(pendingOptions);
     try {
-      await sendGuestResponse(payload);
-      markResponded(slide.id, payload);
+      const sent = await sendGuestResponse(payload);
+      markResponded(sent.slideId, payload, sent.clearCount);
     } catch (err: any) {
       actionError = err?.message || 'Could not submit answer';
       submitted = false;
@@ -351,9 +363,9 @@
     isSubmitting = true;
     try {
       const trimmedName = guestName.trim() || 'Guest';
-      await sendGuestResponse(String(scaleRating), trimmedName !== 'Guest' ? trimmedName : undefined);
+      const sent = await sendGuestResponse(String(scaleRating), trimmedName !== 'Guest' ? trimmedName : undefined);
       submitted = true;
-      markResponded(slide.id, String(scaleRating));
+      markResponded(sent.slideId, String(scaleRating), sent.clearCount);
     } catch (err: any) {
       actionError = err?.message || 'Could not submit rating';
     } finally {
@@ -372,9 +384,9 @@
     try {
       const trimmedName = guestName.trim() || 'Guest';
       const payloadStr = JSON.stringify({ answers: surveyAnswers });
-      await sendGuestResponse(payloadStr, trimmedName !== 'Guest' ? trimmedName : undefined);
+      const sent = await sendGuestResponse(payloadStr, trimmedName !== 'Guest' ? trimmedName : undefined);
       submitted = true;
-      markResponded(slide.id, 'survey_submitted');
+      markResponded(sent.slideId, 'survey_submitted', sent.clearCount);
     } catch (err: any) {
       actionError = err?.message || 'Could not submit survey';
     } finally {
@@ -390,7 +402,7 @@
     isSubmitting = true;
     try {
       const trimmedName = guestName.trim() || 'Guest';
-      await sendGuestResponse(
+      const sent = await sendGuestResponse(
         isRatingOnly ? String(starRating) : inputValue.trim(),
         trimmedName !== 'Guest' ? trimmedName : undefined,
         slide.type === 'FEEDBACK' ? (isRatingOnly ? starRating : undefined) : undefined
@@ -399,7 +411,7 @@
       actionError = '';
       if (slide.type === 'FEEDBACK') {
         submitted = true;
-        markResponded(slide.id, isRatingOnly ? String(starRating) : 'submitted');
+        markResponded(sent.slideId, isRatingOnly ? String(starRating) : 'submitted', sent.clearCount);
       } else {
         guestName = trimmedName;
         thankYou = true;

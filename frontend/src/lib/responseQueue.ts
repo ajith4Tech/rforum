@@ -18,6 +18,7 @@
  */
 import { writable } from 'svelte/store';
 import { submitResponse, isConnectivityError, ApiError } from './api';
+import { confirmQueuedAnswerClearCount } from './respondedState';
 
 export interface QueuedResponse {
   /** Idempotency key — also the IndexedDB primary key. */
@@ -211,7 +212,10 @@ export async function flushPending(sessionCode: string): Promise<void> {
         continue;
       }
       try {
-        await send(entry);
+        const response: any = await send(entry);
+        // The answer's "already answered" state was recorded as pending; the
+        // server's count says whether it now predates a later clear.
+        confirmQueuedAnswerClearCount(entry.guestId, entry.slideId, response?.responses_cleared);
         await deleteEntry(entry.id);
         lastConfirmed.set({ slideId: entry.slideId, at: Date.now() });
       } catch (err) {

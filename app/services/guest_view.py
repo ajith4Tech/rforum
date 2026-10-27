@@ -17,6 +17,22 @@ _PRESERVED_FILE_KEYS = (
     "has_file",
 )
 
+# Keys only the server writes. `responses_cleared` counts how often the
+# moderator cleared a slide's responses (app/routers/responses.py); guests
+# compare it with the count recorded when they answered, so a clear they
+# missed while disconnected still resets their "already answered" state.
+# A client copy may be stale, so client-sent values are always ignored.
+RESPONSES_CLEARED_KEY = "responses_cleared"
+_SERVER_OWNED_KEYS = (RESPONSES_CLEARED_KEY,)
+
+
+def without_server_owned_keys(content_json: dict | None) -> dict:
+    """Copy of a client-supplied content_json for a NEW slide (e.g. a duplicate) with server-owned keys removed."""
+    cj = dict(content_json or {})
+    for key in _SERVER_OWNED_KEYS:
+        cj.pop(key, None)
+    return cj
+
 
 def strip_slide_content_json(content_json: dict) -> dict:
     """
@@ -39,7 +55,8 @@ def strip_slide_content_json(content_json: dict) -> dict:
 def merge_slide_content_json(existing: dict | None, incoming: dict | None) -> dict:
     """
     Apply an editor PATCH without dropping persisted file/layout fields the
-    client omitted. Does not restore keys the client explicitly sent.
+    client omitted. Does not restore keys the client explicitly sent — except
+    server-owned keys, which always keep their stored value.
     """
     merged = dict(incoming or {})
     src = dict(existing or {})
@@ -48,4 +65,9 @@ def merge_slide_content_json(existing: dict | None, incoming: dict | None) -> di
             merged[key] = src[key]
     if "layout" not in merged and "layout" in src:
         merged["layout"] = src["layout"]
+    for key in _SERVER_OWNED_KEYS:
+        if key in src:
+            merged[key] = src[key]
+        else:
+            merged.pop(key, None)
     return merged

@@ -29,7 +29,7 @@ from app.services.file_processing import (
     extract_total_pages,
     validate_upload,
 )
-from app.services.guest_view import merge_slide_content_json
+from app.services.guest_view import merge_slide_content_json, without_server_owned_keys
 from app.services.slide_content import quiz_content_error, sanitize_slide_content_json
 
 logger = logging.getLogger(__name__)
@@ -107,7 +107,7 @@ async def create_slide(
     _ensure_not_presentation_session(session)
 
     data = payload.model_dump()
-    data["content_json"] = sanitize_slide_content_json(data.get("content_json"))
+    data["content_json"] = without_server_owned_keys(sanitize_slide_content_json(data.get("content_json")))
     quiz_error = quiz_content_error(data["content_json"])
     if quiz_error:
         raise HTTPException(status_code=422, detail=quiz_error)

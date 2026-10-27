@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi import Response as HTTPResponse
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -18,7 +18,8 @@ from app.config import get_settings
 from app.database import get_db
 from app.models import Response, Slide, User, UserRole
 from app.rate_limit import check_rate_limit
-from app.schemas import ResponseCreate, ResponseModerationUpdate, ResponseOut
+from app.schemas import ResponseCreate, ResponseModerationUpdate, ResponseOut, ResponseSubmitOut
+from app.services.guest_view import RESPONSES_CLEARED_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +65,63 @@ async def _find_replay(db: AsyncSession, response_id: uuid.UUID, slide_uuid: uui
     return result.scalar_one_or_none()
 
 
-@router.post("/", response_model=ResponseOut, status_code=201)
+def _parse_clear_count(value: object) -> int:
+    # Same rule as the clear's SQL increment: missing or non-numeric counts as 0.
+    try:
+        return max(int(str(value)), 0) if value is not None else 0
+    except ValueError:
+        return 0
+
+
+async def _lock_clear_count(db: AsyncSession, slide_uuid: uuid.UUID) -> int:
+    """The slide's responses_cleared count, read under a FOR SHARE lock on the
+    slide row that is held until this transaction ends.
+
+    A clear first updates that row (conflicting with the share lock), then
+    deletes the slide's responses. So a clear either committed before this
+    read — anything this request stores comes after it and is reported with
+    the new count — or waits until this request's transaction ends and then
+    deletes what it stored, which was reported with the count from before
+    that clear. Either way the reported count tells the guest whether their
+    answer predates a clear. Concurrent submissions' share locks don't
+    conflict with each other.
+    """
+    value = await db.scalar(
+        select(Slide.content_json[RESPONSES_CLEARED_KEY].astext)
+        .where(Slide.id == slide_uuid)
+        .with_for_update(read=True)
+    )
+    return _parse_clear_count(value)
+
+
+def _submit_out(response: Response, cleared_count: int) -> ResponseSubmitOut:
+    return ResponseSubmitOut(**ResponseOut.model_validate(response).model_dump(), responses_cleared=cleared_count)
+
+
+# Bumps content_json.responses_cleared in a single statement evaluated against
+# the row's latest committed version (an UPDATE waits for, then re-reads, a row
+# another transaction is changing), so no other key is overwritten and no
+# concurrent edit can be lost. The column is JSON, so it round-trips through
+# jsonb for jsonb_set. A missing or non-numeric counter counts as 0, and
+# non-object content is treated as {}.
+_INCREMENT_CLEAR_COUNT_SQL = text("""
+    UPDATE slides
+    SET content_json = jsonb_set(
+        CASE WHEN json_typeof(content_json) = 'object' THEN content_json::jsonb ELSE '{}'::jsonb END,
+        ARRAY[CAST(:key AS text)],
+        to_jsonb(
+            CASE WHEN (content_json ->> CAST(:key AS text)) ~ '^[0-9]{1,9}$'
+                 THEN (content_json ->> CAST(:key AS text))::int
+                 ELSE 0
+            END + 1
+        )
+    )::json
+    WHERE id = :slide_id
+    RETURNING (content_json ->> CAST(:key AS text))::int
+""")
+
+
+@router.post("/", response_model=ResponseSubmitOut, status_code=201)
 async def submit_response(
     slide_id: str,
     payload: ResponseCreate,
@@ -77,6 +134,10 @@ async def submit_response(
         slide_uuid = uuid.UUID(slide_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid slide ID format")
+
+    # Taken first so the replay check below and the insert are both
+    # consistent with the reported clear count (see _lock_clear_count).
+    cleared_count = await _lock_clear_count(db, slide_uuid)
 
     idempotency_key = request.headers.get(IDEMPOTENCY_HEADER)
     response_id: uuid.UUID | None = None
@@ -91,7 +152,7 @@ async def submit_response(
         if existing is not None:
             http_response.status_code = status.HTTP_200_OK
             http_response.headers["Idempotent-Replay"] = "true"
-            return existing
+            return _submit_out(existing, cleared_count)
 
     result = await db.execute(
         select(Slide).where(Slide.id == slide_uuid).options(selectinload(Slide.session))
@@ -203,12 +264,15 @@ async def submit_response(
         await db.rollback()
         if response_id is None:
             raise
+        # The rollback released the share lock: re-take it before looking up
+        # the stored copy, so the reported count still matches it.
+        cleared_count = await _lock_clear_count(db, slide_uuid)
         existing = await _find_replay(db, response_id, slide_uuid)
         if existing is None:
             raise
         http_response.status_code = status.HTTP_200_OK
         http_response.headers["Idempotent-Replay"] = "true"
-        return existing
+        return _submit_out(existing, cleared_count)
     # No db.refresh() needed here: expire_on_commit=False (app/database.py)
     # keeps flush()'s already-populated values (id/upvotes are Python-side
     # defaults; created_at is filled in via Postgres RETURNING on flush)
@@ -224,7 +288,7 @@ async def submit_response(
         json.dumps({"event": "new_response", "data": out.model_dump(mode="json")}),
     )
 
-    return response
+    return _submit_out(response, cleared_count)
 
 
 @router.get("/", response_model=list[ResponseOut])
@@ -400,7 +464,16 @@ async def clear_responses(
     if user.role != UserRole.SUPER_ADMIN and slide.session.owner_id != user.id:
         raise HTTPException(status_code=403, detail="Not authorized to clear responses")
 
-    # Delete all responses for this slide
+    # Bump the slide's clear counter, then delete its responses, in one
+    # transaction. Guests compare the counter (part of every join/resync
+    # payload) with the one returned when they answered, so one who missed the
+    # live event below can still answer again after reconnecting.
+    # The increment is atomic and touches only that key (see
+    # _INCREMENT_CLEAR_COUNT_SQL), and it comes FIRST: its row lock makes
+    # in-flight submissions finish before the delete (or wait for this clear).
+    cleared_count = await db.scalar(
+        _INCREMENT_CLEAR_COUNT_SQL, {"key": RESPONSES_CLEARED_KEY, "slide_id": slide_uuid}
+    )
     await db.execute(delete(Response).where(Response.slide_id == slide_uuid))
     await db.commit()
 
@@ -410,6 +483,9 @@ async def clear_responses(
     await _publish_safe(
         redis,
         f"session:{session_code}",
-        json.dumps({"event": "clear_responses", "data": {"slide_id": str(slide_uuid)}}),
+        json.dumps({
+            "event": "clear_responses",
+            "data": {"slide_id": str(slide_uuid), RESPONSES_CLEARED_KEY: cleared_count},
+        }),
     )
 

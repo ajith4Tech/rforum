@@ -461,6 +461,13 @@ class ResponseModerationUpdate(BaseModel):
     is_hidden: bool
 
 
+class ResponseSubmitOut(ResponseOut):
+    """POST response: the stored response plus the slide's responses_cleared
+    count it belongs to (app/routers/responses.py::_lock_clear_count) — guests
+    record it so a later moderator clear can be told apart from this answer."""
+    responses_cleared: int = 0
+
+
 # ── Session Assets ────────────────────────────────────
 class SessionAssetOut(BaseModel):
     id: uuid.UUID
