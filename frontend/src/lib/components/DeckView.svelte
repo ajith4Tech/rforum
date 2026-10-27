@@ -16,7 +16,7 @@
     session, presentation = null, timeline = null, slides = [], activeSlideId = null,
     responses = [], wsStatus = 'disconnected' as WsStatus, onSelect, onEdit, onPresent, onToggleLive,
     onRefreshPresentation = undefined, onMaximizeQr = undefined, onToggleRevealAnswer = undefined,
-    onVideoControl = undefined, onSetResponseHidden = undefined, onClearResponses = undefined,
+    onVideoControl = undefined, liveToggleBusy = false, onSetResponseHidden = undefined, onClearResponses = undefined,
   }: {
     session: any; presentation?: any; timeline?: any; slides?: any[]; activeSlideId?: string | null;
     responses?: any[]; wsStatus?: WsStatus; onSelect: (id: string) => void; onEdit: () => void;
@@ -28,6 +28,8 @@
     /** Called when the moderator interacts with an embedded video player so
      *  the action can be broadcast to the main screen. */
     onVideoControl?: (payload: VideoControlPayload) => void;
+    /** True while a start/end-session request is in flight. */
+    liveToggleBusy?: boolean;
     /** Moderation: hide/unhide one response, or clear every response of a slide. */
     onSetResponseHidden?: (slideId: string, responseId: string, hidden: boolean) => void;
     onClearResponses?: (slideId: string) => void;
@@ -103,7 +105,7 @@
       <p class="mt-0.5 text-sm text-surface-500">{items.length} {items.length === 1 ? 'slide' : 'slides'} · {session?.is_live ? 'Live' : 'Not live'}</p>
     </div>
     <div class="flex flex-wrap gap-2">
-      <button class="flex items-center gap-2 {session?.is_live ? 'rounded-xl px-4 py-2.5 text-sm font-semibold border border-red-200 bg-red-50 text-red-600 hover:bg-red-100 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-400 dark:hover:bg-red-950/50' : 'btn-secondary'}" onclick={onToggleLive}><Radio class="w-4 h-4" />{session?.is_live ? 'End session' : 'Go live'}</button>
+      <button class="flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed {session?.is_live ? 'rounded-xl px-4 py-2.5 text-sm font-semibold border border-red-200 bg-red-50 text-red-600 hover:bg-red-100 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-400 dark:hover:bg-red-950/50' : 'btn-secondary'}" onclick={onToggleLive} disabled={liveToggleBusy} aria-busy={liveToggleBusy}><Radio class="w-4 h-4" />{#if liveToggleBusy}{session?.is_live ? 'Ending…' : 'Starting…'}{:else}{session?.is_live ? 'End session' : 'Go live'}{/if}</button>
       <button class="btn-secondary flex items-center gap-2" onclick={onEdit}><Pencil class="w-4 h-4" />Edit</button>
       <button class="btn-primary flex items-center gap-2" onclick={() => onPresent(selectedId)}><MonitorPlay class="w-4 h-4" />Present</button>
       {#if isQuizSelected && onToggleRevealAnswer}

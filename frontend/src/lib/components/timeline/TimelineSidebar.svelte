@@ -14,6 +14,7 @@
     activeItemId = null,
     liveItemId = null,
     wsStatus = 'disconnected' as WsStatus,
+    liveToggleBusy = false,
     onToggleLive,
     onSelect,
     onInsert,
@@ -30,6 +31,8 @@
     activeItemId: string | null;
     liveItemId?: string | null;
     wsStatus: WsStatus;
+    /** True while a start/end-session request is in flight. */
+    liveToggleBusy?: boolean;
     onToggleLive: () => void;
     onSelect: (itemId: string) => void;
     onInsert: (itemType: string, position: number) => void;
@@ -116,12 +119,14 @@
     <div class="text-xs text-slate-500 font-mono mb-4">{session?.unique_code}</div>
     <button
       onclick={onToggleLive}
-      class="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all active:scale-95 {session?.is_live
+      disabled={liveToggleBusy}
+      aria-busy={liveToggleBusy}
+      class="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed {session?.is_live
         ? 'bg-red-500/10 text-red-500 border border-red-500/20 hover:bg-red-500/20'
         : 'bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white shadow-lg shadow-purple-500/20'}"
     >
       <Radio class="w-4 h-4" />
-      {session?.is_live ? 'Stop session' : 'Start session'}
+      {#if liveToggleBusy}{session?.is_live ? 'Stopping…' : 'Starting…'}{:else}{session?.is_live ? 'Stop session' : 'Start session'}{/if}
     </button>
   </div>
 

@@ -175,6 +175,11 @@
     saveErrorTimeout = setTimeout(() => { saveError = ''; }, 4000);
   }
 
+  // ── Start / end session ──
+  let liveToggleBusy = $state(false);
+  let endSessionConfirmOpen = $state(false);
+  let endSessionError = $state('');
+
   // ── Response moderation (hide one / clear all for a slide) ──
   let clearConfirmSlideId = $state<string | null>(null);
   let clearingResponses = $state(false);
@@ -498,8 +503,13 @@
     // where a guest's image request lands in that gap and gets a 401
     // (renders as a broken-image icon). The moderator's own view never
     // notices this since it authenticates via JWT, not the is_live check.
+    if (liveToggleBusy) return;
     if (!session?.is_live) {
-      await toggleLive();
+      const error = await setLive(true);
+      if (error) {
+        showSaveError(error);
+        return;
+      }
     }
     const targetId = itemId || previewItemId || timeline?.active_timeline_item_id || activeSlideId;
     if (targetId) {
@@ -509,9 +519,45 @@
     openPresentation();
   }
 
-  async function toggleLive() {
-    session = await updateSession(sessionId, { is_live: !session.is_live });
-    ws?.send('session_update', { is_live: session.is_live });
+  /** Start or end the session. Resolves to an error message on failure
+   * (never throws), or null on success. */
+  async function setLive(next: boolean): Promise<string | null> {
+    if (liveToggleBusy) return null;
+    liveToggleBusy = true;
+    try {
+      session = await updateSession(sessionId, { is_live: next });
+      ws?.send('session_update', { is_live: session.is_live });
+      return null;
+    } catch (err) {
+      const action = next ? 'start' : 'end';
+      return `Could not ${action} the session${err instanceof Error && err.message ? `: ${err.message}` : ''}. Try again.`;
+    } finally {
+      liveToggleBusy = false;
+    }
+  }
+
+  /** Going live is immediate; ending removes every guest from the session, so
+   * it goes through a confirmation dialog first. */
+  async function requestToggleLive() {
+    if (!session || liveToggleBusy) return;
+    if (session.is_live) {
+      endSessionError = '';
+      endSessionConfirmOpen = true;
+      return;
+    }
+    const error = await setLive(true);
+    if (error) showSaveError(error);
+  }
+
+  async function confirmEndSession() {
+    const error = await setLive(false);
+    if (error) endSessionError = error;
+    else endSessionConfirmOpen = false;
+  }
+
+  function cancelEndSession() {
+    if (liveToggleBusy) return;
+    endSessionConfirmOpen = false;
   }
 
   function markResponseHidden(responseId: string | undefined, hidden: boolean) {
@@ -1496,7 +1542,8 @@
         onSelect={inspectDeckItem}
         onEdit={() => requestNavigation(`/dashboard/${sessionId}?mode=editor`)}
         onPresent={startPresentation}
-        onToggleLive={toggleLive}
+        onToggleLive={requestToggleLive}
+        {liveToggleBusy}
         onSetResponseHidden={handleSetResponseHidden}
         onClearResponses={requestClearResponses}
         onRefreshPresentation={refreshPresentationScreen}
@@ -1511,10 +1558,11 @@
           {timeline}
           responses={visibleTimelineResponses}
           {wsStatus}
+          {liveToggleBusy}
           {saveState}
           {canUndo}
           {canRedo}
-          onToggleLive={toggleLive}
+          onToggleLive={requestToggleLive}
           onActivateItem={activatePresentationItem}
           onNavigate={navigateTimeline}
           onInsertItem={handleInsertTimelineItem}
@@ -1624,6 +1672,18 @@
         </div>
       </div>
     </Modal>
+
+    <ConfirmDialog
+      open={endSessionConfirmOpen}
+      title="End this session?"
+      description="Guests will see that the session has ended and can no longer respond, and the projector stops showing slides. You can start it again later."
+      confirmLabel="End session"
+      loading={liveToggleBusy}
+      onConfirm={confirmEndSession}
+      onCancel={cancelEndSession}
+    >
+      {#if endSessionError}<p class="text-sm text-red-500" role="alert">{endSessionError}</p>{/if}
+    </ConfirmDialog>
 
     <ConfirmDialog
       open={clearConfirmSlideId !== null}

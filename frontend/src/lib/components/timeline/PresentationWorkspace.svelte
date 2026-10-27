@@ -17,6 +17,7 @@
     timeline,
     responses = [],
     wsStatus = 'disconnected' as WsStatus,
+    liveToggleBusy = false,
     saveState = 'idle' as 'idle' | 'saving' | 'saved',
     canUndo = false,
     canRedo = false,
@@ -43,6 +44,7 @@
     timeline: any;
     responses?: any[];
     wsStatus?: WsStatus;
+    liveToggleBusy?: boolean;
     saveState?: 'idle' | 'saving' | 'saved';
     canUndo?: boolean;
     canRedo?: boolean;
@@ -226,6 +228,7 @@
     activeItemId={selectedItemId}
     liveItemId={liveItemId}
     {wsStatus}
+    {liveToggleBusy}
     {onToggleLive}
     onSelect={selectItem}
     onInsert={onInsertItem}
