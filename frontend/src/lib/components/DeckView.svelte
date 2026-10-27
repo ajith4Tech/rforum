@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { FileText, Maximize2, MonitorPlay, Pencil, Radio, RefreshCw, Users, BarChart3, Cloud, MessageSquare, Eye, EyeOff } from 'lucide-svelte';
+  import { FileText, Maximize2, MonitorPlay, Pencil, Radio, RefreshCw, Users, BarChart3, Cloud, MessageSquare, Eye, EyeOff, Trash2 } from 'lucide-svelte';
   import { getPresentationPageImageUrl } from '$lib/api';
   import PageImageViewer from '$lib/components/PageImageViewer.svelte';
   import PresentationLiveView from '$lib/components/timeline/PresentationLiveView.svelte';
@@ -16,7 +16,7 @@
     session, presentation = null, timeline = null, slides = [], activeSlideId = null,
     responses = [], wsStatus = 'disconnected' as WsStatus, onSelect, onEdit, onPresent, onToggleLive,
     onRefreshPresentation = undefined, onMaximizeQr = undefined, onToggleRevealAnswer = undefined,
-    onVideoControl = undefined,
+    onVideoControl = undefined, onSetResponseHidden = undefined, onClearResponses = undefined,
   }: {
     session: any; presentation?: any; timeline?: any; slides?: any[]; activeSlideId?: string | null;
     responses?: any[]; wsStatus?: WsStatus; onSelect: (id: string) => void; onEdit: () => void;
@@ -28,6 +28,9 @@
     /** Called when the moderator interacts with an embedded video player so
      *  the action can be broadcast to the main screen. */
     onVideoControl?: (payload: VideoControlPayload) => void;
+    /** Moderation: hide/unhide one response, or clear every response of a slide. */
+    onSetResponseHidden?: (slideId: string, responseId: string, hidden: boolean) => void;
+    onClearResponses?: (slideId: string) => void;
   } = $props();
 
   const items = $derived(timeline ? [...(timeline.items || [])].sort((a: any, b: any) => a.order - b.order) : [...slides].sort((a: any, b: any) => (a.order ?? 0) - (b.order ?? 0)));
@@ -56,7 +59,11 @@
   const selectedSlide = $derived(selected?.slide || selected);
   const isTimeline = $derived(!!timeline);
   const isInteractive = $derived(selectedSlide && selectedSlide.type?.toUpperCase() !== 'CONTENT' && selected?.item_type !== 'PAGE');
-  const visibleResponses = $derived(responsesForSlide(responses, selectedSlide?.id));
+  // The moderator also receives hidden responses (so they can be unhidden);
+  // the preview and counts show only what the audience sees.
+  const slideResponses = $derived(responsesForSlide(responses, selectedSlide?.id));
+  const visibleResponses = $derived(slideResponses.filter((r: any) => !r.is_hidden));
+  const hiddenCount = $derived(slideResponses.length - visibleResponses.length);
   const promptText = $derived(selectedSlide?.content_json?.question || selectedSlide?.content_json?.prompt || 'Audience responses');
 
   // Same detection InteractionView.svelte itself uses — a Quiz slide is a
@@ -211,11 +218,34 @@
       </div>
       {#if isInteractive}
         <h2 class="mt-3 font-heading font-semibold text-surface-900 dark:text-white" style={getFitTitleStyle(promptText, 'question')}>{promptText}</h2>
-        <p class="mt-2 text-2xl font-bold text-brand-500">{visibleResponses.length}<span class="ml-1 text-sm font-medium text-surface-500">responses</span></p>
+        <div class="mt-2 flex items-end justify-between gap-2">
+          <p class="text-2xl font-bold text-brand-500">{visibleResponses.length}<span class="ml-1 text-sm font-medium text-surface-500">responses{#if hiddenCount} · {hiddenCount} hidden{/if}</span></p>
+          {#if onClearResponses && slideResponses.length && selectedSlide?.id}
+            <button
+              class="flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-red-600 transition hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/30"
+              onclick={() => onClearResponses?.(selectedSlide.id)}
+            ><Trash2 class="h-3.5 w-3.5" />Clear</button>
+          {/if}
+        </div>
         <div class="mt-4 space-y-2">
-          {#if visibleResponses.length}
-            {#each [...visibleResponses].slice().reverse().slice(0, 12) as response (response.id)}
-              <div class="rounded-lg bg-surface-100 px-3 py-2 text-sm text-surface-700 dark:bg-surface-900 dark:text-surface-200">{response.value || (response.rating ? `${response.rating} stars` : 'Response')} {#if response.name}<span class="block pt-1 text-xs text-surface-500">{response.name}</span>{/if}</div>
+          {#if slideResponses.length}
+            {#each [...slideResponses].reverse() as response (response.id)}
+              <div class="flex items-start gap-2 rounded-lg px-3 py-2 text-sm {response.is_hidden ? 'border border-dashed border-surface-300 text-surface-400 dark:border-surface-700 dark:text-surface-500' : 'bg-surface-100 text-surface-700 dark:bg-surface-900 dark:text-surface-200'}">
+                <div class="min-w-0 flex-1 break-words">
+                  {#if response.is_hidden}<span class="mb-0.5 block text-[10px] font-semibold uppercase tracking-wider">Hidden from audience</span>{/if}
+                  {response.value || (response.rating ? `${response.rating} stars` : 'Response')} {#if response.name}<span class="block pt-1 text-xs text-surface-500">{response.name}</span>{/if}
+                </div>
+                {#if onSetResponseHidden && selectedSlide?.id}
+                  <button
+                    class="shrink-0 rounded-md p-1 text-surface-500 transition hover:bg-surface-200 hover:text-surface-900 dark:hover:bg-surface-800 dark:hover:text-white"
+                    onclick={() => onSetResponseHidden?.(selectedSlide.id, response.id, !response.is_hidden)}
+                    aria-label={response.is_hidden ? 'Show this response to the audience again' : 'Hide this response from the audience'}
+                    title={response.is_hidden ? 'Unhide' : 'Hide from audience'}
+                  >
+                    {#if response.is_hidden}<Eye class="h-3.5 w-3.5" />{:else}<EyeOff class="h-3.5 w-3.5" />{/if}
+                  </button>
+                {/if}
+              </div>
             {/each}
           {:else}
             <p class="pt-6 text-sm text-surface-500">Responses appear here for this slide when the audience participates.</p>

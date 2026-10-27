@@ -3,7 +3,8 @@
     getSession, updateSession, sendScreenControl, createSlide, updateSlide, deleteSlide, listResponses,
     getSessionPresentation, uploadPresentation, replacePresentation, regeneratePresentation,
     insertTimelineItem, updateTimelineItem, deleteTimelineItem, reorderTimelineItems, activateTimelineItem,
-    attachPresentation, detachPresentation, deletePresentation, uploadSlideFile
+    attachPresentation, detachPresentation, deletePresentation, uploadSlideFile,
+    setResponseHidden, clearResponses
   } from '$lib/api';
   import { page } from '$app/stores';
   import { RforumWebSocket } from '$lib/ws';
@@ -14,6 +15,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { beforeNavigate, goto } from '$app/navigation';
   import Modal from '$lib/components/Modal.svelte';
+  import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
   import {
     NotebookPen,
     UserRound,
@@ -166,6 +168,20 @@
   const hasUnsavedChanges = $derived(deckEditorDirty || legacyFormDirty);
   let saveError = $state('');
   let saveErrorTimeout: ReturnType<typeof setTimeout> | null = null;
+
+  function showSaveError(message: string) {
+    saveError = message;
+    if (saveErrorTimeout) clearTimeout(saveErrorTimeout);
+    saveErrorTimeout = setTimeout(() => { saveError = ''; }, 4000);
+  }
+
+  // ── Response moderation (hide one / clear all for a slide) ──
+  let clearConfirmSlideId = $state<string | null>(null);
+  let clearingResponses = $state(false);
+  let clearResponsesError = $state('');
+  // Hidden responses stay in the moderator's lists (so they can be unhidden)
+  // but never feed the previews, which must match what the audience sees.
+  const visibleTimelineResponses = $derived(timelineResponses.filter((r: any) => !r.is_hidden));
 
   beforeNavigate((nav) => {
     if (bypassLeaveGuard) return;
@@ -345,6 +361,9 @@
       if (!clearedId) return;
       slideResponses = slideResponses.filter((r) => r.slide_id !== clearedId);
       timelineResponses = timelineResponses.filter((r) => r.slide_id !== clearedId);
+    } else if (msg.event === 'response_hidden') {
+      // Unhiding arrives as a new_response carrying is_hidden: false (merged above).
+      markResponseHidden(msg.data?.id, true);
     }
     // video_control events are sent BY the moderator; we intentionally do not
     // process them here — the screen is the only consumer.
@@ -493,6 +512,49 @@
   async function toggleLive() {
     session = await updateSession(sessionId, { is_live: !session.is_live });
     ws?.send('session_update', { is_live: session.is_live });
+  }
+
+  function markResponseHidden(responseId: string | undefined, hidden: boolean) {
+    if (!responseId) return;
+    const apply = (list: any[]) => list.map((r) => (r.id === responseId ? { ...r, is_hidden: hidden } : r));
+    slideResponses = apply(slideResponses);
+    timelineResponses = apply(timelineResponses);
+  }
+
+  async function handleSetResponseHidden(slideId: string, responseId: string, hidden: boolean) {
+    markResponseHidden(responseId, hidden);
+    try {
+      await setResponseHidden(slideId, responseId, hidden);
+    } catch (err) {
+      markResponseHidden(responseId, !hidden);
+      showSaveError(`Could not ${hidden ? 'hide' : 'unhide'} the response${err instanceof Error && err.message ? `: ${err.message}` : ''}`);
+    }
+  }
+
+  function requestClearResponses(slideId: string) {
+    clearResponsesError = '';
+    clearConfirmSlideId = slideId;
+  }
+
+  async function confirmClearResponses() {
+    const slideId = clearConfirmSlideId;
+    if (!slideId || clearingResponses) return;
+    clearingResponses = true;
+    try {
+      await clearResponses(slideId);
+      slideResponses = slideResponses.filter((r) => r.slide_id !== slideId);
+      timelineResponses = timelineResponses.filter((r) => r.slide_id !== slideId);
+      clearConfirmSlideId = null;
+    } catch (err) {
+      clearResponsesError = `Could not clear responses${err instanceof Error && err.message ? `: ${err.message}` : ''}. Try again.`;
+    } finally {
+      clearingResponses = false;
+    }
+  }
+
+  function cancelClearResponses() {
+    if (clearingResponses) return;
+    clearConfirmSlideId = null;
   }
 
   function notifyLocalPresentationScreen(action: "refresh" | "toggle_qr", commandId: string) {
@@ -1435,6 +1497,8 @@
         onEdit={() => requestNavigation(`/dashboard/${sessionId}?mode=editor`)}
         onPresent={startPresentation}
         onToggleLive={toggleLive}
+        onSetResponseHidden={handleSetResponseHidden}
+        onClearResponses={requestClearResponses}
         onRefreshPresentation={refreshPresentationScreen}
         onMaximizeQr={maximizePresentationQr}
         onToggleRevealAnswer={handleToggleQuizReveal}
@@ -1445,7 +1509,7 @@
           {session}
           {presentation}
           {timeline}
-          responses={timelineResponses}
+          responses={visibleTimelineResponses}
           {wsStatus}
           {saveState}
           {canUndo}
@@ -1560,6 +1624,18 @@
         </div>
       </div>
     </Modal>
+
+    <ConfirmDialog
+      open={clearConfirmSlideId !== null}
+      title="Clear all responses?"
+      description="Every response to this slide is permanently deleted for the moderator, projector and guests, including from analytics. This can't be undone."
+      confirmLabel="Clear responses"
+      loading={clearingResponses}
+      onConfirm={confirmClearResponses}
+      onCancel={cancelClearResponses}
+    >
+      {#if clearResponsesError}<p class="text-sm text-red-500" role="alert">{clearResponsesError}</p>{/if}
+    </ConfirmDialog>
 
     {#if screenCommandFlash}
       <div class="fixed bottom-4 right-4 z-50 rounded-xl border border-brand-200 bg-white px-4 py-2 text-sm font-medium text-brand-700 shadow-lg dark:border-brand-500/30 dark:bg-slate-950 dark:text-brand-300">

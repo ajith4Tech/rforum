@@ -18,7 +18,7 @@ from app.config import get_settings
 from app.database import get_db
 from app.models import Response, Slide, User, UserRole
 from app.rate_limit import check_rate_limit
-from app.schemas import ResponseCreate, ResponseOut
+from app.schemas import ResponseCreate, ResponseModerationUpdate, ResponseOut
 
 logger = logging.getLogger(__name__)
 
@@ -255,11 +255,12 @@ async def list_responses(
     if not is_owner_or_admin and not slide.session.is_live:
         raise HTTPException(status_code=403, detail="Session is not live")
 
-    result = await db.execute(
-        select(Response)
-        .where(Response.slide_id == slide_uuid)
-        .order_by(Response.upvotes.desc(), Response.created_at.desc())
-    )
+    query = select(Response).where(Response.slide_id == slide_uuid)
+    # Hidden responses are moderator-only — this is also what every guest and
+    # projector reconnect/resync refetches, so a hidden response can't come back.
+    if not is_owner_or_admin:
+        query = query.where(Response.is_hidden.is_(False))
+    result = await db.execute(query.order_by(Response.upvotes.desc(), Response.created_at.desc()))
     return result.scalars().all()
 
 
@@ -300,7 +301,7 @@ async def upvote_response(
         .options(selectinload(Response.slide).selectinload(Slide.session))
     )
     response = result.scalar_one_or_none()
-    if not response:
+    if not response or response.is_hidden:
         raise HTTPException(status_code=404, detail="Response not found")
     if not response.slide.session.is_live:
         raise HTTPException(status_code=403, detail="Session is not live")
@@ -323,6 +324,51 @@ async def upvote_response(
         f"session:{session_code}",
         json.dumps({"event": "upvote", "data": out.model_dump(mode="json")}),
     )
+
+    return response
+
+
+@router.patch("/{response_id}", response_model=ResponseOut)
+async def moderate_response(
+    slide_id: str,
+    response_id: str,
+    payload: ResponseModerationUpdate,
+    request: Request,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Hide or unhide one response (session owner or super admin only)."""
+    try:
+        slide_uuid = uuid.UUID(slide_id)
+        response_uuid = uuid.UUID(response_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid ID format")
+
+    result = await db.execute(
+        select(Response)
+        .where(Response.id == response_uuid, Response.slide_id == slide_uuid)
+        .options(selectinload(Response.slide).selectinload(Slide.session))
+    )
+    response = result.scalar_one_or_none()
+    if not response:
+        raise HTTPException(status_code=404, detail="Response not found")
+    session = response.slide.session
+    if user.role != UserRole.SUPER_ADMIN and session.owner_id != user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to moderate responses")
+
+    if response.is_hidden != payload.is_hidden:
+        response.is_hidden = payload.is_hidden
+        await db.commit()
+
+    # Hiding tells every client to drop it; unhiding re-announces it exactly
+    # like a fresh submission, which every client already merges by id.
+    out = ResponseOut.model_validate(response)
+    if payload.is_hidden:
+        message = {"event": "response_hidden", "data": {"slide_id": str(slide_uuid), "id": str(response_uuid)}}
+    else:
+        message = {"event": "new_response", "data": out.model_dump(mode="json")}
+    redis: Redis = request.app.state.redis
+    await _publish_safe(redis, f"session:{session.unique_code}", json.dumps(message))
 
     return response
 

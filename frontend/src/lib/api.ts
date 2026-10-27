@@ -379,6 +379,14 @@ export async function upvoteResponse(slideId: string, responseId: string) {
   });
 }
 
+/** Moderator only: hide a response from guests and the projector (or show it again). */
+export async function setResponseHidden(slideId: string, responseId: string, hidden: boolean) {
+  return fetchJson(`/slides/${slideId}/responses/${responseId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ is_hidden: hidden })
+  }, true);
+}
+
 export async function clearResponses(slideId: string) {
   return fetchJson(`/slides/${slideId}/responses/`, {
     method: 'DELETE'

@@ -451,9 +451,14 @@ class ResponseOut(BaseModel):
     name: str | None = None
     rating: int | None = None
     upvotes: int
+    is_hidden: bool = False
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class ResponseModerationUpdate(BaseModel):
+    is_hidden: bool
 
 
 # ── Session Assets ────────────────────────────────────

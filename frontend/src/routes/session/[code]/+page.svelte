@@ -9,6 +9,7 @@
   import ContentSlideCanvas from '$lib/components/ContentSlideCanvas.svelte';
   import { upsertTimelineItemFromWs } from '$lib/timelineTypes';
   import { getFitTitleStyle, mergeResponsesById, responsesForSlide } from '$lib/fitTitle';
+  import { HiddenResponseTracker } from '$lib/hiddenResponses';
   import { startAutoFlush, flushPending, rejectedSubmissions, dismissRejected } from '$lib/responseQueue';
   import {
     Orbit, Send, ChevronUp, BarChart3, MessageSquare, AlignLeft, CheckCircle2, Cloud, Sun, Moon
@@ -22,6 +23,10 @@
   // Presentation Timeline (additive — only populated when session.presentation_id is set)
   let presentationTimeline: any = $state(null);
   let timelineResponses: any[] = $state([]);
+  // Responses the moderator hid while this page is open (see $lib/hiddenResponses).
+  const hiddenResponses = new HiddenResponseTracker();
+  const shownResponses = $derived(responses.filter(hiddenResponses.isShown));
+  const shownTimelineResponses = $derived(timelineResponses.filter(hiddenResponses.isShown));
   const activeTimelineItem = $derived(
     presentationTimeline
       ? [...(presentationTimeline.items || [])].sort((a: any, b: any) => a.order - b.order)
@@ -156,10 +161,21 @@
    * rather than failing the whole state load. */
   async function fetchSlideResponses(slideId: string, previous: any[]): Promise<any[]> {
     try {
-      return responsesForSlide(await listResponses(slideId), slideId);
+      return await fetchFreshResponses(slideId);
     } catch {
       return responsesForSlide(previous, slideId);
     }
+  }
+
+  /** A slide's responses, fresh from the server (throws on failure). Every
+   * such fetch is authoritative for that slide: it drops hides older than the
+   * fetch, so a response unhidden while this page missed the event — offline,
+   * or while another slide was shown — reappears (see $lib/hiddenResponses). */
+  async function fetchFreshResponses(slideId: string): Promise<any[]> {
+    const startedAt = hiddenResponses.fetchStarted();
+    const fresh = responsesForSlide(await listResponses(slideId), slideId);
+    hiddenResponses.fetchSucceeded(slideId, startedAt);
+    return fresh;
   }
 
   /** Load the live session's current state from the server. Used on first
@@ -317,6 +333,8 @@
         }
       }
     } else if (msg.event === 'new_response') {
+      // A moderator unhiding a response re-announces it as a new_response.
+      if (msg.data?.id) hiddenResponses.unhide(msg.data.id);
       if (msg.data && activeSlide && msg.data.slide_id === activeSlide.id) {
         responses = mergeResponsesById(responses, [msg.data]);
       }
@@ -330,6 +348,12 @@
       if (clearedId === activeTimelineItem?.slide?.id) timelineResponses = [];
       responses = responses.filter((r) => r.slide_id !== clearedId);
       timelineResponses = timelineResponses.filter((r) => r.slide_id !== clearedId);
+    } else if (msg.event === 'response_hidden') {
+      const hiddenId = msg.data?.id;
+      if (!hiddenId) return;
+      hiddenResponses.hide(hiddenId, msg.data?.slide_id);
+      responses = responses.filter((r) => r.id !== hiddenId);
+      timelineResponses = timelineResponses.filter((r) => r.id !== hiddenId);
     } else if (msg.event === 'upvote') {
       // Update the response with new upvote count
       responses = responses.map((r) =>
@@ -536,7 +560,7 @@
           presentationId={session.presentation_id}
           sessionId={session.id}
           sessionCode={code || session?.unique_code || ''}
-          responses={timelineResponses}
+          responses={shownTimelineResponses}
           variant="guest"
           {guestId}
         />
@@ -550,7 +574,7 @@
         {:else}
           <InteractionView
             slide={activeSlide}
-            responses={responses}
+            responses={shownResponses}
             variant="guest"
             {guestId}
             sessionCode={code}
