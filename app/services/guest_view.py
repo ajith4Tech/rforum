@@ -3,6 +3,7 @@ Guest-facing payload sanitization — shared by the legacy slide-list endpoint
 and the new presentation timeline endpoint so both strip raw file paths the
 same way. Pure functions, no DB/FastAPI imports.
 """
+from app.services.slide_content import sanitize_slide_content_json
 
 
 # Keys that identify an attached slide file. PATCH bodies from the editor can
@@ -22,8 +23,10 @@ def strip_slide_content_json(content_json: dict) -> dict:
     Remove raw upload paths and unrevealed quiz answers from a slide's content_json
     before it reaches a guest. Guests only ever see rendered content through the page-image
     endpoints, never the original file path/name, and never see quiz answers pre-reveal.
+    Rich text is re-sanitized here too, covering content stored before write-time
+    sanitization existed and slides relayed over the moderator's WebSocket.
     """
-    cj = dict(content_json or {})
+    cj = sanitize_slide_content_json(content_json)
     if "file_url" in cj:
         cj["has_file"] = True
         del cj["file_url"]

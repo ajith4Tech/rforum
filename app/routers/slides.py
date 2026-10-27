@@ -30,6 +30,7 @@ from app.services.file_processing import (
     validate_upload,
 )
 from app.services.guest_view import merge_slide_content_json
+from app.services.slide_content import sanitize_slide_content_json
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +106,10 @@ async def create_slide(
     session = await _verify_ownership(session_id, user, db)
     _ensure_not_presentation_session(session)
 
-    slide = Slide(session_id=uuid.UUID(session_id), **payload.model_dump())
+    data = payload.model_dump()
+    data["content_json"] = sanitize_slide_content_json(data.get("content_json"))
+
+    slide = Slide(session_id=uuid.UUID(session_id), **data)
     db.add(slide)
     await db.flush()
     await db.commit()
@@ -155,8 +159,8 @@ async def update_slide(
 
     update_data = payload.model_dump(exclude_unset=True)
     if "content_json" in update_data:
-        update_data["content_json"] = merge_slide_content_json(
-            slide.content_json, update_data.get("content_json")
+        update_data["content_json"] = sanitize_slide_content_json(
+            merge_slide_content_json(slide.content_json, update_data.get("content_json"))
         )
 
     # If activating this slide, deactivate all others in the session

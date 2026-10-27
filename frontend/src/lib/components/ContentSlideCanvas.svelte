@@ -2,6 +2,7 @@
   import { getPageImageUrl } from '$lib/api';
   import PageImageViewer from '$lib/components/PageImageViewer.svelte';
   import { getFitTitleStyle } from '$lib/fitTitle';
+  import { sanitizeRichHtml } from '$lib/sanitizeHtml';
   import { Video, Tv } from 'lucide-svelte';
 
   let {
@@ -37,8 +38,10 @@
   const layout = $derived(slide?.content_json?.layout || 'title_content');
   const title = $derived(slide?.content_json?.title || '');
   const subtitle = $derived(slide?.content_json?.subtitle || '');
-  const body = $derived(slide?.content_json?.body || '');
-  const body2 = $derived(slide?.content_json?.body2 || '');
+  // Rich text is rendered as HTML on guest phones and the projector — only
+  // ever through the allowlist sanitizer (see $lib/sanitizeHtml).
+  const body = $derived(sanitizeRichHtml(slide?.content_json?.body));
+  const body2 = $derived(sanitizeRichHtml(slide?.content_json?.body2));
   const videoUrl = $derived(slide?.content_json?.video_url || slide?.content_json?.url || '');
   const playOnDevices = $derived(Boolean(slide?.content_json?.settings?.play_on_participant_devices));
   const resolvedSessionId = $derived(sessionId || slide?.session_id || '');

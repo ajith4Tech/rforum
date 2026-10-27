@@ -10,6 +10,7 @@
   import { getPageImageUrl } from '$lib/api';
   import { theme } from '$lib/theme';
   import { getFitTitleStyle } from '$lib/fitTitle';
+  import { sanitizeRichHtml } from '$lib/sanitizeHtml';
 
   let {
     sessionId,
@@ -119,6 +120,18 @@
     }, 250);
   }
 
+  /** Load stored rich text into a contenteditable — always sanitized, since
+   * assigning innerHTML would otherwise run any handlers it carries. The
+   * server's sanitized HTML serializes slightly differently from the
+   * browser's own innerHTML, so the editor the moderator is typing in is left
+   * alone for the same slide (rewriting it would reset the caret). */
+  let editorSyncedSlideId: string | null = null;
+  function syncRichEditor(el: HTMLDivElement | null, html: string, slideChanged: boolean) {
+    if (!el || (!slideChanged && document.activeElement === el)) return;
+    const safe = sanitizeRichHtml(html);
+    if (el.innerHTML !== safe) el.innerHTML = safe;
+  }
+
   // Synchronize local edit buffer when active slide changes
   $effect(() => {
     if (activeSlide) {
@@ -140,13 +153,11 @@
       localMaxLabel = cj.max_label ?? '';
       localQuestions = Array.isArray(cj.questions) ? JSON.parse(JSON.stringify(cj.questions)) : [];
 
+      const slideChanged = activeSlide.id !== editorSyncedSlideId;
+      editorSyncedSlideId = activeSlide.id;
       setTimeout(() => {
-        if (bodyEditorEl && bodyEditorEl.innerHTML !== localBody) {
-          bodyEditorEl.innerHTML = localBody;
-        }
-        if (body2EditorEl && body2EditorEl.innerHTML !== localBody2) {
-          body2EditorEl.innerHTML = localBody2;
-        }
+        syncRichEditor(bodyEditorEl, localBody, slideChanged);
+        syncRichEditor(body2EditorEl, localBody2, slideChanged);
       }, 0);
     }
   });

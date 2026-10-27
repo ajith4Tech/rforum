@@ -32,6 +32,7 @@ import json
 
 from app.auth import get_current_user
 from app.services.guest_view import merge_slide_content_json
+from app.services.slide_content import sanitize_slide_content_json
 from app.config import get_settings
 from app.database import get_db
 from app.rate_limit import check_rate_limit
@@ -1233,7 +1234,7 @@ async def insert_timeline_item(
 
     position = min(payload.position, len(timeline.items))
     slide_type = _INTERACTION_TYPE_TO_SLIDE_TYPE[payload.item_type]
-    content_json = dict(payload.content_json)
+    content_json = sanitize_slide_content_json(payload.content_json)
     if payload.item_type == TimelineItemType.RATING:
         content_json["mode"] = "rating_only"
 
@@ -1278,7 +1279,7 @@ async def update_timeline_item(
         raise HTTPException(status_code=400, detail="Cannot edit content of a presentation page")
 
     existing = dict(item.slide.content_json) if item.slide is not None else {}
-    content_json = merge_slide_content_json(existing, payload.content_json)
+    content_json = sanitize_slide_content_json(merge_slide_content_json(existing, payload.content_json))
     if item.item_type == TimelineItemType.RATING:
         content_json["mode"] = "rating_only"
 
