@@ -173,6 +173,17 @@
 
       const slideChanged = activeSlide.id !== editorSyncedSlideId;
       editorSyncedSlideId = activeSlide.id;
+      if (slideChanged) {
+        // Pending-save state belongs to the slide that was left (its unsaved
+        // edits were discarded via the page's confirm): a pending debounce
+        // must not fire for the new slide, and an autosave paused by that
+        // slide's quiz answer must not leave the new one looking unsaved.
+        if (saveTimer) {
+          clearTimeout(saveTimer);
+          saveTimer = null;
+        }
+        savePending = false;
+      }
       setTimeout(() => {
         syncRichEditor(bodyEditorEl, localBody, slideChanged);
         syncRichEditor(body2EditorEl, localBody2, slideChanged);
@@ -232,8 +243,11 @@
       cj.prompt = localPrompt;
     }
     const finalContent = { ...cj, ...updates };
-    await onUpdateSlideContent(activeSlide.id, finalContent);
-    savePending = false;
+    const savedSlideId = activeSlide.id;
+    await onUpdateSlideContent(savedSlideId, finalContent);
+    // If the moderator moved to another slide (or queued newer edits) while
+    // this save was in flight, the pending state is no longer this save's.
+    if (activeSlide?.id === savedSlideId && !saveTimer) savePending = false;
   }
 
   function changeLayout(newLayout: string) {

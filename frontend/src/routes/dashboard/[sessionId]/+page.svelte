@@ -14,7 +14,7 @@
   import { get } from 'svelte/store';
   import { onMount, onDestroy } from 'svelte';
   import { beforeNavigate, goto } from '$app/navigation';
-  import Modal from '$lib/components/Modal.svelte';
+  import Modal, { isModalOpen } from '$lib/components/Modal.svelte';
   import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
   import {
     NotebookPen,
@@ -750,7 +750,9 @@
    * id, tracked via `box`) at the same array position; redo deletes it again. */
   function pushDeletedSlideUndo(deletedSlide: any, index: number, label: string) {
     const box: IdBox = { id: deletedSlide.id };
-    const snapshot = { type: deletedSlide.type, order: deletedSlide.order, content_json: { ...deletedSlide.content_json } };
+    // Undo re-creates the slide as a NEW record, where an invalid legacy quiz
+    // answer is no longer tolerated (see $lib/quiz) — restore it unanswered.
+    const snapshot = { type: deletedSlide.type, order: deletedSlide.order, content_json: { ...quizContentForCopy(deletedSlide.content_json || {}) } };
     undoManager.push({
       label,
       undo: async () => {
@@ -861,6 +863,12 @@
    * the legacy editor mirror what PresentationWorkspace already does for the
    * timeline editor. Native undo/redo inside a focused text field is left alone. */
   function handleGlobalKeydown(e: KeyboardEvent) {
+    // Undo/delete/arrow shortcuts must not act behind an open dialog (Ctrl+S
+    // still must not open the browser's "Save page" dialog).
+    if (isModalOpen()) {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') e.preventDefault();
+      return;
+    }
     const mod = e.ctrlKey || e.metaKey;
     const key = e.key.toLowerCase();
 
@@ -1419,7 +1427,9 @@
     // by the time this fires the moderator has already confirmed.
     const item = (timeline?.items || []).find((i: any) => i.id === itemId);
     if (!item) return;
-    const snapshot = { item_type: item.item_type, order: item.order, content_json: { ...(item.slide?.content_json || {}) } };
+    // Undo re-inserts it as a NEW record, where an invalid legacy quiz answer
+    // is no longer tolerated (see $lib/quiz) — restore it unanswered.
+    const snapshot = { item_type: item.item_type, order: item.order, content_json: { ...quizContentForCopy(item.slide?.content_json || {}) } };
     const box: IdBox = { id: itemId };
     await withSaveState(async () => {
       await deleteTimelineItem(sessionId, box.id);
@@ -1559,6 +1569,7 @@
           responses={visibleTimelineResponses}
           {wsStatus}
           {liveToggleBusy}
+          errorMessage={saveError}
           {saveState}
           {canUndo}
           {canRedo}

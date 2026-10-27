@@ -1,3 +1,11 @@
+<script module lang="ts">
+  /** True while any modal dialog is open — page-level keyboard shortcuts
+   * (slide navigation, delete, undo) must not act behind it. */
+  export function isModalOpen(): boolean {
+    return typeof document !== 'undefined' && document.querySelector('[role="dialog"][aria-modal="true"]') !== null;
+  }
+</script>
+
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import { X } from 'lucide-svelte';
@@ -21,7 +29,40 @@
   } = $props();
 
   let dialogEl: HTMLDivElement | null = $state(null);
+  let overlayEl: HTMLDivElement | null = $state(null);
   let previouslyFocused: HTMLElement | null = null;
+
+  const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+  // While an element is fullscreen (e.g. the presentation workspace) the
+  // browser paints only that element's subtree, so a dialog rendered anywhere
+  // else would be invisible yet still hold focus. While open, the overlay is
+  // moved into the fullscreen element, and back to where it was rendered when
+  // fullscreen ends. It is the {#if open} block's only node, so Svelte still
+  // removes it correctly on close wherever it currently sits.
+  let homeParent: Node | null = null;
+  let homeNextSibling: Node | null = null;
+  function placeOverlay() {
+    const el = overlayEl;
+    if (!el) return;
+    const fullscreen = document.fullscreenElement;
+    if (fullscreen && !fullscreen.contains(el)) {
+      if (!homeParent) {
+        homeParent = el.parentNode;
+        homeNextSibling = el.nextSibling;
+      }
+      fullscreen.appendChild(el);
+    } else if (!fullscreen && homeParent && el.parentNode !== homeParent) {
+      homeParent.insertBefore(el, homeNextSibling?.parentNode === homeParent ? homeNextSibling : null);
+      homeParent = null;
+      homeNextSibling = null;
+    }
+  }
+
+  function focusIntoDialog() {
+    const focusTarget = dialogEl?.querySelector<HTMLElement>(FOCUSABLE);
+    (focusTarget ?? dialogEl)?.focus();
+  }
 
   function handleKeydown(e: KeyboardEvent) {
     if (e.key === 'Escape') {
@@ -29,9 +70,7 @@
       onClose();
     } else if (e.key === 'Tab') {
       // Simple focus trap: cycle within the dialog's focusable elements.
-      const focusable = dialogEl?.querySelectorAll<HTMLElement>(
-        'a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
-      );
+      const focusable = dialogEl?.querySelectorAll<HTMLElement>(FOCUSABLE);
       if (!focusable || focusable.length === 0) return;
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
@@ -48,12 +87,20 @@
   $effect(() => {
     if (!open) return;
     previouslyFocused = document.activeElement as HTMLElement | null;
-    const focusTarget = dialogEl?.querySelector<HTMLElement>(
-      'a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
-    );
-    (focusTarget ?? dialogEl)?.focus();
+    // Move first: re-parenting a focused element would drop its focus.
+    placeOverlay();
+    focusIntoDialog();
+
+    function onFullscreenChange() {
+      placeOverlay();
+      if (!dialogEl?.contains(document.activeElement)) focusIntoDialog();
+    }
+    document.addEventListener('fullscreenchange', onFullscreenChange);
 
     return () => {
+      document.removeEventListener('fullscreenchange', onFullscreenChange);
+      homeParent = null;
+      homeNextSibling = null;
       previouslyFocused?.focus();
     };
   });
@@ -61,6 +108,7 @@
 
 {#if open}
   <div
+    bind:this={overlayEl}
     class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center px-4 z-50"
     onclick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     onkeydown={handleKeydown}

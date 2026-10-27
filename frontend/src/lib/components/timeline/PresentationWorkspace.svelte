@@ -1,6 +1,6 @@
 <script lang="ts">
   import { getPresentationPageImageUrl } from '$lib/api';
-  import Modal from '$lib/components/Modal.svelte';
+  import Modal, { isModalOpen } from '$lib/components/Modal.svelte';
   import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
   import PresentationDetailsPanel from './PresentationDetailsPanel.svelte';
   import InteractionView from './InteractionView.svelte';
@@ -18,6 +18,7 @@
     responses = [],
     wsStatus = 'disconnected' as WsStatus,
     liveToggleBusy = false,
+    errorMessage = '',
     saveState = 'idle' as 'idle' | 'saving' | 'saved',
     canUndo = false,
     canRedo = false,
@@ -45,6 +46,10 @@
     responses?: any[];
     wsStatus?: WsStatus;
     liveToggleBusy?: boolean;
+    /** The page's save/start-session error. The page shows it above the
+     * workspace; in fullscreen only the workspace is painted, so it is
+     * repeated in the toolbar there. */
+    errorMessage?: string;
     saveState?: 'idle' | 'saving' | 'saved';
     canUndo?: boolean;
     canRedo?: boolean;
@@ -182,7 +187,8 @@
     function onKeydown(e: KeyboardEvent) {
       const target = e.target as HTMLElement | null;
       const isTyping = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
-      if (isTyping || previewVariant) return;
+      // Never navigate/delete behind an open dialog (e.g. the end-session confirm).
+      if (isTyping || previewVariant || isModalOpen()) return;
 
       if (e.key === 'ArrowLeft') {
         e.preventDefault();
@@ -221,6 +227,9 @@
   bind:this={workspaceEl}
   class="grid grid-cols-12 gap-5 {isFullscreen ? 'h-screen overflow-y-auto bg-surface-50 dark:bg-surface-950 p-4 sm:p-6' : ''}"
 >
+  {#if isFullscreen && errorMessage}
+    <div class="col-span-12 px-4 py-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-sm text-red-500" role="alert">{errorMessage}</div>
+  {/if}
   <TimelineSidebar
     {session}
     {presentation}

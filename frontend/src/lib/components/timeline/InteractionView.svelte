@@ -25,6 +25,7 @@
   import { getFitTitleStyle } from '$lib/fitTitle';
   import { validQuizAnswer, quizSaveError } from '$lib/quiz';
   import { recordAnsweredClearCount, forgetAnswered, responsesClearedCount } from '$lib/respondedState';
+  import { isModalOpen } from '$lib/components/Modal.svelte';
 
   let {
     slide,
@@ -727,7 +728,8 @@
     function onKeydown(e: KeyboardEvent) {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
         e.preventDefault();
-        if (editing) saveEdit();
+        // Never save this form from behind an open dialog.
+        if (editing && !isModalOpen()) saveEdit();
       }
     }
     window.addEventListener('keydown', onKeydown);
