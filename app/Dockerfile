@@ -1,4 +1,8 @@
-FROM python:3.12-slim
+# Pinned by digest: an unpinned tag re-resolves on every build, and each
+# upstream republish of python:3.12-slim invalidates every layer below —
+# including the multi-minute LibreOffice apt layer. Bump deliberately
+# (docker buildx imagetools inspect python:3.12-slim) to pick up patches.
+FROM python:3.12-slim@sha256:12316debbfb86890f6b2d825820612741ba527ad5a44e3902759141d572bfe8f
 
 # Build context is the repository root (docker build -f app/Dockerfile .),
 # not app/ — required so "app" resolves as a real Python package under
@@ -29,15 +33,16 @@ RUN grep -v '^moto' app/requirements.txt > /tmp/requirements-prod.txt \
     && pip install --no-cache-dir -r /tmp/requirements-prod.txt \
     && rm /tmp/requirements-prod.txt
 
-COPY app/ app/
-COPY db/ db/
-COPY scripts/ scripts/
-
 # Runs as a non-root user; writable dirs (LibreOffice profile under $HOME,
 # temp conversion dir, local storage fallback root) are supplied as emptyDir/
 # PVC mounts by the Helm chart, not baked into the image.
+# Ownership is set by COPY --chown instead of a trailing `chown -R /srv`,
+# which re-wrote every copied file into an extra duplicate layer.
 RUN useradd --create-home --uid 10001 rforum \
-    && chown -R rforum:rforum /srv
+    && chown rforum:rforum /srv /srv/app
+COPY --chown=rforum:rforum app/ app/
+COPY --chown=rforum:rforum db/ db/
+COPY --chown=rforum:rforum scripts/ scripts/
 USER rforum
 ENV HOME=/home/rforum
 

@@ -1,0 +1,17 @@
+# Only src/, static/, the package manifests and the build configs are needed
+# by `npm run build`; nginx.conf is needed by the runtime stage. Everything
+# else here would only bloat the context or invalidate the `COPY . .` layer
+# (forcing a full `npm run build`) without changing the output.
+node_modules
+build
+.svelte-kit
+.env
+.env.*
+e2e
+test-results
+playwright-report
+blob-report
+playwright.config.ts
+verify_editor.mjs
+Dockerfile
+.dockerignore

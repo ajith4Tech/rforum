@@ -1,0 +1,12 @@
+# Used only by app/Dockerfile (build context is the repository root).
+# The image copies just app/, db/ and scripts/ — allowlist those and keep
+# local bytecode and env files out so they can't invalidate the COPY layers
+# or leak into the image.
+*
+!app/
+!db/
+!scripts/
+**/__pycache__
+**/*.py[cod]
+**/.env
+**/.env.*

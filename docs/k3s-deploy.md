@@ -143,14 +143,32 @@ From the repository root. No external registry.
 docker build -f app/Dockerfile -t rforum-backend:1.0.0 .
 docker build -f frontend/Dockerfile -t rforum-frontend:1.0.0 ./frontend
 
-docker save rforum-backend:1.0.0  | sudo k3s ctr images import -
-docker save rforum-frontend:1.0.0 | sudo k3s ctr images import -
+# Save to a file with a shell redirect, then import. Not `docker save -o`:
+# snap-packaged Docker can't create the hidden temp file -o writes in /root.
+# Not a `docker save | ctr import -` pipe: it can stall silently and leave
+# the old image under the same tag.
+docker save rforum-backend:1.0.0  > /root/rforum-backend-1.0.0.tar
+docker save rforum-frontend:1.0.0 > /root/rforum-frontend-1.0.0.tar
+sudo k3s ctr -n k8s.io images import /root/rforum-backend-1.0.0.tar
+sudo k3s ctr -n k8s.io images import /root/rforum-frontend-1.0.0.tar
 
-sudo k3s ctr images list | grep rforum
+# Digests must match the "exporting manifest list" lines of the builds.
+sudo k3s ctr -n k8s.io images list | grep rforum
 ```
+
+Base images are pinned by digest in both Dockerfiles so layer caches survive
+upstream tag republishes; bump the digests deliberately to take patches.
 
 Same-tag rebuilds need `kubectl -n rforum rollout restart deploy/rforum-backend`
 (and frontend) because `imagePullPolicy` is `IfNotPresent`.
+
+A rollout restart does **not** run the migrate Job (it is a Helm
+`pre-upgrade` hook). If the rebuild includes new files under
+`db/alembic/versions/`, run `helm upgrade` (section 7) instead, or apply them
+before restarting:
+`kubectl -n rforum exec deploy/rforum-backend -- sh -c 'cd db && alembic upgrade heads'`.
+Otherwise new code runs against the old schema and endpoints touching the new
+columns return 500.
 
 ## 6. Secrets overlay (never commit)
 
