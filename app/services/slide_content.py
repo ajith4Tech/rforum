@@ -243,3 +243,50 @@ def sanitize_slide_content_json(content_json: dict | None) -> dict:
         if key in cj and cj[key] is not None:
             cj[key] = sanitize_rich_html(cj[key])
     return cj
+
+
+def is_quiz_content(content_json: dict | None) -> bool:
+    cj = content_json or {}
+    return str(cj.get("interaction_type") or "").upper() == "QUIZ" or str(cj.get("mode") or "").lower() == "quiz"
+
+
+def valid_quiz_answer(content_json: dict | None) -> str:
+    """The quiz's correct answer when it identifies exactly one option, else ''.
+
+    The answer is stored as option text, so it is only meaningful when it
+    matches one option exactly (a duplicate-text match is ambiguous).
+    Mirrored by frontend/src/lib/quiz.ts.
+    """
+    cj = content_json or {}
+    answer = cj.get("correct_answer")
+    options = cj.get("options")
+    if not isinstance(answer, str) or answer == "" or not isinstance(options, list):
+        return ""
+    return answer if options.count(answer) == 1 else ""
+
+
+def quiz_content_error(content_json: dict | None, existing: dict | None = None) -> str | None:
+    """Why a quiz configuration may not be saved, or None when it is valid.
+
+    Rules (same in both editors, see frontend/src/lib/quiz.ts):
+      - The answer may be empty ("not chosen yet") while the answer is hidden.
+      - Revealing requires a valid answer — otherwise every guest would be
+        told they were wrong.
+      - A non-empty answer must match exactly one option. The one exception is
+        a legacy record whose stored answer was already invalid and is left
+        unchanged, so such a quiz can still be edited or have its answer
+        hidden; it can never be revealed until a valid answer is marked.
+    """
+    cj = content_json or {}
+    if not is_quiz_content(cj):
+        return None
+    answer = valid_quiz_answer(cj)
+    if cj.get("reveal_answer") and not answer:
+        return "Mark which option is the correct answer before revealing it."
+    stored = cj.get("correct_answer")
+    if stored is None or stored == "" or answer:
+        return None
+    previous = existing or {}
+    if is_quiz_content(previous) and stored == previous.get("correct_answer") and not valid_quiz_answer(previous):
+        return None
+    return "The quiz's correct answer must match exactly one of its options."

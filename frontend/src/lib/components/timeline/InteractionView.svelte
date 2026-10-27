@@ -23,6 +23,7 @@
     CheckCircle2, ListChecks, HelpCircle, Sliders, ClipboardList, Check, X, Plus, Trash2
   } from 'lucide-svelte';
   import { getFitTitleStyle } from '$lib/fitTitle';
+  import { validQuizAnswer, quizSaveError } from '$lib/quiz';
 
   let {
     slide,
@@ -96,6 +97,11 @@
     return (value || '').replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
   }
   const displayPrompt = $derived(plainText(promptText || ''));
+
+  // The stored quiz answer is only trusted when it matches exactly one option
+  // (see $lib/quiz) — older data can hold an answer orphaned by an option
+  // rename. Guests and the projector only receive it once revealed.
+  const correctAnswer = $derived(isQuiz ? validQuizAnswer(cj) : '');
 
   // Scale parameters
   const scaleMin = $derived(typeof cj.min === 'number' ? cj.min : 1);
@@ -436,13 +442,13 @@
       label: opt,
       count: counts[opt],
       percent: Math.round((counts[opt] / total) * 100),
-      isCorrect: isQuiz && cj.correct_answer === opt
+      isCorrect: isQuiz && correctAnswer !== '' && correctAnswer === opt
     }));
   }
 
   const quizStats = $derived.by(() => {
-    if (!isQuiz) return { total: 0, correct: 0, incorrect: 0, percentCorrect: 0 };
-    const correctAns = cj.correct_answer || '';
+    if (!isQuiz || !correctAnswer) return { total: responses.length, correct: 0, incorrect: 0, percentCorrect: 0 };
+    const correctAns = correctAnswer;
     let correct = 0;
     let incorrect = 0;
     responses.forEach((r) => {
@@ -557,7 +563,9 @@
   let editQuestion = $state(cj.question ?? cj.prompt ?? '');
   let editPrompt = $state(cj.prompt ?? cj.question ?? '');
   let editOptions = $state<string[]>(cj.options ? [...cj.options] : []);
-  let editCorrectAnswer = $state(cj.correct_answer ?? '');
+  // Quiz: tracked by option position while editing, so renaming/removing
+  // options can't leave the answer pointing at text that no longer exists.
+  let editCorrectIndex = $state<number | null>(null);
   let editRevealAnswer = $state(Boolean(cj.reveal_answer));
   let editMin = $state(scaleMin);
   let editMax = $state(scaleMax);
@@ -568,7 +576,11 @@
 
   function addEditOption() { editOptions = [...editOptions, '']; }
   function updateEditOption(i: number, v: string) { editOptions = editOptions.map((o, idx) => (idx === i ? v : o)); }
-  function removeEditOption(i: number) { editOptions = editOptions.filter((_, idx) => idx !== i); }
+  function removeEditOption(i: number) {
+    editOptions = editOptions.filter((_, idx) => idx !== i);
+    if (editCorrectIndex === i) editCorrectIndex = null;
+    else if (editCorrectIndex !== null && editCorrectIndex > i) editCorrectIndex -= 1;
+  }
 
   function addSurveyQuestion() {
     editQuestions = [
@@ -596,20 +608,31 @@
           mode: isMultipleChoice ? 'multiple_choice' : undefined
         });
       } else if (isQuiz) {
-        const cleaned = editOptions.map((o) => o.trim()).filter(Boolean);
+        const trimmed = editOptions.map((o) => o.trim());
+        const cleaned = trimmed.filter(Boolean);
         if (!editQuestion.trim() || cleaned.length < 2) {
           alert('Provide a question and at least two options.');
           return;
         }
-        await onSaveContent?.({
+        const correct = editCorrectIndex !== null ? trimmed[editCorrectIndex] ?? '' : '';
+        // An invalid legacy answer that wasn't re-marked is kept as stored
+        // (the server allows that unchanged); it is never treated as correct.
+        const quiz = {
           ...cj,
           question: editQuestion.trim(),
           options: cleaned,
-          correct_answer: editCorrectAnswer || cleaned[0],
+          correct_answer: correct || (correctAnswer ? '' : cj.correct_answer ?? ''),
           reveal_answer: editRevealAnswer,
           interaction_type: 'QUIZ',
           mode: 'quiz'
-        });
+        };
+        // Same rules as the Deck Editor and the server ($lib/quiz).
+        const quizError = quizSaveError(quiz, cj);
+        if (quizError) {
+          alert(quizError);
+          return;
+        }
+        await onSaveContent?.(quiz);
       } else if (isScale) {
         await onSaveContent?.({
           ...cj,
@@ -644,7 +667,10 @@
       editQuestion = cj.question ?? cj.prompt ?? '';
       editPrompt = cj.prompt ?? cj.question ?? '';
       editOptions = cj.options ? [...cj.options] : [];
-      editCorrectAnswer = cj.correct_answer ?? '';
+      // From cj, never editOptions: reading edit state here would re-run this
+      // effect (and reset the form) on every keystroke.
+      const correctIdx = correctAnswer ? (cj.options || []).indexOf(correctAnswer) : -1;
+      editCorrectIndex = correctIdx === -1 ? null : correctIdx;
       editRevealAnswer = Boolean(cj.reveal_answer);
       editMin = scaleMin;
       editMax = scaleMax;
@@ -665,7 +691,7 @@
       const cleaned = editOptions.map((o) => o.trim()).filter(Boolean);
       return editQuestion.trim() !== (cj.question || '') ||
         JSON.stringify(cleaned) !== JSON.stringify(cj.options || []) ||
-        editCorrectAnswer !== (cj.correct_answer || '') ||
+        (editCorrectIndex !== null ? (editOptions[editCorrectIndex] ?? '').trim() : '') !== correctAnswer ||
         editRevealAnswer !== Boolean(cj.reveal_answer);
     }
     if (isScale) {
@@ -706,9 +732,9 @@
   <!-- POLL & MULTIPLE CHOICE & QUIZ -->
   {#if isPoll || isMultipleChoice || isQuiz}
     {#if submitted}
-      {#if isQuiz && cj.reveal_answer && cj.correct_answer}
+      {#if isQuiz && cj.reveal_answer && correctAnswer}
         <!-- Quiz: show right/wrong after moderator reveals -->
-        {@const wasCorrect = selectedOption === cj.correct_answer}
+        {@const wasCorrect = selectedOption === correctAnswer}
         <div class="rounded-2xl border p-6 text-center animate-slide-up {wasCorrect ? 'border-emerald-400 bg-emerald-50 dark:bg-emerald-950/30' : 'border-red-400 bg-red-50 dark:bg-red-950/30'}" role="status" aria-live="polite">
           {#if wasCorrect}
             <CheckCircle2 class="w-12 h-12 text-emerald-500 mx-auto mb-3" />
@@ -718,7 +744,7 @@
             <X class="w-12 h-12 text-red-500 mx-auto mb-3" />
             <p class="font-bold text-xl text-red-700 dark:text-red-400">Incorrect</p>
             <p class="text-sm text-slate-500 mt-1">Your answer: {selectedOption}</p>
-            <p class="text-sm font-semibold text-emerald-600 dark:text-emerald-400 mt-2">✓ Correct answer: {cj.correct_answer}</p>
+            <p class="text-sm font-semibold text-emerald-600 dark:text-emerald-400 mt-2">✓ Correct answer: {correctAnswer}</p>
           {/if}
         </div>
       {:else}
@@ -726,7 +752,7 @@
           <CheckCircle2 class="w-12 h-12 text-emerald-500 mx-auto mb-3" />
           <p class="font-semibold text-slate-900 dark:text-white">{pendingHere ? 'Saved on this device' : isQuiz ? 'Answer submitted!' : 'Vote submitted!'}</p>
           <p class="text-sm text-slate-500 mt-1">You chose: {selectedOption}</p>
-          {#if isQuiz}<p class="text-xs text-slate-400 mt-2">Waiting for the moderator to reveal the answer…</p>{/if}
+          {#if isQuiz && !cj.reveal_answer}<p class="text-xs text-slate-400 mt-2">Waiting for the moderator to reveal the answer…</p>{/if}
         </div>
       {/if}
     {:else if isMultipleChoice}
@@ -1023,7 +1049,7 @@
     <!-- POLL & MULTIPLE CHOICE & QUIZ SCREEN -->
     {#if isPoll || isMultipleChoice || isQuiz}
       <div class="space-y-3 max-w-xl mx-auto w-full my-auto">
-        {#if isQuiz && cj.reveal_answer}
+        {#if isQuiz && cj.reveal_answer && correctAnswer}
           <div class="flex items-center justify-between px-3 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs font-semibold">
             <span class="flex items-center gap-1.5"><Check class="w-4 h-4" /> Answer Revealed</span>
             <span>{quizStats.percentCorrect}% correct ({quizStats.correct}/{quizStats.total})</span>
@@ -1250,12 +1276,13 @@
               <div class="flex items-center gap-2">
                 <button
                   type="button"
-                  onclick={() => (editCorrectAnswer = option)}
-                  class="h-8 px-2.5 rounded-lg border text-xs font-semibold flex items-center gap-1 transition {editCorrectAnswer === option ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400 font-bold' : 'border-surface-200 text-surface-400 hover:border-surface-300'}"
+                  onclick={() => (editCorrectIndex = index)}
+                  aria-pressed={editCorrectIndex === index}
+                  class="h-8 px-2.5 rounded-lg border text-xs font-semibold flex items-center gap-1 transition {editCorrectIndex === index ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400 font-bold' : 'border-surface-200 text-surface-400 hover:border-surface-300'}"
                   title="Mark as correct answer"
                 >
                   <Check class="w-3.5 h-3.5" />
-                  {editCorrectAnswer === option ? 'Correct' : 'Mark'}
+                  {editCorrectIndex === index ? 'Correct' : 'Mark'}
                 </button>
                 <input class="input-field flex-1" type="text" value={option}
                   oninput={(e) => updateEditOption(index, (e.currentTarget as HTMLInputElement).value)}
@@ -1424,9 +1451,13 @@
       <div class="border border-surface-200 dark:border-surface-800 rounded-xl p-4 space-y-3">
         <div class="flex items-center justify-between">
           <div class="text-sm font-semibold">Quiz Results</div>
-          <div class="text-xs font-mono text-emerald-600 dark:text-emerald-400 font-bold">
-            {quizStats.percentCorrect}% correct ({quizStats.correct}/{quizStats.total})
-          </div>
+          {#if correctAnswer}
+            <div class="text-xs font-mono text-emerald-600 dark:text-emerald-400 font-bold">
+              {quizStats.percentCorrect}% correct ({quizStats.correct}/{quizStats.total})
+            </div>
+          {:else}
+            <div class="text-xs font-semibold text-amber-600 dark:text-amber-400" role="status">No correct answer set — edit to mark one</div>
+          {/if}
         </div>
         <div class="flex items-end gap-4">
           {#each pollResults() as row}

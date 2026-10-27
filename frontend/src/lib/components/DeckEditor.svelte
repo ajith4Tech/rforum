@@ -11,6 +11,7 @@
   import { theme } from '$lib/theme';
   import { getFitTitleStyle } from '$lib/fitTitle';
   import { sanitizeRichHtml } from '$lib/sanitizeHtml';
+  import { validQuizAnswer } from '$lib/quiz';
 
   let {
     sessionId,
@@ -73,8 +74,20 @@
   let localOptions = $state<string[]>([]);
   let localPrompt = $state('');
   let localVideoUrl = $state('');
-  let localCorrectAnswer = $state('');
+  // Quiz: the correct answer is tracked by option position while editing, so
+  // renaming or removing options can never leave it pointing at stale text.
+  let localCorrectIndex = $state<number | null>(null);
   let localRevealAnswer = $state(false);
+  // Why the marked option can't be saved as the answer right now: 'blank'
+  // while its text is being retyped, 'duplicate' when another option has the
+  // same text (the answer would be ambiguous), 'none' when nothing is marked.
+  const correctOptionIssue = $derived.by((): 'none' | 'blank' | 'duplicate' | null => {
+    if (localCorrectIndex === null) return 'none';
+    const text = localOptions[localCorrectIndex] ?? '';
+    if (!text.trim()) return 'blank';
+    if (localOptions.filter((o) => o === text).length > 1) return 'duplicate';
+    return null;
+  });
   let localMin = $state(1);
   let localMax = $state(10);
   let localStep = $state(1);
@@ -144,7 +157,12 @@
       localOptions = cj.options ? [...cj.options] : ['Option 1', 'Option 2'];
       localPrompt = cj.prompt ?? '';
       localVideoUrl = cj.video_url || cj.url || '';
-      localCorrectAnswer = cj.correct_answer ?? '';
+      // Read from cj, not localOptions: reading that $state here would make
+      // every option keystroke re-run this effect and reset the buffers.
+      const correctIdx = typeof cj.correct_answer === 'string' && cj.correct_answer !== '' && Array.isArray(cj.options)
+        ? cj.options.indexOf(cj.correct_answer)
+        : -1;
+      localCorrectIndex = correctIdx === -1 ? null : correctIdx;
       localRevealAnswer = Boolean(cj.reveal_answer);
       localMin = typeof cj.min === 'number' ? cj.min : 1;
       localMax = typeof cj.max === 'number' ? cj.max : 10;
@@ -162,11 +180,19 @@
     }
   });
 
-  async function saveActiveSlideContent(updates: Record<string, unknown> = {}) {
+  /** `force` is for explicit saves (the leave-page prompt). Autosaves of a
+   * quiz wait while the marked option is blank or ambiguous: saving drops
+   * blank options, which would silently unmark the answer mid-retype. */
+  async function saveActiveSlideContent(updates: Record<string, unknown> = {}, { force = false } = {}) {
     if (!activeSlide) return;
     if (saveTimer) {
       clearTimeout(saveTimer);
       saveTimer = null;
+    }
+    const quizAnswerUnsettled = isQuiz && (correctOptionIssue === 'blank' || correctOptionIssue === 'duplicate');
+    if (quizAnswerUnsettled && !force) {
+      savePending = true; // shown as unsaved; saved once the option text is fixed
+      return;
     }
     const cj = { ...(activeSlide.content_json || {}) };
     if (activeType === 'CONTENT') {
@@ -179,8 +205,17 @@
       cj.question = localQuestion;
       cj.options = localOptions.filter(o => o.trim() !== '');
       if (isQuiz) {
-        cj.correct_answer = localCorrectAnswer;
-        cj.reveal_answer = localRevealAnswer;
+        const stored = activeSlide.content_json || {};
+        if (localCorrectIndex !== null && !quizAnswerUnsettled) {
+          cj.correct_answer = localOptions[localCorrectIndex];
+        } else if (localCorrectIndex === null && stored.correct_answer && !validQuizAnswer(stored)) {
+          // Untouched invalid legacy answer: kept as stored (never treated as correct).
+          cj.correct_answer = stored.correct_answer;
+        } else {
+          cj.correct_answer = '';
+        }
+        // Revealing requires a valid answer (same rule as the server, $lib/quiz).
+        cj.reveal_answer = localRevealAnswer && validQuizAnswer(cj) !== '';
       }
     } else if (activeType === 'FEEDBACK') {
       cj.prompt = localPrompt;
@@ -256,6 +291,8 @@
   }
   function removePollOption(index: number) {
     localOptions = localOptions.filter((_, i) => i !== index);
+    if (localCorrectIndex === index) localCorrectIndex = null;
+    else if (localCorrectIndex !== null && localCorrectIndex > index) localCorrectIndex -= 1;
     void saveActiveSlideContent();
   }
 
@@ -293,7 +330,7 @@
   });
 
   $effect(() => {
-    onSaveReady?.(saveActiveSlideContent);
+    onSaveReady?.(() => saveActiveSlideContent({}, { force: true }));
     return () => onSaveReady?.(null);
   });
 </script>
@@ -604,13 +641,14 @@
               ></textarea>
               <div class="w-full space-y-2 text-left max-h-[50%] overflow-y-auto pr-1">
                 {#each localOptions as opt, i}
-                  <div class="flex items-center gap-2 bg-slate-50 dark:bg-slate-950/50 p-2.5 rounded-xl border {localCorrectAnswer === opt ? 'border-emerald-500 ring-1 ring-emerald-500/30 bg-emerald-50/20 dark:bg-emerald-950/20' : 'border-slate-200 dark:border-slate-800'}">
+                  <div class="flex items-center gap-2 bg-slate-50 dark:bg-slate-950/50 p-2.5 rounded-xl border {localCorrectIndex === i ? 'border-emerald-500 ring-1 ring-emerald-500/30 bg-emerald-50/20 dark:bg-emerald-950/20' : 'border-slate-200 dark:border-slate-800'}">
                     <button
                       type="button"
-                      onclick={() => { localCorrectAnswer = opt; debouncedSave(); }}
-                      class="h-7 px-2 rounded-lg border text-xs font-semibold flex items-center gap-1 transition {localCorrectAnswer === opt ? 'bg-emerald-500 text-white border-emerald-500' : 'border-slate-300 text-slate-500 hover:border-slate-400'}"
+                      onclick={() => { localCorrectIndex = i; debouncedSave(); }}
+                      aria-pressed={localCorrectIndex === i}
+                      class="h-7 px-2 rounded-lg border text-xs font-semibold flex items-center gap-1 transition {localCorrectIndex === i ? 'bg-emerald-500 text-white border-emerald-500' : 'border-slate-300 text-slate-500 hover:border-slate-400'}"
                     >
-                      <Check class="w-3 h-3" /> {localCorrectAnswer === opt ? 'Correct' : 'Mark'}
+                      <Check class="w-3 h-3" /> {localCorrectIndex === i ? 'Correct' : 'Mark'}
                     </button>
                     <input
                       type="text"
@@ -624,6 +662,13 @@
                 {/each}
                 <button onclick={addPollOption} class="text-xs text-purple-600 dark:text-purple-400 hover:underline font-semibold text-center w-full pt-1">+ Add Option</button>
               </div>
+              {#if correctOptionIssue}
+                <p class="text-xs font-medium text-amber-600 dark:text-amber-400" role="status">
+                  {#if correctOptionIssue === 'blank'}Type the correct option's text — changes are saved once it isn't empty.
+                  {:else if correctOptionIssue === 'duplicate'}Another option has the same text as the correct answer — change one of them to save.
+                  {:else}No correct answer marked — mark one before revealing the answer.{/if}
+                </p>
+              {/if}
             </div>
 
           <!-- INTERACTIVE: SCALE -->

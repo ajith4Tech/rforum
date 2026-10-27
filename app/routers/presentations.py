@@ -32,7 +32,7 @@ import json
 
 from app.auth import get_current_user
 from app.services.guest_view import merge_slide_content_json
-from app.services.slide_content import sanitize_slide_content_json
+from app.services.slide_content import quiz_content_error, sanitize_slide_content_json
 from app.config import get_settings
 from app.database import get_db
 from app.rate_limit import check_rate_limit
@@ -1237,6 +1237,9 @@ async def insert_timeline_item(
     content_json = sanitize_slide_content_json(payload.content_json)
     if payload.item_type == TimelineItemType.RATING:
         content_json["mode"] = "rating_only"
+    quiz_error = quiz_content_error(content_json)
+    if quiz_error:
+        raise HTTPException(status_code=422, detail=quiz_error)
 
     slide = Slide(session_id=session.id, type=slide_type, order=0, content_json=content_json, is_active=False)
     db.add(slide)
@@ -1282,6 +1285,9 @@ async def update_timeline_item(
     content_json = sanitize_slide_content_json(merge_slide_content_json(existing, payload.content_json))
     if item.item_type == TimelineItemType.RATING:
         content_json["mode"] = "rating_only"
+    quiz_error = quiz_content_error(content_json, existing)
+    if quiz_error:
+        raise HTTPException(status_code=422, detail=quiz_error)
 
     await db.execute(
         update(Slide).where(Slide.id == item.slide_id).values(content_json=content_json)

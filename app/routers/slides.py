@@ -30,7 +30,7 @@ from app.services.file_processing import (
     validate_upload,
 )
 from app.services.guest_view import merge_slide_content_json
-from app.services.slide_content import sanitize_slide_content_json
+from app.services.slide_content import quiz_content_error, sanitize_slide_content_json
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +108,9 @@ async def create_slide(
 
     data = payload.model_dump()
     data["content_json"] = sanitize_slide_content_json(data.get("content_json"))
+    quiz_error = quiz_content_error(data["content_json"])
+    if quiz_error:
+        raise HTTPException(status_code=422, detail=quiz_error)
 
     slide = Slide(session_id=uuid.UUID(session_id), **data)
     db.add(slide)
@@ -162,6 +165,9 @@ async def update_slide(
         update_data["content_json"] = sanitize_slide_content_json(
             merge_slide_content_json(slide.content_json, update_data.get("content_json"))
         )
+        quiz_error = quiz_content_error(update_data["content_json"], slide.content_json)
+        if quiz_error:
+            raise HTTPException(status_code=422, detail=quiz_error)
 
     # If activating this slide, deactivate all others in the session
     if update_data.get("is_active"):

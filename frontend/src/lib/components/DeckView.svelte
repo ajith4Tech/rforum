@@ -9,6 +9,7 @@
   import type { VideoControlPayload } from '$lib/components/ContentSlideCanvas.svelte';
   import { getFitTitleStyle, responsesForSlide } from '$lib/fitTitle';
   import { metaForItem } from '$lib/timelineTypes';
+  import { validQuizAnswer } from '$lib/quiz';
   import type { ConnectionStatus as WsStatus } from '$lib/ws';
 
   let {
@@ -66,6 +67,9 @@
     (selectedSlide.content_json.interaction_type === 'QUIZ' || selectedSlide.content_json.mode === 'quiz')
   ));
   const quizRevealed = $derived(Boolean(selectedSlide?.content_json?.reveal_answer));
+  // Revealing a quiz without a valid answer would tell every guest they were
+  // wrong — only allow it once one is set. Hiding is always allowed.
+  const quizHasAnswer = $derived(validQuizAnswer(selectedSlide?.content_json) !== '');
 
   const label = (item: any) => {
     const slide = item.slide || item;
@@ -97,10 +101,11 @@
       <button class="btn-primary flex items-center gap-2" onclick={() => onPresent(selectedId)}><MonitorPlay class="w-4 h-4" />Present</button>
       {#if isQuizSelected && onToggleRevealAnswer}
         <button
-          class="btn-secondary flex items-center gap-2"
+          class="btn-secondary flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
           onclick={() => selectedId && onToggleRevealAnswer?.(selectedId)}
+          disabled={!quizRevealed && !quizHasAnswer}
           aria-label={quizRevealed ? 'Hide quiz answer' : 'Reveal quiz answer'}
-          title={quizRevealed ? 'Hide quiz answer' : 'Reveal quiz answer'}
+          title={quizRevealed ? 'Hide quiz answer' : quizHasAnswer ? 'Reveal quiz answer' : 'Mark a correct answer in Edit before revealing'}
         >
           {#if quizRevealed}<EyeOff class="w-4 h-4" />Hide Answer{:else}<Eye class="w-4 h-4" />Reveal Answer{/if}
         </button>

@@ -26,6 +26,7 @@
   import { upsertTimelineItemFromWs } from '$lib/timelineTypes';
   import { UndoManager, type IdBox } from '$lib/undoManager';
   import { mergeResponsesById, responsesForSlide } from '$lib/fitTitle';
+  import { quizContentForCopy } from '$lib/quiz';
 
   const sessionId = $derived($page.params.sessionId);
 
@@ -601,7 +602,7 @@
       const slide = await createSlide(sessionId, {
         type: source.type,
         order: source.order ?? index,
-        content_json: { ...source.content_json }
+        content_json: { ...quizContentForCopy(source.content_json) }
       });
       slides = [...slides.slice(0, index + 1), slide, ...slides.slice(index + 1)];
       await selectSlide(slide.id);
@@ -1282,18 +1283,26 @@
    * directly, matching the exact pattern activateSlide/savePollSlide etc.
    * already use for legacy content edits. */
   async function handleToggleQuizReveal(itemId: string) {
-    if (session?.presentation_id) {
-      const item = (timeline?.items || []).find((i: any) => i.id === itemId);
-      const cj = item?.slide?.content_json || {};
-      await handleUpdateTimelineItemContent(itemId, { ...cj, reveal_answer: !cj.reveal_answer });
-    } else {
-      const slide = slides.find((s) => s.id === itemId);
-      if (!slide) return;
-      const cj = slide.content_json || {};
-      const nextContentJson = { ...cj, reveal_answer: !cj.reveal_answer };
-      const updated = await updateSlide(sessionId, itemId, { content_json: nextContentJson });
-      slides = slides.map((s) => (s.id === itemId ? updated : s));
-      ws?.send('slide_change', { slide_id: itemId, slide: updated, activation: false });
+    // Failures (e.g. the server refusing a quiz whose answer isn't one of its
+    // options) are shown in the save-error banner by withSaveState.
+    try {
+      if (session?.presentation_id) {
+        const item = (timeline?.items || []).find((i: any) => i.id === itemId);
+        const cj = item?.slide?.content_json || {};
+        await handleUpdateTimelineItemContent(itemId, { ...cj, reveal_answer: !cj.reveal_answer });
+      } else {
+        const slide = slides.find((s) => s.id === itemId);
+        if (!slide) return;
+        const cj = slide.content_json || {};
+        const nextContentJson = { ...cj, reveal_answer: !cj.reveal_answer };
+        await withSaveState(async () => {
+          const updated = await updateSlide(sessionId, itemId, { content_json: nextContentJson });
+          slides = slides.map((s) => (s.id === itemId ? updated : s));
+          ws?.send('slide_change', { slide_id: itemId, slide: updated, activation: false });
+        });
+      }
+    } catch {
+      // Already surfaced.
     }
   }
 
@@ -1331,7 +1340,7 @@
     if (!item || item.item_type === 'PAGE' || !item.slide) return;
     const position = item.order + 1;
     await withSaveState(async () => {
-      const created = await insertTimelineItem(sessionId, item.item_type, position, item.slide.content_json || {});
+      const created = await insertTimelineItem(sessionId, item.item_type, position, quizContentForCopy(item.slide.content_json || {}));
       await loadPresentationData();
       pushCreatedTimelineItemUndo(created, position, 'Duplicate interaction');
     });
