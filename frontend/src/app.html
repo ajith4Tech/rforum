@@ -53,6 +53,13 @@
         html.setAttribute('data-theme', theme);
       })();
     </script>
+    <!-- Paint the themed background and fallback type before the app's CSS
+         chunk arrives, so the first frame isn't a white flash. Values mirror
+         the body rules in app.css (surface-50/950). -->
+    <style>
+      html { background: #f6f7f9; color: #0f1117; font-family: Inter, system-ui, sans-serif; }
+      html.dark { background: #0f1117; color: #eceef2; color-scheme: dark; }
+    </style>
     %sveltekit.head%
   </head>
   <body data-sveltekit-preload-data="hover">

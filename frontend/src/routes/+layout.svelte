@@ -1,4 +1,15 @@
 <script>
+  // Only the weights the UI actually uses (font-medium…font-extrabold; mono
+  // 400/500). Each @font-face carries a unicode-range and font-display: swap,
+  // so the browser fetches just the subsets a page renders and shows
+  // fallback text meanwhile.
+  import '@fontsource/inter/400.css';
+  import '@fontsource/inter/500.css';
+  import '@fontsource/inter/600.css';
+  import '@fontsource/inter/700.css';
+  import '@fontsource/inter/800.css';
+  import '@fontsource/jetbrains-mono/400.css';
+  import '@fontsource/jetbrains-mono/500.css';
   import '../app.css';
   import { theme, toggleTheme } from '$lib/theme';
   import { Moon, Sun } from 'lucide-svelte';

@@ -35,7 +35,14 @@ const sw = self as unknown as ServiceWorkerGlobalScope;
 
 const SHELL_CACHE = `rforum-shell-${version}`;
 const SHELL_URL = '/index.html';
-const PRECACHE = [...build, ...files];
+// @fontsource emits every unicode-range subset of every weight in woff2 and
+// woff (~1.5 MB). Pages only ever fetch the subsets they render, so precache
+// just the Latin woff2 files and the heading font; the rest still load on
+// demand (1-year immutable HTTP cache) and fall back to system fonts offline.
+const isFont = (path: string) => /\.(woff2?|ttf|otf)$/.test(path);
+const isPrecachedFont = (path: string) =>
+  /-latin-\d+-normal\.[\w-]+\.woff2$/.test(path) || path.includes('/GlacialIndifference-');
+const PRECACHE = [...build.filter((path) => !isFont(path) || isPrecachedFont(path)), ...files];
 const PRECACHE_PATHS = new Set(PRECACHE);
 
 const LIVE_PREFIX = 'rforum-live-';
