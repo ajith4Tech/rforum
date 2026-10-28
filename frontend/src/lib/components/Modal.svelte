@@ -74,7 +74,11 @@
       if (!focusable || focusable.length === 0) return;
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
-      if (e.shiftKey && document.activeElement === first) {
+      // The dialog container itself (tabindex=-1) holds focus when it has no
+      // focusable child or after a click on static content: Shift+Tab from it
+      // would otherwise leave the dialog.
+      const active = document.activeElement;
+      if (e.shiftKey && (active === first || active === dialogEl)) {
         e.preventDefault();
         last.focus();
       } else if (!e.shiftKey && document.activeElement === last) {
@@ -126,7 +130,7 @@
       {#if showCloseButton}
         <button
           onclick={onClose}
-          class="absolute top-3 right-3 p-1.5 rounded-lg text-surface-400 hover:text-surface-200 hover:bg-surface-800/60 transition z-10"
+          class="absolute top-3 right-3 p-1.5 rounded-lg text-surface-500 hover:text-surface-900 hover:bg-surface-100 dark:text-surface-400 dark:hover:text-surface-100 dark:hover:bg-surface-800 transition-colors z-10"
           aria-label="Close"
         >
           <X class="w-4 h-4" />

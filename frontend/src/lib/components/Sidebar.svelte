@@ -91,17 +91,17 @@
 
 <aside class="col-span-12 lg:col-span-3 order-2 lg:order-1 space-y-4">
   <!-- Session info card -->
-  <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5">
+  <div class="rounded-2xl border border-surface-200 dark:border-surface-800 bg-white dark:bg-surface-900 p-5">
     <div class="flex items-center justify-between mb-3">
-      <div class="text-lg font-semibold text-slate-900 dark:text-white truncate">{session?.title}</div>
+      <div class="text-lg font-semibold text-surface-900 dark:text-surface-100 truncate">{session?.title}</div>
       <ConnectionStatus status={wsStatus} />
     </div>
-    <div class="text-xs text-slate-500 font-mono mb-4">{session?.unique_code}</div>
+    <div class="text-xs text-surface-500 font-mono mb-4">{session?.unique_code}</div>
     <button
       onclick={onToggleLive}
-      class="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all active:scale-95 {session?.is_live
-        ? 'bg-red-500/10 text-red-500 border border-red-500/20 hover:bg-red-500/20'
-        : 'bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white shadow-lg shadow-purple-500/20'}"
+      class="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition active:scale-95 {session?.is_live
+        ? 'bg-red-500/10 text-red-700 dark:text-red-300 border border-red-500/20 hover:bg-red-500/20'
+        : 'bg-gradient-to-r from-brand-600 to-brand-500 hover:from-brand-700 hover:to-brand-600 text-white shadow-lg shadow-brand-600/25'}"
     >
       <Radio class="w-4 h-4" />
       {session?.is_live ? 'Stop session' : 'Start session'}
@@ -109,36 +109,36 @@
   </div>
 
   <!-- Add slide grid -->
-  <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5">
-    <div class="text-sm font-semibold text-slate-900 dark:text-white mb-3">Add slide</div>
+  <div class="rounded-2xl border border-surface-200 dark:border-surface-800 bg-white dark:bg-surface-900 p-5">
+    <div class="text-sm font-semibold text-surface-900 dark:text-surface-100 mb-3">Add slide</div>
     <div class="grid grid-cols-3 gap-2">
       {#each Object.keys(slideLabels) as key}
         {@const Icon = slideIcons[key]}
         <button
           onclick={() => onAddSlide(key)}
-          class="flex flex-col items-center gap-1.5 p-3 rounded-xl border border-slate-200 dark:border-slate-800 hover:border-purple-500/40 hover:bg-purple-50 dark:hover:bg-purple-500/5 transition-all group"
+          class="flex flex-col items-center gap-1.5 p-3 rounded-xl border border-surface-200 dark:border-surface-800 hover:border-brand-500/40 hover:bg-brand-50 dark:hover:bg-brand-500/5 transition-colors group"
           title={slideLabels[key]}
         >
           {#if Icon}
-            <Icon class="w-5 h-5 text-slate-400 group-hover:text-purple-500 transition-colors" />
+            <Icon class="w-5 h-5 text-surface-400 group-hover:text-brand-500 transition-colors" />
           {/if}
-          <span class="text-[10px] font-medium text-slate-500 dark:text-slate-400 group-hover:text-purple-600 dark:group-hover:text-purple-400 transition-colors">{slideLabels[key]}</span>
+          <span class="text-[10px] font-medium text-surface-600 dark:text-surface-400 group-hover:text-brand-700 dark:group-hover:text-brand-400 transition-colors">{slideLabels[key]}</span>
         </button>
       {/each}
     </div>
   </div>
 
   <!-- Slides list -->
-  <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5">
+  <div class="rounded-2xl border border-surface-200 dark:border-surface-800 bg-white dark:bg-surface-900 p-5">
     <div class="flex items-center justify-between mb-3">
-      <div class="text-sm font-semibold text-slate-900 dark:text-white">Slides</div>
-      <span class="text-xs text-slate-400">{slides.length}</span>
+      <div class="text-sm font-semibold text-surface-900 dark:text-surface-100">Slides</div>
+      <span class="text-xs text-surface-500 dark:text-surface-400">{slides.length}</span>
     </div>
     {#if slides.length === 0}
       <div class="flex flex-col items-center gap-2 py-8 text-center">
-        <Layers class="w-9 h-9 text-slate-300 dark:text-slate-700" />
-        <p class="text-sm font-medium text-slate-500 dark:text-slate-400">No slides yet</p>
-        <p class="text-xs text-slate-400 dark:text-slate-500 max-w-[18rem]">Add a Poll, Q&amp;A, Feedback, Content or Word Cloud slide above to get started.</p>
+        <Layers class="w-9 h-9 text-surface-300 dark:text-surface-700" />
+        <p class="text-sm font-medium text-surface-500 dark:text-surface-400">No slides yet</p>
+        <p class="text-xs text-surface-500 dark:text-surface-400 max-w-[18rem]">Add a Poll, Q&amp;A, Feedback, Content or Word Cloud slide above to get started.</p>
       </div>
     {:else}
       <div class="space-y-1">
@@ -147,7 +147,7 @@
             ondragover={(e) => handleDragOver(e, index)}
             ondragleave={handleDragLeave}
             ondrop={(e) => handleDrop(e, index)}
-            class="rounded-lg transition-all {dragOverIndex === index ? 'ring-2 ring-purple-400' : ''}"
+            class="rounded-lg transition-shadow {dragOverIndex === index ? 'ring-2 ring-brand-400' : ''}"
           >
             <div ondragstart={() => handleDragStart(slide.id)}>
               <SlideCard

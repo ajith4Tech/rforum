@@ -23,14 +23,14 @@
   const canNext = $derived(offset + itemCount < total);
 </script>
 
-<div class="flex items-center justify-between gap-3 pt-2">
-  <p class="text-xs text-surface-500 dark:text-surface-400">
+<nav class="flex items-center justify-between gap-3 pt-2" aria-label="Pagination">
+  <p class="text-xs text-surface-500 dark:text-surface-400" aria-live="polite">
     Displaying {from}–{to} of {total}
   </p>
   <div class="flex items-center gap-2">
     <button
       type="button"
-      class="btn-secondary text-sm flex items-center gap-1.5 px-3 py-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+      class="btn-secondary text-sm flex items-center gap-1.5 px-3 py-1.5"
       onclick={onPrev}
       disabled={!canPrev}
       aria-label="Previous page"
@@ -40,7 +40,7 @@
     </button>
     <button
       type="button"
-      class="btn-secondary text-sm flex items-center gap-1.5 px-3 py-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+      class="btn-secondary text-sm flex items-center gap-1.5 px-3 py-1.5"
       onclick={onNext}
       disabled={!canNext}
       aria-label="Next page"
@@ -49,4 +49,4 @@
       <ChevronRight class="w-3.5 h-3.5" />
     </button>
   </div>
-</div>
+</nav>

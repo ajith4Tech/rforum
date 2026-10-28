@@ -1,6 +1,7 @@
 <script lang="ts">
   import { listUpcomingPublicEvents } from '$lib/api';
-  import { Calendar, ExternalLink } from 'lucide-svelte';
+  import { isToday, parseEventDate } from '$lib/dates';
+  import { Calendar, ExternalLink, AlertTriangle, RefreshCw } from 'lucide-svelte';
   import { onMount, onDestroy } from 'svelte';
   import Nav from '$lib/components/Nav.svelte';
 
@@ -16,7 +17,7 @@
     const now = new Date();
     const updated: typeof countdowns = {};
     for (const event of upcomingEvents) {
-      const target = new Date(event.event_date + 'T00:00:00');
+      const target = parseEventDate(event.event_date);
       const diff = target.getTime() - now.getTime();
       if (diff <= 0) {
         updated[event.id] = { days: 0, hours: 0, minutes: 0, seconds: 0 };
@@ -32,21 +33,23 @@
     countdowns = updated;
   }
 
-  function isToday(dateStr: string) {
-    return dateStr === new Date().toISOString().slice(0, 10);
-  }
-
-  onMount(async () => {
+  async function loadEvents() {
+    loadingEvents = true;
+    eventsError = '';
     try {
       const data = await listUpcomingPublicEvents();
       upcomingEvents = Array.isArray(data) ? data : [];
     } catch (e: any) {
-      eventsError = e.message || 'Could not load events';
+      eventsError = e?.message || 'Could not load events';
     } finally {
       loadingEvents = false;
       computeCountdowns();
-      countdownInterval = setInterval(computeCountdowns, 1000);
     }
+  }
+
+  onMount(async () => {
+    await loadEvents();
+    countdownInterval = setInterval(computeCountdowns, 1000);
   });
 
   onDestroy(() => {
@@ -65,7 +68,7 @@
     <div class="mx-auto w-full max-w-full sm:max-w-2xl md:max-w-4xl">
       <!-- Logo -->
       <div class="flex justify-center mb-6 sm:mb-8">
-        <img src="/logo-mascot.webp" alt="Tech Good Community" class="w-20 h-auto sm:w-28 md:w-32 lg:w-40 opacity-80 hover:opacity-100 transition-opacity duration-300" />
+        <img src="/logo-mascot.webp" alt="Tech Good Community" width="160" height="200" class="w-20 h-auto sm:w-28 md:w-32 lg:w-40 opacity-80 hover:opacity-100 transition-opacity duration-300" />
       </div>
 
       <!-- Compact page header -->
@@ -76,7 +79,32 @@
 
       <!-- Events list -->
       {#if loadingEvents}
-        <div class="card p-8 text-center text-surface-400">Loading events…</div>
+        <div class="space-y-5" role="status" aria-label="Loading events">
+          <div class="card space-y-3" aria-hidden="true">
+            <div class="skeleton h-5 w-24 rounded-full"></div>
+            <div class="skeleton h-7 w-2/3 rounded-lg"></div>
+            <div class="skeleton h-4 w-1/3 rounded-lg"></div>
+          </div>
+          <div class="card space-y-3" aria-hidden="true">
+            <div class="skeleton h-5 w-24 rounded-full"></div>
+            <div class="skeleton h-7 w-1/2 rounded-lg"></div>
+            <div class="skeleton h-4 w-1/4 rounded-lg"></div>
+          </div>
+        </div>
+      {:else if eventsError}
+        <div class="card py-12 flex flex-col items-center gap-4 text-center" role="alert">
+          <div class="w-14 h-14 flex items-center justify-center rounded-2xl bg-red-500/10">
+            <AlertTriangle class="w-7 h-7 text-red-600 dark:text-red-400" />
+          </div>
+          <div>
+            <h3 class="text-lg font-heading font-semibold">Couldn't load events</h3>
+            <p class="text-sm text-surface-500 dark:text-surface-400 mt-1">{eventsError}</p>
+          </div>
+          <button type="button" class="btn-secondary text-sm flex items-center gap-2" onclick={loadEvents}>
+            <RefreshCw class="w-4 h-4" />
+            Try again
+          </button>
+        </div>
       {:else if upcomingEvents.length === 0}
         <div class="card py-16 flex flex-col items-center gap-4 text-center">
           <div class="w-14 h-14 flex items-center justify-center rounded-2xl bg-brand-500/10">
@@ -92,18 +120,18 @@
           {#each upcomingEvents as event (event.id)}
             {@const cd = countdowns[event.id]}
             {@const today = isToday(event.event_date)}
-            <div class="card card-interactive">
+            <div class="card">
               <!-- Event header -->
               <div class="flex flex-col sm:flex-row sm:items-start justify-between gap-6">
                 <div class="flex-1">
                   <div class="flex items-center gap-3 mb-2 flex-wrap">
                     {#if today}
-                      <span class="inline-flex items-center gap-1.5 text-live text-xs font-bold px-3 py-1 rounded-full bg-live/10 uppercase tracking-wider">
+                      <span class="badge-live text-rose-700 dark:text-live">
                         <span class="w-1.5 h-1.5 bg-live rounded-full animate-pulse-live"></span>
                         Today
                       </span>
                     {:else}
-                      <span class="inline-flex items-center gap-1.5 text-brand-400 text-xs font-semibold px-3 py-1 rounded-full bg-brand-500/10 uppercase tracking-wider">
+                      <span class="inline-flex items-center gap-1.5 text-brand-700 dark:text-brand-300 text-xs font-semibold px-3 py-1 rounded-full bg-brand-500/10 uppercase tracking-wider">
                         <Calendar class="w-3 h-3" />
                         Upcoming
                       </span>
@@ -111,7 +139,7 @@
                   </div>
                   <h3 class="text-2xl font-heading font-bold tracking-wide">{event.title}</h3>
                   <p class="text-sm text-surface-500 mt-1">
-                    {new Date(event.event_date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+                    {parseEventDate(event.event_date).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
                   </p>
                   {#if event.description}
                     <p class="text-sm text-surface-400 mt-2">{event.description}</p>
@@ -134,8 +162,8 @@
                 {:else if today}
                   <div class="flex-shrink-0 flex items-center">
                     <div class="rounded-2xl border border-live/30 bg-live/5 px-6 py-4 text-center">
-                      <span class="text-live text-2xl font-heading font-bold">LIVE</span>
-                      <p class="text-live/70 text-xs mt-1 uppercase tracking-wider">Today</p>
+                      <span class="text-rose-600 dark:text-live text-2xl font-heading font-bold">LIVE</span>
+                      <p class="text-rose-700 dark:text-live/80 text-xs mt-1 uppercase tracking-wider">Today</p>
                     </div>
                   </div>
                 {/if}
@@ -147,7 +175,7 @@
                   <h4 class="text-xs font-semibold uppercase tracking-widest text-surface-500 mb-3">Sessions</h4>
                   <div class="grid gap-2 grid-cols-1 sm:grid-cols-2">
                     {#each event.sessions as session (session.id)}
-                      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3 px-3 sm:px-4 py-2 sm:py-3 rounded-xl border border-surface-200 dark:border-surface-800 hover:border-surface-300 dark:hover:border-surface-700 transition">
+                      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3 px-3 sm:px-4 py-2 sm:py-3 rounded-xl border border-surface-200 dark:border-surface-800">
                         <div class="flex-1 min-w-0">
                           <div class="font-medium text-sm truncate">{session.title}</div>
                           <div class="font-mono text-xs text-surface-500 mt-0.5">{session.unique_code}</div>

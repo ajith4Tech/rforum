@@ -2,13 +2,14 @@
   import { page } from '$app/stores';
   import { goto } from '$app/navigation';
   import { tick } from 'svelte';
+  import Modal from './Modal.svelte';
   import { theme, toggleTheme } from '$lib/theme';
   import { changePassword } from '$lib/api';
   import { getEvents, getSessions } from '$lib/dataCache';
   import { debounce } from '$lib/debounce';
   import { cycleSearchIndex } from '$lib/search';
   import { isSuperAdmin, currentUser } from '$lib/stores';
-  import { Orbit, Moon, Sun, LogOut, ChevronDown, User, Lock, Info, Shield, Zap, Users, BarChart3, MessageSquare, LogIn, UserPlus, BookOpen, CalendarDays, Presentation, Radio, Layers, BarChart2, MessageCircleQuestion, Star, Cloud, Monitor, Eye, EyeOff, Search, X } from 'lucide-svelte';
+  import { Orbit, Moon, Sun, LogOut, ChevronDown, User, Lock, Info, Shield, Zap, Users, BarChart3, MessageSquare, LogIn, BookOpen, CalendarDays, Radio, Eye, EyeOff, Search, X } from 'lucide-svelte';
 
   let {
     authenticated = false,
@@ -18,12 +19,11 @@
     onLogout?: () => void;
   } = $props();
 
-  let profileOpen = $state(false);
-  let moderatorOpen = $state(false);
   let menuOpen = $state(false);
   let showAbout = $state(false);
   let showUserGuide = $state(false);
-  let guideSection = $state(0);
+  let menuButtonEl: HTMLButtonElement | null = $state(null);
+  let searchButtonEl: HTMLButtonElement | null = $state(null);
 
   let showChangePwd = $state(false);
   let showCurrentPwd = $state(false);
@@ -80,10 +80,33 @@
 
   function handleClickOutside(event: MouseEvent) {
     const target = event.target as HTMLElement;
-    if (!target.closest('[data-profile-menu]'))  profileOpen  = false;
-    if (!target.closest('[data-moderator-menu]')) moderatorOpen = false;
     if (!target.closest('[data-menu]')) menuOpen = false;
   }
+
+  /** Close the menu and hand focus back to its toggle, so a dialog opened
+   * from a menu item restores focus to something still in the DOM. */
+  function closeMenu() {
+    menuOpen = false;
+    menuButtonEl?.focus();
+  }
+
+  function handleWindowKeydown(e: KeyboardEvent) {
+    if (e.key !== 'Escape') return;
+    // Dialogs built on Modal handle their own Escape (and stop propagation).
+    if (showSearch) {
+      e.preventDefault();
+      closeSearch();
+    } else if (menuOpen) {
+      e.preventDefault();
+      closeMenu();
+    }
+  }
+
+  // Close the menu whenever the route changes (link click, back/forward).
+  $effect(() => {
+    $page.url.pathname;
+    menuOpen = false;
+  });
 
   async function runGlobalSearch(query: string) {
     const myRequest = ++searchRequestId;
@@ -137,12 +160,15 @@
 
   function closeSearch() {
     showSearch = false;
+    searchButtonEl?.focus();
   }
 
   function clearGlobalSearch() {
     searchQuery = '';
     debouncedQuery = '';
     activeIndex = 0;
+    // The clear button unmounts once the query is empty — keep focus in the dialog.
+    searchInputEl?.focus();
   }
 
   const combinedResults = $derived.by(() => [
@@ -174,7 +200,7 @@
   }
 
   function openChangePwd() {
-    menuOpen = false;
+    closeMenu();
     currentPwd = '';
     newPwd = '';
     showCurrentPwd = false;
@@ -203,9 +229,9 @@
   }
 </script>
 
-<svelte:window onclick={handleClickOutside} />
+<svelte:window onclick={handleClickOutside} onkeydown={handleWindowKeydown} />
 
-<nav class="fixed top-0 left-0 right-0 z-40 flex items-center justify-between px-4 sm:px-6 md:px-8 py-2.5 border-b backdrop-blur-md nav-bg">
+<nav aria-label="Main" class="fixed top-0 left-0 right-0 z-40 flex items-center justify-between px-4 sm:px-6 md:px-8 py-2.5 border-b backdrop-blur-md nav-bg">
   <div class="flex items-center gap-3 sm:gap-6">
     <a href={authenticated ? '/dashboard' : '/'} class="flex items-center gap-2">
       <Orbit class="w-7 h-7 text-brand-500 flex-shrink-0" />
@@ -217,9 +243,10 @@
         {#each navLinks as link}
           <a
             href={link.href}
-            class="px-3 py-1.5 rounded-lg text-base font-bold transition {isActive(link.href)
-              ? 'text-brand-500 bg-brand-500/10'
-              : 'text-surface-500 hover:text-surface-200 hover:bg-surface-800'}"
+            aria-current={isActive(link.href) ? 'page' : undefined}
+            class="px-3 py-1.5 rounded-lg text-base font-bold transition-colors {isActive(link.href)
+              ? 'text-brand-700 bg-brand-50 dark:text-brand-300 dark:bg-brand-500/10'
+              : 'text-surface-600 hover:text-surface-900 hover:bg-surface-100 dark:text-surface-400 dark:hover:text-surface-100 dark:hover:bg-surface-800'}"
           >
             {link.label}
           </a>
@@ -227,9 +254,10 @@
         {#if $isSuperAdmin}
           <a
             href="/dashboard/admin"
-            class="px-3 py-1.5 rounded-lg text-base font-bold transition flex items-center gap-1.5 {isActive('/dashboard/admin')
-              ? 'text-rose-500 bg-rose-500/10'
-              : 'text-surface-500 hover:text-rose-400 hover:bg-rose-500/10'}"
+            aria-current={isActive('/dashboard/admin') ? 'page' : undefined}
+            class="px-3 py-1.5 rounded-lg text-base font-bold transition-colors flex items-center gap-1.5 {isActive('/dashboard/admin')
+              ? 'text-rose-700 bg-rose-50 dark:text-rose-400 dark:bg-rose-500/10'
+              : 'text-surface-600 hover:text-rose-700 hover:bg-rose-50 dark:text-surface-400 dark:hover:text-rose-400 dark:hover:bg-rose-500/10'}"
           >
             <Shield class="w-3.5 h-3.5" />
             Admin
@@ -242,6 +270,7 @@
   <div class="flex items-center gap-2 sm:gap-3">
     {#if authenticated}
       <button
+        bind:this={searchButtonEl}
         onclick={openSearch}
         class="btn-secondary p-2 flex items-center justify-center"
         aria-label="Search events and sessions"
@@ -258,7 +287,7 @@
       rel="noopener noreferrer"
       title="View Rforum on GitHub"
       aria-label="View Rforum on GitHub"
-      class="btn-secondary p-2 hover:bg-surface-100 dark:hover:bg-surface-800 transition flex items-center justify-center"
+      class="btn-secondary p-2 flex items-center justify-center"
     >
       <svg
         class="w-5 h-5 text-surface-600 dark:text-surface-300"
@@ -273,10 +302,11 @@
     <!-- Unified menu -->
     <div class="relative" data-menu>
       <button
+        bind:this={menuButtonEl}
         onclick={() => menuOpen = !menuOpen}
         class="btn-secondary flex items-center gap-2 px-2.5 py-1.5"
-        aria-label="Account menu"
-        aria-haspopup="true"
+        aria-label={authenticated ? 'Menu: navigation and account' : 'Menu'}
+        aria-controls="nav-menu"
         aria-expanded={menuOpen}
       >
         {#if $isSuperAdmin}
@@ -284,17 +314,17 @@
         {:else}
           <User class="w-4 h-4" />
         {/if}
-        <ChevronDown class="w-3 h-3 text-surface-400 transition-transform {menuOpen ? 'rotate-180' : ''}" />
+        <ChevronDown class="w-3 h-3 text-surface-500 dark:text-surface-400 transition-transform {menuOpen ? 'rotate-180' : ''}" />
       </button>
 
       {#if menuOpen}
-        <div class="absolute right-0 mt-3 w-[min(20rem,calc(100vw-2rem))] rounded-2xl shadow-2xl border border-surface-200 dark:border-surface-700/60 bg-white dark:bg-surface-900 overflow-hidden animate-fade-in">
+        <div id="nav-menu" class="absolute right-0 mt-3 w-[min(20rem,calc(100vw-2rem))] rounded-2xl shadow-2xl border border-surface-200 dark:border-surface-700/60 bg-white dark:bg-surface-900 overflow-hidden animate-fade-in">
           {#if authenticated && $currentUser}
             <div class="px-4 py-3 border-b border-surface-200 dark:border-surface-700/60">
               <p class="text-xs font-semibold text-surface-900 dark:text-surface-100 truncate">{$currentUser.email}</p>
               <div class="flex items-center gap-1.5 mt-1">
                 {#if $isSuperAdmin}
-                  <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-rose-500/10 text-rose-500">
+                  <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-rose-500/10 text-rose-700 dark:text-rose-400">
                     <Shield class="w-3 h-3" /> Super Admin
                   </span>
                 {:else}
@@ -303,7 +333,7 @@
                   </span>
                 {/if}
                 {#if $currentUser && !$currentUser.is_active}
-                  <span class="px-2 py-0.5 rounded-full text-xs font-bold bg-amber-500/10 text-amber-500">Disabled</span>
+                  <span class="px-2 py-0.5 rounded-full text-xs font-bold bg-amber-500/10 text-amber-700 dark:text-amber-400">Disabled</span>
                 {/if}
               </div>
             </div>
@@ -315,8 +345,9 @@
                 <a
                   href={link.href}
                   onclick={() => menuOpen = false}
-                  class="flex items-center px-3 py-2.5 rounded-xl text-sm font-semibold transition {isActive(link.href)
-                    ? 'text-brand-500 bg-brand-500/10'
+                  aria-current={isActive(link.href) ? 'page' : undefined}
+                  class="flex items-center px-3 py-2.5 rounded-xl text-sm font-semibold transition-colors {isActive(link.href)
+                    ? 'text-brand-700 bg-brand-50 dark:text-brand-300 dark:bg-brand-500/10'
                     : 'text-surface-700 dark:text-surface-200 hover:bg-surface-100 dark:hover:bg-surface-800'}"
                 >
                   {link.label}
@@ -326,8 +357,9 @@
                 <a
                   href="/dashboard/admin"
                   onclick={() => menuOpen = false}
-                  class="mt-1 flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-semibold transition {isActive('/dashboard/admin')
-                    ? 'text-rose-500 bg-rose-500/10'
+                  aria-current={isActive('/dashboard/admin') ? 'page' : undefined}
+                  class="mt-1 flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-semibold transition-colors {isActive('/dashboard/admin')
+                    ? 'text-rose-700 bg-rose-50 dark:text-rose-400 dark:bg-rose-500/10'
                     : 'text-surface-700 dark:text-surface-200 hover:bg-rose-50 dark:hover:bg-rose-500/10'}"
                 >
                   <Shield class="w-3.5 h-3.5" />
@@ -339,15 +371,15 @@
 
           <div class="px-2 py-1.5 space-y-0.5">
             <button
-              onclick={() => { menuOpen = false; showAbout = true; }}
-              class="flex items-center gap-3 w-full px-3 py-2 rounded-xl text-sm font-semibold text-surface-700 dark:text-surface-200 hover:bg-surface-100 dark:hover:bg-surface-800 transition"
+              onclick={() => { closeMenu(); showAbout = true; }}
+              class="flex items-center gap-3 w-full px-3 py-2 rounded-xl text-sm font-semibold text-surface-700 dark:text-surface-200 hover:bg-surface-100 dark:hover:bg-surface-800 transition-colors"
             >
               <Info class="w-5 h-5 flex-shrink-0 text-brand-500" />
               About
             </button>
             <button
               onclick={toggleTheme}
-              class="flex items-center gap-3 w-full px-3 py-2 rounded-xl text-sm font-semibold text-surface-700 dark:text-surface-200 hover:bg-surface-100 dark:hover:bg-surface-800 transition"
+              class="flex items-center gap-3 w-full px-3 py-2 rounded-xl text-sm font-semibold text-surface-700 dark:text-surface-200 hover:bg-surface-100 dark:hover:bg-surface-800 transition-colors"
             >
               {#if $theme === 'dark'}
                 <Sun class="w-5 h-5 flex-shrink-0 text-amber-400" />
@@ -360,15 +392,15 @@
 
             {#if authenticated}
               <button
-                onclick={() => { menuOpen = false; showUserGuide = true; guideSection = 0; }}
-                class="flex items-center gap-3 w-full px-3 py-2 rounded-xl text-sm font-semibold text-surface-700 dark:text-surface-200 hover:bg-surface-100 dark:hover:bg-surface-800 transition"
+                onclick={() => { closeMenu(); showUserGuide = true; }}
+                class="flex items-center gap-3 w-full px-3 py-2 rounded-xl text-sm font-semibold text-surface-700 dark:text-surface-200 hover:bg-surface-100 dark:hover:bg-surface-800 transition-colors"
               >
                 <BookOpen class="w-5 h-5 flex-shrink-0 text-emerald-500" />
                 User Guide
               </button>
               <button
                 onclick={openChangePwd}
-                class="flex items-center gap-3 w-full px-3 py-2 rounded-xl text-sm font-semibold text-surface-700 dark:text-surface-200 hover:bg-surface-100 dark:hover:bg-surface-800 transition"
+                class="flex items-center gap-3 w-full px-3 py-2 rounded-xl text-sm font-semibold text-surface-700 dark:text-surface-200 hover:bg-surface-100 dark:hover:bg-surface-800 transition-colors"
               >
                 <Lock class="w-5 h-5 flex-shrink-0 text-surface-400" />
                 Reset Password
@@ -377,7 +409,7 @@
               <a
                 href="/login"
                 onclick={() => menuOpen = false}
-                class="flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-semibold text-surface-700 dark:text-surface-200 hover:bg-surface-100 dark:hover:bg-surface-800 transition"
+                class="flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-semibold text-surface-700 dark:text-surface-200 hover:bg-surface-100 dark:hover:bg-surface-800 transition-colors"
               >
                 <LogIn class="w-5 h-5 flex-shrink-0 text-brand-500" />
                 Moderator Login
@@ -390,7 +422,7 @@
               <div class="border-t border-surface-200 dark:border-surface-700/60 mt-1 mb-2"></div>
               <button
                 onclick={() => { menuOpen = false; onLogout(); }}
-                class="flex items-center gap-3 w-full px-3 py-2 rounded-xl text-sm font-semibold text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 transition"
+                class="flex items-center gap-3 w-full px-3 py-2 rounded-xl text-sm font-semibold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-500/10 transition-colors"
               >
                 <LogOut class="w-5 h-5 flex-shrink-0" />
                 Log out
@@ -405,9 +437,12 @@
 
 <!-- Global Search (Events + Sessions) -->
 {#if showSearch}
+  <!-- Backdrop click is a mouse convenience; Escape (window keydown) closes it from the keyboard. -->
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
   <div
     class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-start justify-center px-4 pt-[10vh] z-50"
     onclick={(e) => { if (e.target === e.currentTarget) closeSearch(); }}
+    tabindex="-1"
     role="dialog"
     aria-modal="true"
     aria-label="Search events and sessions"
@@ -426,7 +461,7 @@
         />
         {#if searchQuery}
           <button
-            class="absolute right-4 top-1/2 -translate-y-1/2 text-surface-400 hover:text-surface-200"
+            class="absolute right-4 top-1/2 -translate-y-1/2 text-surface-500 hover:text-surface-900 dark:text-surface-400 dark:hover:text-surface-100 transition-colors"
             onclick={clearGlobalSearch}
             aria-label="Clear search"
           >
@@ -488,18 +523,11 @@
 {/if}
 
 <!-- About Rforum Modal -->
-{#if showAbout}
-  <div
-    class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center px-4 z-50"
-    onclick={(e) => { if (e.target === e.currentTarget) showAbout = false; }}
-    role="dialog"
-    aria-modal="true"
-  >
-    <div class="card w-full max-w-lg shadow-2xl animate-fade-in">
+<Modal open={showAbout} onClose={() => showAbout = false} labelledBy="about-title" showCloseButton={false}>
       <div class="flex items-center justify-between mb-6">
         <div class="flex items-center gap-2">
           <Orbit class="w-7 h-7 text-brand-500" />
-          <h2 class="text-xl font-heading font-bold tracking-wide">Rforum</h2>
+          <h2 id="about-title" class="text-xl font-heading font-bold tracking-wide">Rforum</h2>
         </div>
         <button onclick={() => showAbout = false} class="btn-secondary px-3 py-1.5 text-xs">Close</button>
       </div>
@@ -521,22 +549,16 @@
           </div>
         {/each}
       </div>
-    </div>
-  </div>
-{/if}
+</Modal>
 
 <!-- User Guide Modal -->
-{#if showUserGuide}
-  <div
-    class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center px-4 z-50"
-    onclick={(e) => { if (e.target === e.currentTarget) showUserGuide = false; }}
-    role="dialog"
-    aria-modal="true"
-  >
-    <div class="card w-full max-w-2xl shadow-2xl animate-fade-in flex flex-col" style="max-height: 88vh;">
+<!-- The inner column caps its own height (Modal's 90vh minus card padding) so
+     the header and Close button stay put while only the guide body scrolls. -->
+<Modal open={showUserGuide} onClose={() => showUserGuide = false} labelledBy="user-guide-title" maxWidth="max-w-2xl" showCloseButton={false}>
+    <div class="flex flex-col max-h-[calc(90vh-2.5rem)]">
 
       <div class="flex items-center justify-between mb-6 flex-shrink-0">
-        <h2 class="text-2xl font-heading font-bold tracking-wide text-surface-900 dark:text-surface-100">Moderator User Guide</h2>
+        <h2 id="user-guide-title" class="text-2xl font-heading font-bold tracking-wide text-surface-900 dark:text-surface-100">Moderator User Guide</h2>
         <button onclick={() => showUserGuide = false} class="btn-secondary px-3 py-1.5 text-sm">Close</button>
       </div>
 
@@ -556,7 +578,7 @@
               'Activate slides one by one from the session dashboard as you present.',
               'Toggle Go Live off to end the session when finished.',
             ] as step, i}
-              <li class="flex items-start gap-3 text-base font-heading text-surface-900 dark:text-surface-100">
+              <li class="flex items-start gap-3 text-base text-surface-900 dark:text-surface-100">
                 <span class="font-bold flex-shrink-0 w-5">{i + 1}.</span>
                 <span>{step}</span>
               </li>
@@ -577,7 +599,7 @@
               { term: 'Join Code', def: 'An 8-character code (e.g. ABCD-1234) participants enter to connect to a live session.' },
               { term: 'Presenter Screen', def: 'A full-screen view at /screen/[code] intended to be projected to your audience.' },
             ] as item}
-              <div class="flex gap-3 text-base font-heading text-surface-900 dark:text-surface-100">
+              <div class="flex gap-3 text-base text-surface-900 dark:text-surface-100">
                 <dt class="font-semibold flex-shrink-0 w-36">{item.term}</dt>
                 <dd>{item.def}</dd>
               </div>
@@ -598,7 +620,7 @@
               { term: 'Word Cloud', def: 'Participants submit words or short phrases shown as a real-time word cloud.' },
               { term: 'Content',    def: 'A static display slide — title, body, or bullet points. No audience input.' },
             ] as item}
-              <div class="flex gap-3 text-base font-heading text-surface-900 dark:text-surface-100">
+              <div class="flex gap-3 text-base text-surface-900 dark:text-surface-100">
                 <dt class="font-semibold flex-shrink-0 w-36">{item.term}</dt>
                 <dd>{item.def}</dd>
               </div>
@@ -620,7 +642,7 @@
               'Copy the join URL from the session page to share a direct link.',
               'Session data and all responses are always saved. View them any time from Analytics.',
             ] as item}
-              <li class="flex items-start gap-3 text-base font-heading text-surface-900 dark:text-surface-100">
+              <li class="flex items-start gap-3 text-base text-surface-900 dark:text-surface-100">
                 <span class="flex-shrink-0 mt-1.5 w-1.5 h-1.5 rounded-full bg-surface-400 dark:bg-surface-500"></span>
                 <span>{item}</span>
               </li>
@@ -641,7 +663,7 @@
               'Keep the session dashboard open on a separate device to control which slide is active.',
               'The join code is always visible on screen so latecomers can join at any point.',
             ] as item}
-              <li class="flex items-start gap-3 text-base font-heading text-surface-900 dark:text-surface-100">
+              <li class="flex items-start gap-3 text-base text-surface-900 dark:text-surface-100">
                 <span class="flex-shrink-0 mt-1.5 w-1.5 h-1.5 rounded-full bg-surface-400 dark:bg-surface-500"></span>
                 <span>{item}</span>
               </li>
@@ -651,25 +673,17 @@
 
       </div>
     </div>
-  </div>
-{/if}
+</Modal>
 
 <!-- Reset Password Modal -->
-{#if showChangePwd}
-  <div
-    class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center px-4 z-50"
-    onclick={(e) => { if (e.target === e.currentTarget) showChangePwd = false; }}
-    role="dialog"
-    aria-modal="true"
-  >
-    <div class="card w-full max-w-sm shadow-2xl animate-fade-in p-6">
+<Modal open={showChangePwd} onClose={() => showChangePwd = false} labelledBy="change-pwd-title" maxWidth="max-w-sm" showCloseButton={false}>
       <!-- Modal header -->
       <div class="flex items-center gap-3 mb-1">
         <div class="w-9 h-9 flex items-center justify-center rounded-xl bg-brand-500/10 flex-shrink-0">
           <Lock class="w-4 h-4 text-brand-500" />
         </div>
         <div>
-          <h2 class="text-base font-heading font-bold tracking-wide leading-tight">Reset Password</h2>
+          <h2 id="change-pwd-title" class="text-base font-heading font-bold tracking-wide leading-tight">Reset Password</h2>
           <p class="text-xs text-surface-500">Update your account password</p>
         </div>
       </div>
@@ -678,10 +692,12 @@
 
       <form onsubmit={handleChangePwd} class="space-y-3">
         <div>
-          <label class="block text-xs font-medium text-surface-400 mb-1.5">Current password</label>
+          <label for="nav-current-pwd" class="block text-xs font-medium text-surface-400 mb-1.5">Current password</label>
           <div class="relative">
             <Lock class="absolute left-3.5 top-3 w-4 h-4 text-surface-400 pointer-events-none" />
             <input
+              id="nav-current-pwd"
+              autocomplete="current-password"
               type={showCurrentPwd ? 'text' : 'password'}
               bind:value={currentPwd}
               placeholder="Enter current password"
@@ -692,7 +708,8 @@
             <button
               type="button"
               onclick={() => showCurrentPwd = !showCurrentPwd}
-              class="absolute right-3.5 top-3 text-surface-400 hover:text-surface-300 transition-colors"
+              class="absolute right-3.5 top-3 text-surface-500 hover:text-surface-800 dark:text-surface-400 dark:hover:text-surface-200 transition-colors"
+              aria-label={showCurrentPwd ? 'Hide current password' : 'Show current password'}
               title={showCurrentPwd ? 'Hide password' : 'Show password'}
             >
               {#if showCurrentPwd}
@@ -704,10 +721,12 @@
           </div>
         </div>
         <div>
-          <label class="block text-xs font-medium text-surface-400 mb-1.5">New password</label>
+          <label for="nav-new-pwd" class="block text-xs font-medium text-surface-400 mb-1.5">New password</label>
           <div class="relative">
             <Lock class="absolute left-3.5 top-3 w-4 h-4 text-surface-400 pointer-events-none" />
             <input
+              id="nav-new-pwd"
+              autocomplete="new-password"
               type={showNewPwd ? 'text' : 'password'}
               bind:value={newPwd}
               placeholder="Min 6 characters"
@@ -718,7 +737,8 @@
             <button
               type="button"
               onclick={() => showNewPwd = !showNewPwd}
-              class="absolute right-3.5 top-3 text-surface-400 hover:text-surface-300 transition-colors"
+              class="absolute right-3.5 top-3 text-surface-500 hover:text-surface-800 dark:text-surface-400 dark:hover:text-surface-200 transition-colors"
+              aria-label={showNewPwd ? 'Hide new password' : 'Show new password'}
               title={showNewPwd ? 'Hide password' : 'Show password'}
             >
               {#if showNewPwd}
@@ -731,23 +751,21 @@
         </div>
 
         {#if pwdError}
-          <div class="rounded-lg bg-red-500/10 border border-red-500/20 px-3 py-2">
-            <p class="text-xs text-red-400">{pwdError}</p>
+          <div class="rounded-lg bg-red-500/10 border border-red-500/20 px-3 py-2" role="alert">
+            <p class="text-xs text-red-700 dark:text-red-300">{pwdError}</p>
           </div>
         {/if}
         {#if pwdSuccess}
-          <div class="rounded-lg bg-emerald-500/10 border border-emerald-500/20 px-3 py-2">
-            <p class="text-xs text-emerald-400">{pwdSuccess}</p>
+          <div class="rounded-lg bg-emerald-500/10 border border-emerald-500/20 px-3 py-2" role="status">
+            <p class="text-xs text-emerald-700 dark:text-emerald-300">{pwdSuccess}</p>
           </div>
         {/if}
 
         <div class="flex gap-2 pt-2">
           <button type="button" onclick={() => showChangePwd = false} class="btn-secondary flex-1 text-sm py-2">Cancel</button>
-          <button type="submit" class="btn-primary flex-1 text-sm py-2" disabled={pwdLoading}>
+          <button type="submit" class="btn-primary flex-1 text-sm py-2" disabled={pwdLoading} aria-busy={pwdLoading}>
             {pwdLoading ? 'Saving…' : 'Save password'}
           </button>
         </div>
       </form>
-    </div>
-  </div>
-{/if}
+</Modal>
