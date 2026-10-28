@@ -19,6 +19,8 @@
   } from '$lib/api';
   import { currentUser, orgSettings } from '$lib/stores';
   import { onMount } from 'svelte';
+  import Modal from '$lib/components/Modal.svelte';
+  import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
   import { Shield, User, Trash2, ToggleLeft, ToggleRight, ChevronDown, Search, RefreshCw, AlertTriangle, HardDrive, Building2, Upload, X, Check } from 'lucide-svelte';
 
   type UserRecord = {
@@ -42,12 +44,14 @@
   let storageTotalBytes = $state(0);
   let storageTotalAssets = $state(0);
   let storageTopUsers: { user_id: string; email: string; total_bytes: number; asset_count: number }[] = $state([]);
-  let loadingStorage = $state(false);
+  let loadingStorage = $state(true);
+  let storageError = $state('');
 
   // Confirm delete modal
   let deleteTarget = $state<UserRecord | null>(null);
   let deleteConfirmEmail = $state('');
   let deletingId = $state<string | null>(null);
+  let deleteError = $state('');
 
   // Inline action states
   let togglingId = $state<string | null>(null);
@@ -75,6 +79,9 @@
   let faviconError = $state('');
   let faviconCacheBust = $state(0);
   let faviconFileInput: HTMLInputElement | undefined = $state();
+
+  // Which branding asset is awaiting removal confirmation
+  let pendingRemoval = $state<'logo' | 'favicon' | null>(null);
 
   function applyOrgUpdate(updated: OrgSettingsAdmin) {
     orgAdmin = updated;
@@ -148,6 +155,7 @@
       logoError = e?.message || 'Failed to remove logo';
     } finally {
       logoDeleting = false;
+      pendingRemoval = null;
     }
   }
 
@@ -177,6 +185,7 @@
       faviconError = e?.message || 'Failed to remove favicon';
     } finally {
       faviconDeleting = false;
+      pendingRemoval = null;
     }
   }
 
@@ -197,13 +206,16 @@
 
   async function loadStorage() {
     loadingStorage = true;
+    storageError = '';
     try {
       const s = await adminGetStorage();
       storageTotalBytes = s.total_bytes;
       storageTotalAssets = s.asset_count;
       storageTopUsers = s.top_users;
-    } catch {
-      // non-critical, keep defaults
+    } catch (e: any) {
+      // Non-critical for the rest of the page, but say so rather than
+      // showing zeros / "no uploads" as if that were the real answer.
+      storageError = e?.message || 'Failed to load storage stats';
     } finally {
       loadingStorage = false;
     }
@@ -268,16 +280,32 @@
     if (!deleteTarget) return;
     if (deleteConfirmEmail.trim().toLowerCase() !== deleteTarget.email.toLowerCase()) return;
     deletingId = deleteTarget.id;
+    deleteError = '';
     try {
       await adminDeleteUser(deleteTarget.id);
       users = users.filter(u => u.id !== deleteTarget!.id);
       deleteTarget = null;
       deleteConfirmEmail = '';
     } catch (e: any) {
-      actionError = e?.message || 'Failed to delete user';
+      // Shown inside the dialog: the page-level banner is behind the overlay.
+      deleteError = e?.message || 'Failed to delete user';
     } finally {
       deletingId = null;
     }
+  }
+
+  function openDelete(u: UserRecord) {
+    deleteTarget = u;
+    deleteConfirmEmail = '';
+    deleteError = '';
+    actionError = '';
+  }
+
+  function closeDelete() {
+    if (deletingId) return;
+    deleteTarget = null;
+    deleteConfirmEmail = '';
+    deleteError = '';
   }
 
   function formatDate(iso: string) {
@@ -285,10 +313,10 @@
   }
 </script>
 
-<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
 
   <!-- Header -->
-  <div class="flex items-center justify-between mb-8">
+  <div class="flex flex-wrap items-center justify-between gap-3 mb-8">
     <div class="flex items-center gap-3">
       <div class="w-10 h-10 flex items-center justify-center rounded-xl bg-rose-500/10">
         <Shield class="w-5 h-5 text-rose-500" />
@@ -305,7 +333,7 @@
   </div>
 
   {#if actionError}
-    <div class="mb-4 px-4 py-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 text-sm flex items-center gap-2">
+    <div role="alert" class="mb-4 px-4 py-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-700 dark:text-rose-400 text-sm flex items-center gap-2">
       <AlertTriangle class="w-4 h-4 flex-shrink-0" />
       {actionError}
       <button onclick={() => actionError = ''} class="ml-auto text-xs underline">Dismiss</button>
@@ -315,20 +343,21 @@
   <!-- Filters -->
   <div class="card mb-6 flex flex-wrap gap-3 items-center">
     <div class="relative flex-1 min-w-48">
-      <Search class="absolute left-3 top-2.5 w-4 h-4 text-surface-400" />
+      <Search class="absolute left-3 top-2.5 w-4 h-4 text-surface-400 pointer-events-none" />
       <input
-        type="text"
+        type="search"
         placeholder="Search by email…"
+        aria-label="Search users by email"
         bind:value={searchQuery}
         class="input-field pl-9 text-sm py-2"
       />
     </div>
-    <select bind:value={roleFilter} class="input-field text-sm py-2 w-40">
+    <select bind:value={roleFilter} aria-label="Filter by role" class="input-field text-sm py-2 w-40">
       <option value="all">All roles</option>
       <option value="USER">Moderator</option>
       <option value="SUPER_ADMIN">Super Admin</option>
     </select>
-    <select bind:value={statusFilter} class="input-field text-sm py-2 w-40">
+    <select bind:value={statusFilter} aria-label="Filter by status" class="input-field text-sm py-2 w-40">
       <option value="all">All status</option>
       <option value="active">Active</option>
       <option value="disabled">Disabled</option>
@@ -337,13 +366,18 @@
 
   <!-- Table -->
   {#if loading}
-    <div class="flex justify-center py-16">
+    <div class="flex justify-center py-16" role="status" aria-label="Loading users">
       <RefreshCw class="w-8 h-8 text-surface-400 animate-spin" />
     </div>
   {:else if error}
-    <div class="card text-center py-12 text-rose-500">{error}</div>
+    <div class="card text-center py-12" role="alert">
+      <p class="text-sm text-rose-700 dark:text-rose-400 mb-4">{error}</p>
+      <button onclick={load} class="btn-secondary text-sm">Retry</button>
+    </div>
   {:else if filteredUsers.length === 0}
-    <div class="card text-center py-12 text-surface-400">No users match your filters.</div>
+    <div class="card text-center py-12 text-sm text-surface-500">
+      {users.length === 0 ? 'No users yet.' : 'No users match your filters.'}
+    </div>
   {:else}
     <div class="card overflow-hidden p-0">
       <div class="overflow-x-auto">
@@ -360,7 +394,7 @@
           </thead>
           <tbody>
             {#each filteredUsers as u (u.id)}
-              <tr class="border-b border-surface-100 dark:border-surface-800/60 hover:bg-surface-50 dark:hover:bg-surface-800/40 transition">
+              <tr class="border-b border-surface-100 dark:border-surface-800/60 hover:bg-surface-50 dark:hover:bg-surface-800/40 transition-colors">
                 <!-- Email -->
                 <td class="px-4 py-3">
                   <div class="flex items-center gap-2">
@@ -379,6 +413,7 @@
                       value={u.role}
                       onchange={(e) => handleRoleChange(u, (e.target as HTMLSelectElement).value as 'USER' | 'SUPER_ADMIN')}
                       disabled={promotingId === u.id}
+                      aria-label={`Role for ${u.email}`}
                       class="appearance-none pl-2 pr-6 py-1 rounded-lg text-xs font-bold border transition cursor-pointer
                         {u.role === 'SUPER_ADMIN'
                           ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20'
@@ -398,9 +433,11 @@
                   <button
                     onclick={() => handleToggleActive(u)}
                     disabled={togglingId === u.id}
-                    class="flex items-center gap-1.5 text-xs font-semibold transition disabled:opacity-50
-                      {u.is_active ? 'text-emerald-600 dark:text-emerald-400' : 'text-surface-400'}"
+                    class="flex items-center gap-1.5 text-xs font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed
+                      {u.is_active ? 'text-emerald-700 dark:text-emerald-400' : 'text-surface-500'}"
                     title="{u.is_active ? 'Click to disable' : 'Click to enable'}"
+                    aria-label={`${u.is_active ? 'Disable' : 'Enable'} ${u.email}`}
+                    aria-busy={togglingId === u.id}
                   >
                     {#if u.is_active}
                       <ToggleRight class="w-5 h-5" />
@@ -429,9 +466,10 @@
                 <!-- Delete -->
                 <td class="px-4 py-3 text-right">
                   <button
-                    onclick={() => { deleteTarget = u; deleteConfirmEmail = ''; actionError = ''; }}
-                    class="p-1.5 rounded-lg text-surface-400 hover:text-rose-500 hover:bg-rose-500/10 transition"
+                    onclick={() => openDelete(u)}
+                    class="p-1.5 rounded-lg text-surface-500 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
                     title="Delete user"
+                    aria-label={`Delete ${u.email}`}
                   >
                     <Trash2 class="w-4 h-4" />
                   </button>
@@ -445,8 +483,8 @@
   {/if}
 
   <!-- ── Storage section ─────────────────────────────────────────────── -->
-  <div class="mt-10">
-    <div class="flex items-center justify-between mb-5">
+  <div class="mt-8">
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-5">
       <div class="flex items-center gap-3">
         <div class="w-10 h-10 flex items-center justify-center rounded-xl bg-warning/10">
           <HardDrive class="w-5 h-5 text-warning" />
@@ -462,14 +500,20 @@
       </button>
     </div>
 
+    {#if storageError && !loadingStorage}
+      <div class="card text-center py-10" role="alert">
+        <p class="text-sm text-rose-700 dark:text-rose-400 mb-4">{storageError}</p>
+        <button onclick={loadStorage} class="btn-secondary text-sm">Retry</button>
+      </div>
+    {:else}
     <!-- Total summary -->
-    <div class="grid grid-cols-2 gap-4 mb-6">
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
       <div class="card">
         <p class="text-xs text-surface-500 uppercase tracking-widest font-semibold mb-1">Total Storage Used</p>
         <p class="text-3xl font-heading font-bold">{formatBytes(storageTotalBytes)}</p>
         <div class="mt-3 w-full h-1.5 rounded-full bg-surface-100 dark:bg-surface-800 overflow-hidden">
           <div
-            class="h-full rounded-full transition-all duration-500 {Math.min((storageTotalBytes / (10 * 1024 * 1024 * 1024)) * 100, 100) > 80 ? 'bg-danger' : Math.min((storageTotalBytes / (10 * 1024 * 1024 * 1024)) * 100, 100) > 50 ? 'bg-warning' : 'bg-brand-500'}"
+            class="h-full rounded-full transition-[width] duration-500 {Math.min((storageTotalBytes / (10 * 1024 * 1024 * 1024)) * 100, 100) > 80 ? 'bg-danger' : Math.min((storageTotalBytes / (10 * 1024 * 1024 * 1024)) * 100, 100) > 50 ? 'bg-warning' : 'bg-brand-500'}"
             style="width:{Math.min((storageTotalBytes / (10 * 1024 * 1024 * 1024)) * 100, 100)}%"
           ></div>
         </div>
@@ -484,7 +528,7 @@
 
     <!-- Top users by storage -->
     {#if loadingStorage}
-      <div class="flex justify-center py-8"><RefreshCw class="w-6 h-6 text-surface-400 animate-spin" /></div>
+      <div class="flex justify-center py-8" role="status" aria-label="Loading storage"><RefreshCw class="w-6 h-6 text-surface-400 animate-spin" /></div>
     {:else if storageTopUsers.length === 0}
       <div class="card text-center py-10 text-surface-500 text-sm">No file uploads recorded yet.</div>
     {:else}
@@ -506,7 +550,7 @@
             <tbody>
               {#each storageTopUsers as u, i (u.user_id)}
                 {@const pct = storageTotalBytes > 0 ? (u.total_bytes / storageTotalBytes) * 100 : 0}
-                <tr class="border-b border-surface-100 dark:border-surface-800/60 hover:bg-surface-50 dark:hover:bg-surface-800/30 transition">
+                <tr class="border-b border-surface-100 dark:border-surface-800/60">
                   <td class="px-4 py-3 text-surface-500 text-xs font-mono">{i + 1}</td>
                   <td class="px-4 py-3">
                     <div class="flex items-center gap-2">
@@ -521,7 +565,7 @@
                   <td class="px-4 py-3">
                     <div class="flex items-center gap-2">
                       <div class="flex-1 h-2 rounded-full bg-surface-100 dark:bg-surface-800 overflow-hidden">
-                        <div class="h-full rounded-full bg-brand-500 transition-all duration-500" style="width:{pct.toFixed(1)}%"></div>
+                        <div class="h-full rounded-full bg-brand-500 transition-[width] duration-500" style="width:{pct.toFixed(1)}%"></div>
                       </div>
                       <span class="text-xs text-surface-500 w-10 text-right">{pct.toFixed(0)}%</span>
                     </div>
@@ -533,10 +577,11 @@
         </div>
       </div>
     {/if}
+    {/if}
   </div>
 
   <!-- ── Organization Settings section ───────────────────────────────── -->
-  <div class="mt-10">
+  <div class="mt-8">
     <div class="flex items-center gap-3 mb-5">
       <div class="w-10 h-10 flex items-center justify-center rounded-xl bg-brand-500/10">
         <Building2 class="w-5 h-5 text-brand-500" />
@@ -548,16 +593,20 @@
     </div>
 
     {#if orgSettingsLoading}
-      <div class="flex justify-center py-12"><RefreshCw class="w-6 h-6 text-surface-400 animate-spin" /></div>
+      <div class="flex justify-center py-12" role="status" aria-label="Loading organization settings"><RefreshCw class="w-6 h-6 text-surface-400 animate-spin" /></div>
     {:else if orgSettingsLoadError}
-      <div class="card text-center py-10 text-rose-500 text-sm">{orgSettingsLoadError}</div>
+      <div class="card text-center py-10" role="alert">
+        <p class="text-sm text-rose-700 dark:text-rose-400 mb-4">{orgSettingsLoadError}</p>
+        <button onclick={loadOrgSettings} class="btn-secondary text-sm">Retry</button>
+      </div>
     {:else if orgAdmin}
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
 
         <!-- Organization Name -->
         <div class="card">
-          <h3 class="text-xs font-semibold text-surface-500 uppercase tracking-widest mb-3">Organization Name</h3>
+          <label for="org-name" class="block text-xs font-semibold text-surface-500 uppercase tracking-widest mb-3">Organization Name</label>
           <input
+            id="org-name"
             type="text"
             bind:value={orgNameInput}
             maxlength="120"
@@ -566,13 +615,13 @@
             disabled={orgNameSaving}
           />
           {#if orgNameError}
-            <p class="text-xs text-rose-500 mb-2">{orgNameError}</p>
+            <p class="text-xs text-rose-700 dark:text-rose-400 mb-2" role="alert">{orgNameError}</p>
           {/if}
           <div class="flex items-center gap-3">
             <button
               onclick={saveOrgName}
               disabled={orgNameSaving || !orgNameInput.trim() || orgNameInput.trim() === orgAdmin.display_name}
-              class="btn-primary text-sm flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              class="btn-primary text-sm flex items-center gap-2"
             >
               {#if orgNameSaving}
                 <RefreshCw class="w-3.5 h-3.5 animate-spin" /> Saving…
@@ -580,11 +629,9 @@
                 Save Changes
               {/if}
             </button>
-            {#if orgNameSaved}
-              <span class="text-xs text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
-                <Check class="w-3.5 h-3.5" /> Saved
-              </span>
-            {/if}
+            <span role="status" class="text-xs text-emerald-700 dark:text-emerald-400 flex items-center gap-1">
+              {#if orgNameSaved}<Check class="w-3.5 h-3.5" /> Saved{/if}
+            </span>
           </div>
         </div>
 
@@ -605,7 +652,7 @@
             </div>
           </div>
           {#if logoError}
-            <p class="text-xs text-rose-500 mb-2">{logoError}</p>
+            <p class="text-xs text-rose-700 dark:text-rose-400 mb-2" role="alert">{logoError}</p>
           {/if}
           <div class="flex items-center gap-2">
             <input
@@ -618,7 +665,7 @@
             <button
               onclick={() => logoFileInput?.click()}
               disabled={logoUploading || logoDeleting}
-              class="btn-secondary text-sm flex items-center gap-2 disabled:opacity-50"
+              class="btn-secondary text-sm flex items-center gap-2"
             >
               {#if logoUploading}
                 <RefreshCw class="w-3.5 h-3.5 animate-spin" /> Uploading…
@@ -628,9 +675,9 @@
             </button>
             {#if orgAdmin.has_custom_logo}
               <button
-                onclick={removeLogo}
+                onclick={() => (pendingRemoval = 'logo')}
                 disabled={logoUploading || logoDeleting}
-                class="text-xs font-semibold text-surface-500 hover:text-rose-500 transition disabled:opacity-50 flex items-center gap-1"
+                class="btn-ghost text-xs px-2.5 py-1.5 flex items-center gap-1 hover:!text-rose-700 dark:hover:!text-rose-400"
               >
                 <X class="w-3.5 h-3.5" /> {logoDeleting ? 'Removing…' : 'Remove'}
               </button>
@@ -655,7 +702,7 @@
             </div>
           </div>
           {#if faviconError}
-            <p class="text-xs text-rose-500 mb-2">{faviconError}</p>
+            <p class="text-xs text-rose-700 dark:text-rose-400 mb-2" role="alert">{faviconError}</p>
           {/if}
           <div class="flex items-center gap-2">
             <input
@@ -668,7 +715,7 @@
             <button
               onclick={() => faviconFileInput?.click()}
               disabled={faviconUploading || faviconDeleting}
-              class="btn-secondary text-sm flex items-center gap-2 disabled:opacity-50"
+              class="btn-secondary text-sm flex items-center gap-2"
             >
               {#if faviconUploading}
                 <RefreshCw class="w-3.5 h-3.5 animate-spin" /> Uploading…
@@ -678,9 +725,9 @@
             </button>
             {#if orgAdmin.has_custom_favicon}
               <button
-                onclick={removeFavicon}
+                onclick={() => (pendingRemoval = 'favicon')}
                 disabled={faviconUploading || faviconDeleting}
-                class="text-xs font-semibold text-surface-500 hover:text-rose-500 transition disabled:opacity-50 flex items-center gap-1"
+                class="btn-ghost text-xs px-2.5 py-1.5 flex items-center gap-1 hover:!text-rose-700 dark:hover:!text-rose-400"
               >
                 <X class="w-3.5 h-3.5" /> {faviconDeleting ? 'Removing…' : 'Remove'}
               </button>
@@ -694,66 +741,78 @@
 
 </div>
 
-<!-- Delete confirmation modal -->
-{#if deleteTarget}
-  <div
-    class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center px-4 z-50"
-    onclick={(e) => { if (e.target === e.currentTarget) { deleteTarget = null; } }}
-    role="dialog"
-    aria-modal="true"
-  >
-    <div class="card w-full max-w-md shadow-2xl animate-fade-in p-6">
-      <div class="flex items-center gap-3 mb-4">
-        <div class="w-10 h-10 flex items-center justify-center rounded-xl bg-rose-500/10 flex-shrink-0">
-          <AlertTriangle class="w-5 h-5 text-rose-500" />
-        </div>
-        <div>
-          <h2 class="text-base font-heading font-bold text-surface-900 dark:text-surface-100">Delete User</h2>
-          <p class="text-xs text-surface-500">This permanently deletes the account and all their data.</p>
-        </div>
+<!-- Delete confirmation modal (needs the type-the-email gate, so it uses Modal
+     directly rather than ConfirmDialog) -->
+<Modal open={!!deleteTarget} onClose={closeDelete} labelledBy="delete-user-title" maxWidth="max-w-md">
+  {#if deleteTarget}
+    <div class="flex items-center gap-3 mb-4 pr-8">
+      <div class="w-10 h-10 flex items-center justify-center rounded-xl bg-rose-500/10 flex-shrink-0">
+        <AlertTriangle class="w-5 h-5 text-rose-500" />
       </div>
-
-      <div class="rounded-xl bg-surface-50 dark:bg-surface-800/60 px-4 py-3 mb-4">
-        <p class="text-sm font-semibold text-surface-900 dark:text-surface-100 break-all">{deleteTarget.email}</p>
-        <p class="text-xs text-surface-500 mt-0.5">
-          {deleteTarget.events_count} event{deleteTarget.events_count !== 1 ? 's' : ''} &nbsp;·&nbsp;
-          {deleteTarget.sessions_count} session{deleteTarget.sessions_count !== 1 ? 's' : ''} will be removed
-        </p>
-      </div>
-
-      <div class="mb-4">
-        <label class="block text-xs font-medium text-surface-500 mb-1.5">
-          Type the email address to confirm:
-        </label>
-        <input
-          type="email"
-          bind:value={deleteConfirmEmail}
-          placeholder={deleteTarget.email}
-          class="input-field text-sm"
-          autocomplete="off"
-        />
-      </div>
-
-      <div class="flex gap-3">
-        <button
-          onclick={() => { deleteTarget = null; deleteConfirmEmail = ''; }}
-          class="btn-secondary flex-1"
-        >
-          Cancel
-        </button>
-        <button
-          onclick={confirmDelete}
-          disabled={deleteConfirmEmail.trim().toLowerCase() !== deleteTarget.email.toLowerCase() || deletingId === deleteTarget.id}
-          class="flex-1 px-4 py-2 rounded-xl font-semibold text-sm bg-rose-500 text-white hover:bg-rose-600 transition disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          {deletingId === deleteTarget.id ? 'Deleting…' : 'Delete permanently'}
-        </button>
+      <div>
+        <h2 id="delete-user-title" class="text-base font-heading font-bold text-surface-900 dark:text-surface-100">Delete User</h2>
+        <p class="text-xs text-surface-500">This permanently deletes the account and all their data.</p>
       </div>
     </div>
-  </div>
-{/if}
 
-<!-- ─────────────────────────────────────────────────────────────── -->
-<!-- Storage section (outside the modal, inside the page container  -->
-<!-- is imported from outside the {#if deleteTarget} block)         -->
-<!-- ─────────────────────────────────────────────────────────────── -->
+    <div class="rounded-xl bg-surface-50 dark:bg-surface-800/60 px-4 py-3 mb-4">
+      <p class="text-sm font-semibold text-surface-900 dark:text-surface-100 break-all">{deleteTarget.email}</p>
+      <p class="text-xs text-surface-500 mt-0.5">
+        {deleteTarget.events_count} event{deleteTarget.events_count !== 1 ? 's' : ''} &nbsp;·&nbsp;
+        {deleteTarget.sessions_count} session{deleteTarget.sessions_count !== 1 ? 's' : ''} will be removed
+      </p>
+    </div>
+
+    <div class="mb-4">
+      <label for="delete-confirm-email" class="block text-xs font-medium text-surface-500 mb-1.5">
+        Type the email address to confirm:
+      </label>
+      <input
+        id="delete-confirm-email"
+        type="email"
+        bind:value={deleteConfirmEmail}
+        placeholder={deleteTarget.email}
+        class="input-field text-sm"
+        autocomplete="off"
+        disabled={deletingId === deleteTarget.id}
+      />
+    </div>
+
+    {#if deleteError}
+      <p role="alert" class="mb-4 px-3 py-2 rounded-lg bg-rose-500/10 text-xs text-rose-700 dark:text-rose-400 flex items-center gap-2">
+        <AlertTriangle class="w-3.5 h-3.5 flex-shrink-0" />{deleteError}
+      </p>
+    {/if}
+
+    <div class="flex gap-3">
+      <button
+        onclick={closeDelete}
+        disabled={deletingId === deleteTarget.id}
+        class="btn-secondary flex-1 text-sm"
+      >
+        Cancel
+      </button>
+      <button
+        onclick={confirmDelete}
+        disabled={deleteConfirmEmail.trim().toLowerCase() !== deleteTarget.email.toLowerCase() || deletingId === deleteTarget.id}
+        aria-busy={deletingId === deleteTarget.id}
+        class="flex-1 px-4 py-2 rounded-xl font-semibold text-sm bg-danger text-white hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
+      >
+        {deletingId === deleteTarget.id ? 'Deleting…' : 'Delete permanently'}
+      </button>
+    </div>
+  {/if}
+</Modal>
+
+<ConfirmDialog
+  open={pendingRemoval !== null}
+  tone="danger"
+  title={pendingRemoval === 'logo' ? 'Remove logo?' : 'Remove favicon?'}
+  description={pendingRemoval === 'logo'
+    ? 'The default Rforum logo will be shown instead.'
+    : 'The default Rforum favicon will be used instead.'}
+  confirmLabel="Remove"
+  loading={logoDeleting || faviconDeleting}
+  onConfirm={() => (pendingRemoval === 'logo' ? removeLogo() : removeFavicon())}
+  onCancel={() => { if (!logoDeleting && !faviconDeleting) pendingRemoval = null; }}
+/>

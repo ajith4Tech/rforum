@@ -8,6 +8,8 @@
     Activity, Zap, Star
   } from 'lucide-svelte';
   import { onMount } from 'svelte';
+  import { isToday, parseEventDate } from '$lib/dates';
+  import { SLIDE_TYPE_COLORS, FALLBACK_SERIES_COLOR } from '$lib/chartPalette';
 
   // ── Types ─────────────────────────────────────────────
   interface EventItem {
@@ -77,14 +79,10 @@
   function formatDate(dateStr: string) {
     if (!dateStr) return '—';
     try {
-      return new Date(dateStr + 'T00:00:00').toLocaleDateString(undefined, {
+      return parseEventDate(dateStr).toLocaleDateString(undefined, {
         year: 'numeric', month: 'short', day: 'numeric'
       });
     } catch { return dateStr; }
-  }
-
-  function isToday(dateStr: string) {
-    return dateStr === new Date().toISOString().slice(0, 10);
   }
 
   const sortedEvents = $derived(
@@ -108,10 +106,16 @@
       : null
   );
 
-  // Type labels and colours
-  const typeLabels: Record<string, string> = { POLL: 'Polls', QNA: 'Q&A', FEEDBACK: 'Feedback', CONTENT: 'Content', WORD_CLOUD: 'Word Cloud' };
-  const typeColors: Record<string, string> = { POLL: '#7C3AED', QNA: '#06B6D4', FEEDBACK: '#F59E0B', CONTENT: '#10B981', WORD_CLOUD: '#EC4899' };
+  // The overview only loads a bounded page of events, so the top session's
+  // event may not be among them — hide the link rather than a dead button.
+  const topSessionEventId = $derived(
+    topSession
+      ? events.find(e => e.sessions?.some(s => s.id === topSession.session_id))?.id ?? null
+      : null
+  );
 
+  // Type labels (colours come from the shared chart palette)
+  const typeLabels: Record<string, string> = { POLL: 'Polls', QNA: 'Q&A', FEEDBACK: 'Feedback', CONTENT: 'Content', WORD_CLOUD: 'Word Cloud' };
 
   // Donut helpers
   function getDonutSegments(dist: Record<string, number>) {
@@ -123,7 +127,7 @@
       const pct = value / total;
       const start = cumulative;
       cumulative += pct;
-      return { key, label: typeLabels[key] || key, color: typeColors[key] || '#94A3B8', value, pct: Math.round(pct * 100), startPct: start, endPct: cumulative };
+      return { key, label: typeLabels[key] || key, color: SLIDE_TYPE_COLORS[key] || FALLBACK_SERIES_COLOR, value, pct: Math.round(pct * 100), startPct: start, endPct: cumulative };
     });
   }
 
@@ -148,7 +152,7 @@
   <title>Analytics – Rforum</title>
 </svelte:head>
 
-<main class="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8">
+<main class="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
 
   <!-- Page Header -->
   <div class="mb-8 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
@@ -159,8 +163,8 @@
   </div>
 
   {#if loading}
-    <div class="flex flex-col items-center justify-center py-24 gap-3">
-      <div class="w-10 h-10 border-3 border-brand-500 border-t-transparent rounded-full animate-spin"></div>
+    <div class="flex flex-col items-center justify-center py-24 gap-3" role="status" aria-live="polite">
+      <div class="w-10 h-10 border-[3px] border-brand-500 border-t-transparent rounded-full animate-spin"></div>
       <span class="text-sm text-surface-500 dark:text-surface-400 font-medium">Loading analytics…</span>
     </div>
 
@@ -177,19 +181,19 @@
     <!-- ═══════════════════════════════════════════════════
          OVERVIEW KPI CARDS
          ═══════════════════════════════════════════════════ -->
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-5 mb-8">
+    <div class="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 mb-8">
       {#each [
-        { label: 'Events',       value: totalEvents,       icon: CalendarDays,  bg: 'bg-brand-500/10 dark:bg-brand-500/15',   text: 'text-brand-500 dark:text-brand-400',   hover: 'hover:border-brand-500/30'   },
-        { label: 'Sessions',     value: totalSessions,     icon: Layers,         bg: 'bg-accent-500/10 dark:bg-accent-500/15',  text: 'text-accent-500 dark:text-accent-400',  hover: 'hover:border-accent-500/30'  },
-        { label: 'Participants', value: totalParticipants, icon: Users,          bg: 'bg-emerald-500/10 dark:bg-emerald-500/15', text: 'text-emerald-500 dark:text-emerald-400', hover: 'hover:border-emerald-500/30' },
-        { label: 'Responses',    value: totalResponses,    icon: MessageSquare,  bg: 'bg-violet-500/10 dark:bg-violet-500/15',  text: 'text-violet-500 dark:text-violet-400',  hover: 'hover:border-violet-500/30'  },
-        { label: 'Live Now',     value: activeSessions,    icon: Radio,          bg: 'bg-live/10 dark:bg-live/15',        text: 'text-live',        hover: 'hover:border-live/30'        },
-        { label: 'Avg Rating',   value: avgRating !== null ? avgRating.toFixed(1) : '—', icon: Star, bg: 'bg-amber-500/10 dark:bg-amber-500/15', text: 'text-amber-500 dark:text-amber-400', hover: 'hover:border-amber-500/30' },
+        { label: 'Events',       value: totalEvents,       icon: CalendarDays,  bg: 'bg-brand-500/10 dark:bg-brand-500/15',   text: 'text-brand-500 dark:text-brand-400' },
+        { label: 'Sessions',     value: totalSessions,     icon: Layers,         bg: 'bg-accent-500/10 dark:bg-accent-500/15',  text: 'text-accent-500 dark:text-accent-400' },
+        { label: 'Participants', value: totalParticipants, icon: Users,          bg: 'bg-emerald-500/10 dark:bg-emerald-500/15', text: 'text-emerald-500 dark:text-emerald-400' },
+        { label: 'Responses',    value: totalResponses,    icon: MessageSquare,  bg: 'bg-brand-500/10 dark:bg-brand-500/15',  text: 'text-brand-500 dark:text-brand-400' },
+        { label: 'Live Now',     value: activeSessions,    icon: Radio,          bg: 'bg-live/10 dark:bg-live/15',        text: 'text-live' },
+        { label: 'Avg Rating',   value: avgRating !== null ? avgRating.toFixed(1) : '—', icon: Star, bg: 'bg-amber-500/10 dark:bg-amber-500/15', text: 'text-amber-500 dark:text-amber-400' },
       ] as card}
         {@const Icon = card.icon}
-        <div class="card p-6 bg-white dark:bg-surface-900 border border-surface-200 dark:border-surface-800 shadow-sm hover:shadow-md transition-all duration-300 relative overflow-hidden group {card.hover}">
+        <div class="card p-5 shadow-sm relative overflow-hidden">
           <div class="flex items-center justify-between mb-4">
-            <div class="w-12 h-12 flex items-center justify-center rounded-2xl {card.bg} transition-transform duration-300 group-hover:scale-110 shadow-sm">
+            <div class="w-12 h-12 flex items-center justify-center rounded-2xl {card.bg} shadow-sm">
               <Icon class="w-6 h-6 {card.text}" />
             </div>
             {#if card.label === 'Live Now' && activeSessions > 0}
@@ -222,8 +226,8 @@
 
       <!-- Avg responses / participant -->
       <div class="card p-6 bg-white dark:bg-surface-900 border border-surface-200 dark:border-surface-800 shadow-sm flex items-center gap-5">
-        <div class="w-14 h-14 flex items-center justify-center rounded-2xl bg-violet-500/10 dark:bg-violet-500/15 flex-shrink-0">
-          <Activity class="w-6 h-6 text-violet-500 dark:text-violet-400" />
+        <div class="w-14 h-14 flex items-center justify-center rounded-2xl bg-brand-500/10 dark:bg-brand-500/15 flex-shrink-0">
+          <Activity class="w-6 h-6 text-brand-500 dark:text-brand-400" />
         </div>
         <div>
           <div class="text-3xl font-heading font-extrabold tabular-nums text-surface-900 dark:text-surface-50">{avgResponsesPerParticipant}</div>
@@ -258,7 +262,7 @@
           <p class="text-xs text-surface-500 dark:text-surface-400 mt-0.5">Distribution of slide formats configured in active sessions.</p>
         </div>
         {#if Object.keys(slideTypeDistribution).length === 0}
-          <div class="flex flex-col items-center justify-center py-12 text-surface-400">
+          <div class="flex flex-col items-center justify-center py-12 text-surface-500 dark:text-surface-400">
             <Layers class="w-10 h-10 mb-3 opacity-30 text-surface-500" />
             <p class="text-sm font-medium">No slide configurations found</p>
           </div>
@@ -266,12 +270,12 @@
           {@const segments = getDonutSegments(slideTypeDistribution)}
           {@const total = Object.values(slideTypeDistribution).reduce((a, b) => a + b, 0)}
           <div class="flex flex-col sm:flex-row sm:items-center gap-8 min-h-[200px]">
-            <svg viewBox="0 0 200 200" class="w-40 h-40 flex-shrink-0 mx-auto sm:mx-0">
+            <svg viewBox="0 0 200 200" class="w-40 h-40 flex-shrink-0 mx-auto sm:mx-0" aria-hidden="true">
               {#each segments as seg}
                 <path d={describeArc(100, 100, 70, seg.startPct, seg.endPct)} fill="none" stroke={seg.color} stroke-width="20" stroke-linecap="round" />
               {/each}
               <text x="100" y="96" text-anchor="middle" class="fill-surface-900 dark:fill-surface-50" style="font-size:24px; font-weight:800; font-family:var(--font-heading);">{total}</text>
-              <text x="100" y="116" text-anchor="middle" class="fill-surface-500 dark:fill-surface-400" style="font-size:10px; font-weight:500; uppercase tracking-widest">slides</text>
+              <text x="100" y="116" text-anchor="middle" class="fill-surface-600 dark:fill-surface-400" style="font-size:10px; font-weight:500; text-transform:uppercase; letter-spacing:0.1em">slides</text>
             </svg>
             <div class="space-y-3 flex-1 max-h-48 overflow-y-auto pr-1">
               {#each segments as seg}
@@ -298,7 +302,7 @@
           <p class="text-xs text-surface-500 dark:text-surface-400 mt-0.5">Response engagement volumes categorized by slide type.</p>
         </div>
         {#if Object.keys(responseCountsByType).length === 0}
-          <div class="flex flex-col items-center justify-center py-12 text-surface-400">
+          <div class="flex flex-col items-center justify-center py-12 text-surface-500 dark:text-surface-400">
             <Layers class="w-10 h-10 mb-3 opacity-30 text-surface-500" />
             <p class="text-sm font-medium">No responses recorded yet</p>
           </div>
@@ -306,12 +310,12 @@
           {@const segments = getDonutSegments(responseCountsByType)}
           {@const totalResp = Object.values(responseCountsByType).reduce((a, b) => a + b, 0)}
           <div class="flex flex-col sm:flex-row sm:items-center gap-8 min-h-[200px]">
-            <svg viewBox="0 0 200 200" class="w-40 h-40 flex-shrink-0 mx-auto sm:mx-0">
+            <svg viewBox="0 0 200 200" class="w-40 h-40 flex-shrink-0 mx-auto sm:mx-0" aria-hidden="true">
               {#each segments as seg}
                 <path d={describeArc(100, 100, 70, seg.startPct, seg.endPct)} fill="none" stroke={seg.color} stroke-width="20" stroke-linecap="round" />
               {/each}
               <text x="100" y="96" text-anchor="middle" class="fill-surface-900 dark:fill-surface-50" style="font-size:24px; font-weight:800; font-family:var(--font-heading);">{totalResp}</text>
-              <text x="100" y="116" text-anchor="middle" class="fill-surface-500 dark:fill-surface-400" style="font-size:10px; font-weight:500; uppercase tracking-widest">responses</text>
+              <text x="100" y="116" text-anchor="middle" class="fill-surface-600 dark:fill-surface-400" style="font-size:10px; font-weight:500; text-transform:uppercase; letter-spacing:0.1em">responses</text>
             </svg>
             <div class="space-y-3 flex-1 max-h-48 overflow-y-auto pr-1">
               {#each segments as seg}
@@ -336,7 +340,7 @@
          MOST ACTIVE SESSION HIGHLIGHT
          ═══════════════════════════════════════════════════ -->
     {#if topSession}
-      <div class="card p-6 mb-8 bg-gradient-to-r from-brand-500/5 to-accent-500/5 dark:from-brand-500/10 dark:to-accent-500/10 border border-brand-500/20 dark:border-brand-500/30 relative overflow-hidden shadow-sm hover:shadow-md transition-all duration-300">
+      <div class="card p-6 mb-8 bg-gradient-to-r from-brand-500/5 to-accent-500/5 dark:from-brand-500/10 dark:to-accent-500/10 border border-brand-500/20 dark:border-brand-500/30 relative overflow-hidden shadow-sm">
         <div class="absolute -right-10 -top-10 w-44 h-44 bg-gradient-to-br from-brand-500/10 to-accent-500/10 rounded-full blur-xl pointer-events-none"></div>
         <div class="flex flex-col sm:flex-row sm:items-center gap-5 relative z-10">
           <div class="w-14 h-14 flex items-center justify-center rounded-2xl bg-brand-500/10 dark:bg-brand-500/15 flex-shrink-0 shadow-sm">
@@ -346,21 +350,20 @@
             <div class="text-[10px] text-brand-500 dark:text-brand-400 uppercase tracking-widest font-bold mb-1">Featured Active Session</div>
             <h3 class="font-heading font-extrabold text-xl text-surface-900 dark:text-surface-50 truncate">{topSession.title}</h3>
             <div class="flex flex-wrap items-center gap-4 mt-2 text-sm text-surface-500 dark:text-surface-400">
-              <span class="flex items-center gap-1.5"><MessageSquare class="w-4 h-4 text-violet-400" />{topSession.total_responses} responses</span>
+              <span class="flex items-center gap-1.5"><MessageSquare class="w-4 h-4 text-brand-400" />{topSession.total_responses} responses</span>
               <span class="flex items-center gap-1.5"><Users class="w-4 h-4 text-emerald-400" />{topSession.unique_participants} participants</span>
               {#if topSession.avg_rating !== null}
-                <span class="flex items-center gap-1.5 text-amber-400 font-semibold">
+                <span class="flex items-center gap-1.5 text-amber-600 dark:text-amber-400 font-semibold">
                   <Star class="w-4 h-4 fill-current" /> {topSession.avg_rating.toFixed(1)} / 5.0
                 </span>
               {/if}
             </div>
           </div>
-          <button onclick={() => {
-            const ev = events.find(e => e.sessions?.some(s => s.id === topSession.session_id));
-            if (ev) goto(`/dashboard/analytics/${ev.id}/${topSession.session_id}`);
-          }} class="btn-primary text-sm px-6 py-2.5 flex-shrink-0 shadow-md">
-            View Details
-          </button>
+          {#if topSessionEventId}
+            <a href="/dashboard/analytics/{topSessionEventId}/{topSession.session_id}" class="btn-primary text-sm px-6 py-2.5 flex-shrink-0 shadow-md text-center">
+              View Details
+            </a>
+          {/if}
         </div>
       </div>
     {/if}
@@ -391,7 +394,7 @@
           {@const liveSess = ev.sessions?.filter(s => s.is_live).length ?? 0}
           <button
             onclick={() => goto(`/dashboard/analytics/${ev.id}`)}
-            class="card text-left bg-white dark:bg-surface-900 border border-surface-200 dark:border-surface-800 hover:border-brand-500/40 dark:hover:border-brand-500/40 shadow-sm hover:shadow-md transition-all duration-300 group w-full flex flex-col justify-between"
+            class="card card-interactive text-left shadow-sm hover:border-brand-500/40 dark:hover:border-brand-500/40 group w-full flex flex-col justify-between"
           >
             <div>
               <!-- Top Header: Date/Status -->
@@ -399,23 +402,23 @@
                 <div class="flex-1 min-w-0">
                   <div class="flex items-center gap-2 flex-wrap mb-2">
                     {#if today}
-                      <span class="text-live text-[10px] font-bold uppercase tracking-widest bg-live/10 px-2 py-0.5 rounded-md">Today</span>
+                      <span class="text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-live/10 text-rose-700 dark:text-live">Today</span>
                     {/if}
                     {#if ev.is_published}
-                      <span class="text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-500 dark:text-emerald-400">Published</span>
+                      <span class="text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-400">Published</span>
                     {:else}
                       <span class="text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-surface-100 dark:bg-surface-800 text-surface-500 dark:text-surface-400">Draft</span>
                     {/if}
                     {#if liveSess > 0}
-                      <span class="text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-rose-500/15 text-live flex items-center gap-1.5 border border-live/10">
+                      <span class="text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-live/15 text-rose-700 dark:text-live flex items-center gap-1.5 border border-live/10">
                         <span class="w-1.5 h-1.5 rounded-full bg-live animate-pulse"></span>{liveSess} Live
                       </span>
                     {/if}
                   </div>
-                  <h3 class="font-heading font-extrabold text-lg leading-snug text-surface-900 dark:text-surface-100 group-hover:text-brand-500 dark:group-hover:text-brand-400 transition-colors truncate">{ev.title}</h3>
+                  <h3 class="font-heading font-extrabold text-lg leading-snug text-surface-900 dark:text-surface-100 group-hover:text-brand-600 dark:group-hover:text-brand-400 transition-colors truncate">{ev.title}</h3>
                   <p class="text-xs text-surface-500 dark:text-surface-400 mt-1 font-medium">{formatDate(ev.event_date)}</p>
                 </div>
-                <div class="w-9 h-9 flex items-center justify-center rounded-xl bg-surface-50 dark:bg-surface-800 group-hover:bg-brand-500/10 group-hover:text-brand-500 transition-all duration-300">
+                <div class="w-9 h-9 flex items-center justify-center rounded-xl bg-surface-50 dark:bg-surface-800 group-hover:bg-brand-500/10 group-hover:text-brand-500 transition-colors duration-300">
                   <ChevronRight class="w-5 h-5 text-surface-400 dark:text-surface-500 group-hover:text-brand-500 dark:group-hover:text-brand-400" />
                 </div>
               </div>

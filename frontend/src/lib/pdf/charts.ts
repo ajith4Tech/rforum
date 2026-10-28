@@ -1,4 +1,5 @@
 import { CHART_FONT_FAMILY } from './constants';
+import { PAPER } from '$lib/chartPalette';
 
 /** Converts an RGB tuple (as used by jsPDF's setFillColor et al.) to a CSS hex string for canvas fillStyle. */
 export function rgbToHex(rgb: readonly number[]): string {
@@ -60,7 +61,7 @@ export function generateHighResPieChart(
       const midAngle = cumulativeAngle + sweep / 2;
       const lx = cx + labelRadius * Math.cos(midAngle);
       const ly = cy + labelRadius * Math.sin(midAngle);
-      ctx.fillStyle = '#FFFFFF';
+      ctx.fillStyle = PAPER.background;
       ctx.font = `bold 9px ${CHART_FONT_FAMILY}`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
@@ -73,18 +74,18 @@ export function generateHighResPieChart(
   if (isDonut) {
     ctx.beginPath();
     ctx.arc(cx, cy, radius * 0.65, 0, Math.PI * 2);
-    ctx.fillStyle = '#FFFFFF';
+    ctx.fillStyle = PAPER.background;
     ctx.fill();
 
     if (centerText) {
-      ctx.fillStyle = '#0F172A';
+      ctx.fillStyle = PAPER.text;
       ctx.font = `bold 15px ${CHART_FONT_FAMILY}`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(centerText, cx, cy - (centerSubtext ? 4 : 0));
     }
     if (centerSubtext) {
-      ctx.fillStyle = '#64748B';
+      ctx.fillStyle = PAPER.muted;
       ctx.font = `normal 8px ${CHART_FONT_FAMILY}`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
@@ -114,11 +115,11 @@ export function generateHighResWordCloud(
   if (!ctx) return '';
   ctx.scale(scale, scale);
 
-  ctx.fillStyle = '#F8FAFC';
+  ctx.fillStyle = PAPER.panel;
   ctx.fillRect(0, 0, width, height);
 
   if (keywords.length === 0) {
-    ctx.fillStyle = '#94A3B8';
+    ctx.fillStyle = PAPER.faint;
     ctx.font = `normal 12px ${CHART_FONT_FAMILY}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';

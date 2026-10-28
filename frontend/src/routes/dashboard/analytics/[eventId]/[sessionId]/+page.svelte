@@ -9,11 +9,12 @@
   } from 'lucide-svelte';
   import { onMount } from 'svelte';
   import { fade } from 'svelte/transition';
-  import { rgbToHex, generateHighResPieChart, generateHighResWordCloud } from '$lib/pdf/charts';
+  import { generateHighResPieChart, generateHighResWordCloud } from '$lib/pdf/charts';
   import { loadMascot } from '$lib/pdf/mascot';
-  import { BRAND, CHART_PALETTE, FOOTER_TEXT } from '$lib/pdf/constants';
+  import { BRAND, FOOTER_TEXT } from '$lib/pdf/constants';
   import { orgSettings } from '$lib/stores';
   import CountUp from '$lib/components/CountUp.svelte';
+  import { SLIDE_TYPE_COLORS, seriesColor, slideTypeColor, engagementBadgeClass } from '$lib/chartPalette';
 
   const eventId   = $derived($page.params.eventId);
   const sessionId = $derived($page.params.sessionId);
@@ -158,27 +159,21 @@
 
   // ── Slide type config ─────────────────────────────────
   const typeConfig: Record<string, { label: string; color: string; bg: string; icon: any }> = {
-    POLL:       { label: 'Poll',       color: 'text-brand-500 dark:text-brand-400', bg: 'bg-brand-500/10 dark:bg-brand-500/15', icon: BarChart3  },
-    WORD_CLOUD: { label: 'Word Cloud', color: 'text-pink-500 dark:text-pink-400',   bg: 'bg-pink-500/10 dark:bg-pink-500/15',   icon: Cloud      },
-    QNA:        { label: 'Q&A',        color: 'text-cyan-500 dark:text-cyan-400',   bg: 'bg-cyan-500/10 dark:bg-cyan-500/15',   icon: HelpCircle },
-    FEEDBACK:   { label: 'Feedback',   color: 'text-amber-500 dark:text-amber-400',  bg: 'bg-amber-500/10 dark:bg-amber-500/15',  icon: Star       },
-    CONTENT:    { label: 'Open Text',  color: 'text-emerald-500 dark:text-emerald-400',bg: 'bg-emerald-500/10 dark:bg-emerald-500/15',icon: AlignLeft  },
+    POLL:       { label: 'Poll',       color: 'text-brand-700 dark:text-brand-400',   bg: 'bg-brand-500/10 dark:bg-brand-500/15',   icon: BarChart3  },
+    WORD_CLOUD: { label: 'Word Cloud', color: 'text-pink-700 dark:text-pink-400',     bg: 'bg-pink-500/10 dark:bg-pink-500/15',     icon: Cloud      },
+    QNA:        { label: 'Q&A',        color: 'text-cyan-700 dark:text-cyan-400',     bg: 'bg-cyan-500/10 dark:bg-cyan-500/15',     icon: HelpCircle },
+    FEEDBACK:   { label: 'Feedback',   color: 'text-amber-700 dark:text-amber-400',   bg: 'bg-amber-500/10 dark:bg-amber-500/15',   icon: Star       },
+    CONTENT:    { label: 'Open Text',  color: 'text-emerald-700 dark:text-emerald-400', bg: 'bg-emerald-500/10 dark:bg-emerald-500/15', icon: AlignLeft  },
   };
 
   function tc(type: string) {
-    return typeConfig[type] ?? { label: type, color: 'text-surface-500', bg: 'bg-surface-100', icon: BarChart2 };
+    return typeConfig[type] ?? { label: type, color: 'text-surface-600 dark:text-surface-400', bg: 'bg-surface-100 dark:bg-surface-800', icon: BarChart2 };
   }
 
   function getSlideParticipationRate(slide: SlideDetail): number {
     if (totalParticipants === 0) return 0;
     const unique = new Set(slide.responses.map(r => r.guest_identifier)).size;
     return Math.round((unique / totalParticipants) * 100);
-  }
-
-  function getStatusBadgeClass(rate: number): string {
-    if (rate >= 80) return 'bg-emerald-500/15 text-emerald-500 dark:text-emerald-400';
-    if (rate >= 50) return 'bg-amber-500/15 text-amber-500 dark:text-amber-400';
-    return 'bg-rose-500/15 text-rose-500 dark:text-rose-400';
   }
 
   // Poll aggregated votes
@@ -263,7 +258,6 @@
       counts[s.type] = (counts[s.type] ?? 0) + 1;
       responses[s.type] = (responses[s.type] ?? 0) + s.responses.length;
     }
-    const palette = ['#7C3AED', '#06B6D4', '#10B981', '#F59E0B', '#EC4899', '#6366F1', '#14B8A6', '#EF4444'];
     const total = slides.length || 1;
     let cum = 0;
     return Object.keys(counts).map((type, i) => {
@@ -276,7 +270,7 @@
         pct: Math.round(p * 100),
         startPct: start,
         endPct: cum,
-        color: palette[i % palette.length],
+        color: slideTypeColor(type, i),
       };
     });
   });
@@ -489,8 +483,6 @@
       doc.text('Analysis of configured slide interactive formats and responses received', 15, y);
       y += 15;
 
-      const colorsList = CHART_PALETTE;
-
       // Calculate slide counts by type for charts
       const slideTypeCounts: Record<string, number> = {};
       const slideTypeResponses: Record<string, number> = {};
@@ -505,7 +497,7 @@
       // Chart 1: Slide types donut
       const slideChartData = uniqueTypes.map((type, i) => ({
         value: slideTypeCounts[type],
-        color: rgbToHex(colorsList[i % colorsList.length])
+        color: slideTypeColor(type, i)
       }));
       const totalSlidesSum = slides.length || 1;
       const slideDonutImg = generateHighResPieChart(150, 150, slideChartData, true, String(totalSlidesSum), 'slides');
@@ -516,7 +508,7 @@
       // Chart 2: Responses pie
       const respChartData = uniqueTypes.map((type, i) => ({
         value: slideTypeResponses[type] || 0,
-        color: rgbToHex(colorsList[i % colorsList.length])
+        color: slideTypeColor(type, i)
       }));
       const totalRespSum = slides.reduce((sum, s) => sum + s.responses.length, 0) || 1;
       const respPieImg = generateHighResPieChart(150, 150, respChartData, false, String(totalRespSum), 'responses');
@@ -533,12 +525,12 @@
       doc.setFontSize(9); doc.setFont('helvetica', 'normal');
 
       uniqueTypes.forEach((type, i) => {
-        const color = colorsList[i % colorsList.length];
+        const color = slideTypeColor(type, i);
         if (y > 260) {
           doc.addPage();
           y = 25;
         }
-        doc.setFillColor(color[0], color[1], color[2]);
+        doc.setFillColor(color);
         doc.rect(20, y, 4, 4, 'F');
         doc.setTextColor(...BRAND.muted);
 
@@ -585,7 +577,7 @@
           y += 6;
 
           // Generate high-resolution canvas word cloud and embed it!
-          const wcPngImg = generateHighResWordCloud(160, 80, cloudData.cloud, '#EC4899');
+          const wcPngImg = generateHighResWordCloud(160, 80, cloudData.cloud, SLIDE_TYPE_COLORS.WORD_CLOUD);
           if (wcPngImg) {
             doc.addImage(wcPngImg, 'PNG', 25, y, 150, 75);
             y += 82;
@@ -652,7 +644,7 @@
           y += 6;
 
           // Generate high-resolution canvas word cloud and embed it!
-          const wcPngImg = generateHighResWordCloud(160, 80, cloudData.cloud, '#10B981');
+          const wcPngImg = generateHighResWordCloud(160, 80, cloudData.cloud, SLIDE_TYPE_COLORS.CONTENT);
           if (wcPngImg) {
             doc.addImage(wcPngImg, 'PNG', 25, y, 150, 75);
             y += 82;
@@ -733,21 +725,21 @@
   <title>{sessionTitle || 'Session Analytics'} – {$orgSettings.display_name}</title>
 </svelte:head>
 
-<main class="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8">
+<main class="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
 
   <!-- Breadcrumb -->
   <nav class="sticky top-16 z-30 -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 py-3 mb-6 flex items-center gap-1.5 text-xs text-surface-500 flex-wrap bg-white/90 dark:bg-surface-950/90 backdrop-blur-md border-b border-surface-200 dark:border-surface-800/80" aria-label="Breadcrumb">
-    <a href="/dashboard/analytics" class="hover:text-brand-400 transition-colors flex items-center gap-1">
+    <a href="/dashboard/analytics" class="hover:text-brand-600 dark:hover:text-brand-400 transition-colors flex items-center gap-1">
       <BarChart2 class="w-3.5 h-3.5" />Analytics
     </a>
-    <ChevronRight class="w-3 h-3 flex-shrink-0 text-surface-700" />
+    <ChevronRight class="w-3 h-3 flex-shrink-0 text-surface-400 dark:text-surface-600" />
     {#if eventTitle}
-      <a href="/dashboard/analytics/{eventId}" class="hover:text-brand-400 transition-colors truncate max-w-[150px]">
+      <a href="/dashboard/analytics/{eventId}" class="hover:text-brand-600 dark:hover:text-brand-400 transition-colors truncate max-w-[150px]">
         {eventTitle}
       </a>
-      <ChevronRight class="w-3 h-3 flex-shrink-0 text-surface-700" />
+      <ChevronRight class="w-3 h-3 flex-shrink-0 text-surface-400 dark:text-surface-600" />
     {/if}
-    <span class="text-surface-300 font-medium truncate max-w-[180px]">{sessionTitle || '…'}</span>
+    <span class="text-surface-700 dark:text-surface-300 font-medium truncate max-w-[180px]" aria-current="page">{sessionTitle || '…'}</span>
   </nav>
 
   {#if loading}
@@ -833,15 +825,15 @@
     <!-- ── Session Overview KPI Cards ────────────────────── -->
     <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4 mb-8">
       {#each [
-        { label: 'Participants',  value: totalParticipants,                 decimals: 0, suffix: '', icon: Users,        bg: 'bg-emerald-500/10 dark:bg-emerald-500/15', text: 'text-emerald-500 dark:text-emerald-400', hover: 'hover:border-emerald-500/30' },
-        { label: 'Slides',        value: slides.length,                     decimals: 0, suffix: '', icon: Layers,       bg: 'bg-brand-500/10 dark:bg-brand-500/15',     text: 'text-brand-500 dark:text-brand-400',    hover: 'hover:border-brand-500/30'   },
-        { label: 'Responses',     value: totalResponses,                    decimals: 0, suffix: '', icon: MessageSquare, bg: 'bg-violet-500/10 dark:bg-violet-500/15',  text: 'text-violet-500 dark:text-violet-400',  hover: 'hover:border-violet-500/30'  },
-        { label: 'Engagement',    value: sessionEngagementRate,             decimals: 0, suffix: '%', icon: BarChart2,    bg: 'bg-accent-500/10 dark:bg-accent-500/15',   text: 'text-accent-500 dark:text-accent-400',  hover: 'hover:border-accent-500/30'  },
-        { label: 'Avg / Person',  value: averageResponsesPerParticipantNum, decimals: 1, suffix: '', icon: Activity,     bg: 'bg-amber-500/10 dark:bg-amber-500/15',    text: 'text-amber-500 dark:text-amber-400',    hover: 'hover:border-amber-500/30'   },
+        { label: 'Participants',  value: totalParticipants,                 decimals: 0, suffix: '', icon: Users,        bg: 'bg-emerald-500/10 dark:bg-emerald-500/15', text: 'text-emerald-500 dark:text-emerald-400' },
+        { label: 'Slides',        value: slides.length,                     decimals: 0, suffix: '', icon: Layers,       bg: 'bg-brand-500/10 dark:bg-brand-500/15',     text: 'text-brand-500 dark:text-brand-400' },
+        { label: 'Responses',     value: totalResponses,                    decimals: 0, suffix: '', icon: MessageSquare, bg: 'bg-brand-500/10 dark:bg-brand-500/15',  text: 'text-brand-500 dark:text-brand-400' },
+        { label: 'Engagement',    value: sessionEngagementRate,             decimals: 0, suffix: '%', icon: BarChart2,    bg: 'bg-accent-500/10 dark:bg-accent-500/15',   text: 'text-accent-500 dark:text-accent-400' },
+        { label: 'Avg / Person',  value: averageResponsesPerParticipantNum, decimals: 1, suffix: '', icon: Activity,     bg: 'bg-amber-500/10 dark:bg-amber-500/15',    text: 'text-amber-500 dark:text-amber-400' },
       ] as card, i}
         {@const Icon = card.icon}
-        <div in:fade={{ duration: 300, delay: i * 60 }} class="card p-5 bg-white dark:bg-surface-900 border border-surface-200 dark:border-surface-800 transition-all duration-300 {card.hover} hover:shadow-md cursor-default group overflow-hidden">
-          <div class="w-11 h-11 flex items-center justify-center rounded-xl {card.bg} mb-3.5 transition-transform duration-300 group-hover:scale-110 shadow-sm">
+        <div in:fade={{ duration: 300, delay: i * 60 }} class="card p-5 shadow-sm overflow-hidden">
+          <div class="w-11 h-11 flex items-center justify-center rounded-xl {card.bg} mb-3.5 shadow-sm">
             <Icon class="w-5 h-5 {card.text}" />
           </div>
           <div class="text-2xl sm:text-3xl font-heading font-extrabold tabular-nums tracking-tight leading-none text-surface-900 dark:text-surface-50">
@@ -888,7 +880,7 @@
             <p class="text-xs text-surface-500 dark:text-surface-400 mt-0.5">Share of configured slides by interaction format.</p>
           </div>
           <div class="flex flex-col sm:flex-row sm:items-center gap-6">
-            <svg viewBox="0 0 200 200" class="w-36 h-36 flex-shrink-0 mx-auto sm:mx-0">
+            <svg viewBox="0 0 200 200" class="w-36 h-36 flex-shrink-0 mx-auto sm:mx-0" aria-hidden="true">
               {#each slideTypeBreakdown as seg}
                 {@const sa = seg.startPct * 360 - 90}
                 {@const ea = seg.endPct * 360 - 90}
@@ -905,9 +897,9 @@
                   <path d="M {sx} {sy} A 70 70 0 {large} 1 {ex} {ey}" fill="none" stroke={seg.color} stroke-width="22" stroke-linecap="round" />
                 {/if}
               {/each}
-              <circle cx="100" cy="100" r="52" fill="white" class="dark:fill-surface-900" />
-              <text x="100" y="96" text-anchor="middle" style="font-size:22px; font-weight:800; fill:#0F172A" class="dark:fill-surface-50">{slides.length}</text>
-              <text x="100" y="114" text-anchor="middle" style="font-size:9px; font-weight:500; fill:#64748B">slides</text>
+              <circle cx="100" cy="100" r="52" class="fill-white dark:fill-surface-900" />
+              <text x="100" y="96" text-anchor="middle" class="fill-surface-900 dark:fill-surface-50" style="font-size:22px; font-weight:800; font-family:var(--font-heading);">{slides.length}</text>
+              <text x="100" y="114" text-anchor="middle" class="fill-surface-600 dark:fill-surface-400" style="font-size:9px; font-weight:500;">slides</text>
             </svg>
             <div class="space-y-2.5 flex-1 min-w-0">
               {#each slideTypeBreakdown as seg}
@@ -937,7 +929,7 @@
                   </span>
                 </div>
                 <div class="h-3.5 w-full rounded-full bg-surface-100 dark:bg-surface-800 overflow-hidden">
-                  <div class="h-full rounded-full bg-gradient-to-r from-brand-600 to-brand-400 transition-all duration-700" style="width:{Math.round((seg.responses / maxTypeResponses) * 100)}%"></div>
+                  <div class="h-full rounded-full bg-gradient-to-r from-brand-600 to-brand-400 transition-[width] duration-700" style="width:{Math.round((seg.responses / maxTypeResponses) * 100)}%"></div>
                 </div>
               </div>
             {/each}
@@ -993,7 +985,7 @@
                 <span class="text-xs font-bold tabular-nums text-surface-700 dark:text-surface-300">
                   {slide.responses.length} <span class="font-medium text-surface-400">resp</span>
                 </span>
-                <span class="px-3 py-1 rounded-full text-xs font-bold {getStatusBadgeClass(rate)}">
+                <span class="px-3 py-1 rounded-full text-xs font-bold {engagementBadgeClass(rate)}">
                   {rate}% engaged
                 </span>
               </div>
@@ -1010,14 +1002,13 @@
                 {#if slide.responses.length === 0}
                   <p class="text-sm text-surface-500 dark:text-surface-400 italic py-4 text-center">No responses recorded yet.</p>
                 {:else}
-                  {@const colors = ['#7C3AED', '#06B6D4', '#10B981', '#F59E0B', '#EC4899']}
                   {@const totalPoll = results.reduce((acc, r) => acc + r.count, 0) || 1}
-                  {@const segs = (() => { let cum = 0; return results.map((r, i) => { const p = r.count / totalPoll; const s = cum; cum += p; return { ...r, start: s, end: cum, color: colors[i % colors.length] }; }); })()}
+                  {@const segs = (() => { let cum = 0; return results.map((r, i) => { const p = r.count / totalPoll; const s = cum; cum += p; return { ...r, start: s, end: cum, color: seriesColor(i) }; }); })()}
                   <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
                     <!-- Results Bars -->
                     <div class="space-y-2.5">
                       {#each results as row}
-                        <div class="p-3.5 rounded-xl border transition-all duration-200
+                        <div class="p-3.5 rounded-xl border
                                     {row.isWinner ? 'bg-brand-500/5 dark:bg-brand-500/10 border-brand-500/30' : 'bg-surface-50 dark:bg-surface-800/20 border-surface-200/70 dark:border-surface-800/60'}">
                           <div class="flex items-center justify-between mb-2 gap-3">
                             <span class="text-sm font-semibold text-surface-800 dark:text-surface-200 truncate flex-1 min-w-0">
@@ -1029,7 +1020,7 @@
                             </span>
                           </div>
                           <div class="h-3 w-full rounded-full bg-surface-200 dark:bg-surface-700/60 overflow-hidden">
-                            <div class="h-full rounded-full transition-all duration-700
+                            <div class="h-full rounded-full transition-[width] duration-700
                                         {row.isWinner ? 'bg-gradient-to-r from-brand-600 to-brand-400' : 'bg-surface-400/60 dark:bg-surface-500/50'}"
                                  style="width:{row.pct}%"></div>
                           </div>
@@ -1040,20 +1031,20 @@
                     <!-- Vote Distribution Donut -->
                     <div class="flex flex-col items-center justify-center p-5 border border-surface-200 dark:border-surface-800/60 rounded-2xl bg-surface-50/30 dark:bg-surface-900/30 max-w-xs mx-auto w-full">
                       <span class="text-[10px] uppercase tracking-widest text-surface-500 dark:text-surface-400 font-bold mb-4">Vote Distribution</span>
-                      <svg viewBox="0 0 100 100" class="w-28 h-28">
+                      <svg viewBox="0 0 100 100" class="w-28 h-28" aria-hidden="true">
                         {#each segs as seg}
                           {#if seg.pct > 0}
                             <circle cx="50" cy="50" r="35" fill="none" stroke={seg.color} stroke-width="13"
-                                    stroke-dasharray="{seg.pct} 100" stroke-dashoffset="-{seg.start * 100}"
+                                    pathLength="100" stroke-dasharray="{seg.pct} 100" stroke-dashoffset="-{seg.start * 100}"
                                     transform="rotate(-90 50 50)" />
                           {/if}
                         {/each}
-                        <text x="50" y="54" text-anchor="middle" style="font-size:9px; font-weight:700; fill:#64748B">POLL</text>
+                        <text x="50" y="54" text-anchor="middle" class="fill-surface-600 dark:fill-surface-400" style="font-size:9px; font-weight:700;">POLL</text>
                       </svg>
                       <div class="flex flex-wrap justify-center gap-x-3 gap-y-2 mt-4 text-xs">
                         {#each results as row, idx}
                           <div class="flex items-center gap-1.5">
-                            <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" style="background:{colors[idx % colors.length]}"></span>
+                            <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" style="background:{seriesColor(idx)}"></span>
                             <span class="text-surface-500 dark:text-surface-400 font-medium">{row.option} <span class="font-bold text-surface-700 dark:text-surface-300">({row.pct}%)</span></span>
                           </div>
                         {/each}
@@ -1077,8 +1068,8 @@
                     <!-- Word Cloud Tags -->
                     <div class="p-5 rounded-2xl border border-surface-200 dark:border-surface-800 bg-surface-50/40 dark:bg-surface-900/20 flex flex-wrap gap-2 items-center justify-center min-h-[180px]">
                       {#each wcData.cloud.slice(0, 25) as wordObj}
-                        <span class="inline-flex items-center gap-1 px-3 py-1.5 rounded-full font-bold transition-all duration-200 hover:scale-105 shadow-sm
-                                     bg-pink-500/10 text-pink-600 dark:text-pink-300 border border-pink-500/20 hover:border-pink-500/35"
+                        <span class="inline-flex items-center gap-1 px-3 py-1.5 rounded-full font-bold shadow-sm
+                                     bg-pink-500/10 text-pink-700 dark:text-pink-300 border border-pink-500/20"
                               style="font-size: {Math.max(0.7, Math.min(1.35, 0.7 + wordObj.count * 0.1))}rem">
                           {wordObj.word}
                           <span class="text-[9px] text-pink-700 dark:text-pink-400 font-extrabold ml-1 opacity-80">{wordObj.count}</span>
@@ -1093,10 +1084,10 @@
                         {#each wcData.topKeywords as kw, idx}
                           <div class="flex items-center justify-between py-2.5 text-sm">
                             <div class="flex items-center gap-3">
-                              <span class="w-6 h-6 rounded-lg bg-pink-500/10 text-pink-500 text-[10px] font-extrabold flex items-center justify-center flex-shrink-0">{idx + 1}</span>
+                              <span class="w-6 h-6 rounded-lg bg-pink-500/10 text-pink-700 dark:text-pink-400 text-[10px] font-extrabold flex items-center justify-center flex-shrink-0">{idx + 1}</span>
                               <span class="font-semibold text-surface-800 dark:text-surface-200">"{kw.word}"</span>
                             </div>
-                            <span class="font-bold tabular-nums text-pink-500 dark:text-pink-400">{kw.count}×</span>
+                            <span class="font-bold tabular-nums text-pink-700 dark:text-pink-400">{kw.count}×</span>
                           </div>
                         {/each}
                       </div>
@@ -1134,7 +1125,7 @@
                       <span class="text-xs uppercase tracking-widest text-surface-500 dark:text-surface-400 font-bold block mb-3">Most Upvoted Questions</span>
                       <div class="space-y-2">
                         {#each qna.sorted.slice(0, 8) as r, qi}
-                          <div class="flex items-start gap-3 p-3.5 rounded-xl border border-surface-200 dark:border-surface-800/80 bg-surface-50/30 dark:bg-surface-900/20 hover:border-cyan-500/25 transition-colors">
+                          <div class="flex items-start gap-3 p-3.5 rounded-xl border border-surface-200 dark:border-surface-800/80 bg-surface-50/30 dark:bg-surface-900/20">
                             <span class="w-6 h-6 rounded-lg bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 text-[10px] font-extrabold flex items-center justify-center flex-shrink-0 mt-0.5">{qi + 1}</span>
                             <p class="flex-1 text-sm text-surface-800 dark:text-surface-100 font-medium leading-relaxed min-w-0">{r.value}</p>
                             <div class="flex items-center gap-1 bg-cyan-500/10 dark:bg-cyan-500/15 text-cyan-600 dark:text-cyan-400 px-2.5 py-1 rounded-full text-xs font-bold flex-shrink-0">
@@ -1161,7 +1152,7 @@
                         <div class="flex items-center gap-3 text-sm">
                           <span class="w-9 text-right text-surface-600 dark:text-surface-400 font-bold text-xs tabular-nums flex-shrink-0">{row.stars}★</span>
                           <div class="h-3 flex-1 rounded-full bg-surface-100 dark:bg-surface-800 overflow-hidden">
-                            <div class="h-full rounded-full bg-gradient-to-r from-amber-500 to-amber-400 transition-all duration-700" style="width:{row.pct}%"></div>
+                            <div class="h-full rounded-full bg-gradient-to-r from-amber-500 to-amber-400 transition-[width] duration-700" style="width:{row.pct}%"></div>
                           </div>
                           <span class="w-20 text-right text-xs text-surface-500 dark:text-surface-400 tabular-nums font-bold flex-shrink-0">
                             {row.count} <span class="font-normal opacity-70">({row.pct}%)</span>
@@ -1173,7 +1164,7 @@
                     <!-- Average Score Card -->
                     <div class="flex flex-col items-center justify-center p-6 border border-surface-200 dark:border-surface-800 bg-amber-500/5 dark:bg-amber-500/10 rounded-2xl text-center max-w-xs mx-auto w-full">
                       <span class="text-[10px] uppercase tracking-widest text-surface-500 dark:text-surface-400 font-bold mb-3">Average Score</span>
-                      <span class="text-5xl font-heading font-extrabold text-amber-500 tracking-tight leading-none">{fb.avg.toFixed(1)}</span>
+                      <span class="text-5xl font-heading font-extrabold text-amber-600 dark:text-amber-400 tracking-tight leading-none">{fb.avg.toFixed(1)}</span>
                       <span class="text-xs text-surface-400 mt-1 font-medium">out of 5</span>
                       <div class="text-amber-400 text-2xl tracking-widest mt-3 select-none">{ratingStars(fb.avg)}</div>
                       <span class="text-xs text-surface-500 dark:text-surface-400 mt-3 font-medium">Based on {fb.totalRatings} {fb.totalRatings === 1 ? 'rating' : 'ratings'}</span>
@@ -1196,8 +1187,8 @@
                     <!-- Tags -->
                     <div class="p-5 rounded-2xl border border-surface-200 dark:border-surface-800 bg-surface-50/40 dark:bg-surface-900/20 flex flex-wrap gap-2 items-center justify-center min-h-[180px]">
                       {#each wcData.cloud.slice(0, 25) as wordObj}
-                        <span class="inline-flex items-center gap-1 px-3 py-1.5 rounded-full font-bold transition-all duration-200 hover:scale-105 shadow-sm
-                                     bg-emerald-500/10 text-emerald-600 dark:text-emerald-300 border border-emerald-500/20 hover:border-emerald-500/35"
+                        <span class="inline-flex items-center gap-1 px-3 py-1.5 rounded-full font-bold shadow-sm
+                                     bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20"
                               style="font-size: {Math.max(0.7, Math.min(1.35, 0.7 + wordObj.count * 0.1))}rem">
                           {wordObj.word}
                           <span class="text-[9px] text-emerald-700 dark:text-emerald-400 font-extrabold ml-1 opacity-80">{wordObj.count}</span>
@@ -1215,7 +1206,7 @@
                               <span class="w-6 h-6 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[10px] font-extrabold flex items-center justify-center flex-shrink-0">{idx + 1}</span>
                               <span class="font-semibold text-surface-800 dark:text-surface-200">"{kw.word}"</span>
                             </div>
-                            <span class="font-bold tabular-nums text-emerald-500 dark:text-emerald-400">{kw.count}×</span>
+                            <span class="font-bold tabular-nums text-emerald-700 dark:text-emerald-400">{kw.count}×</span>
                           </div>
                         {/each}
                       </div>

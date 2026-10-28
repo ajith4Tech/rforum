@@ -10,6 +10,7 @@
   import { BRAND, CHART_PALETTE, FOOTER_TEXT } from '$lib/pdf/constants';
   import { orgSettings } from '$lib/stores';
   import CountUp from '$lib/components/CountUp.svelte';
+  import { SERIES_COLORS, engagementBadgeClass } from '$lib/chartPalette';
 
   const eventId = $derived($page.params.eventId);
 
@@ -762,23 +763,17 @@
     }
   }
 
-  function engBadge(pct: number) {
-    if (pct >= 80) return 'bg-emerald-500/15 text-emerald-400';
-    if (pct >= 50) return 'bg-amber-500/15 text-amber-400';
-    return 'bg-rose-500/15 text-rose-400';
-  }
-
   function ratingStars(n: number | null) { return n === null ? null : '★'.repeat(Math.round(n)) + '☆'.repeat(5 - Math.round(n)); }
 </script>
 
 <svelte:head><title>{eventTitle || 'Event'} – Analytics – {$orgSettings.display_name}</title></svelte:head>
 
-<main class="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8">
+<main class="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
   <!-- Breadcrumb -->
   <nav class="flex items-center gap-1.5 text-xs text-surface-500 mb-6 flex-wrap" aria-label="Breadcrumb">
-    <a href="/dashboard/analytics" class="hover:text-brand-400 transition-colors flex items-center gap-1"><BarChart2 class="w-3.5 h-3.5" />Analytics</a>
-    <ChevronRight class="w-3 h-3 text-surface-700" />
-    <span class="text-surface-300 font-medium truncate max-w-[260px]">{eventTitle || '…'}</span>
+    <a href="/dashboard/analytics" class="hover:text-brand-600 dark:hover:text-brand-400 transition-colors flex items-center gap-1"><BarChart2 class="w-3.5 h-3.5" />Analytics</a>
+    <ChevronRight class="w-3 h-3 text-surface-400 dark:text-surface-600" />
+    <span class="text-surface-700 dark:text-surface-300 font-medium truncate max-w-[260px]" aria-current="page">{eventTitle || '…'}</span>
   </nav>
 
   {#if loading}
@@ -839,14 +834,14 @@
     <!-- KPI Cards Grid -->
     <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
       {#each [
-        { label: 'Total Sessions',     value: totalSessions,       decimals: 0, suffix: '', icon: Layers,        bg: 'bg-brand-500/10 dark:bg-brand-500/15',    text: 'text-brand-500 dark:text-brand-400',    hover: 'hover:border-brand-500/30'   },
-        { label: 'Total Participants', value: totalParticipants,   decimals: 0, suffix: '', icon: Users,         bg: 'bg-emerald-500/10 dark:bg-emerald-500/15', text: 'text-emerald-500 dark:text-emerald-400', hover: 'hover:border-emerald-500/30' },
-        { label: 'Total Responses',    value: totalResponses,      decimals: 0, suffix: '', icon: MessageSquare, bg: 'bg-violet-500/10 dark:bg-violet-500/15',   text: 'text-violet-500 dark:text-violet-400',  hover: 'hover:border-violet-500/30'  },
-        { label: 'Avg Engagement',     value: eventEngagementRate, decimals: 0, suffix: '%', icon: TrendingUp,   bg: 'bg-amber-500/10 dark:bg-amber-500/15',    text: 'text-amber-500 dark:text-amber-400',    hover: 'hover:border-amber-500/30'   },
+        { label: 'Total Sessions',     value: totalSessions,       decimals: 0, suffix: '', icon: Layers,        bg: 'bg-brand-500/10 dark:bg-brand-500/15',    text: 'text-brand-500 dark:text-brand-400' },
+        { label: 'Total Participants', value: totalParticipants,   decimals: 0, suffix: '', icon: Users,         bg: 'bg-emerald-500/10 dark:bg-emerald-500/15', text: 'text-emerald-500 dark:text-emerald-400' },
+        { label: 'Total Responses',    value: totalResponses,      decimals: 0, suffix: '', icon: MessageSquare, bg: 'bg-brand-500/10 dark:bg-brand-500/15',   text: 'text-brand-500 dark:text-brand-400' },
+        { label: 'Avg Engagement',     value: eventEngagementRate, decimals: 0, suffix: '%', icon: TrendingUp,   bg: 'bg-amber-500/10 dark:bg-amber-500/15',    text: 'text-amber-500 dark:text-amber-400' },
       ] as card, i}
         {@const Icon = card.icon}
-        <div in:fade={{ duration: 300, delay: i * 60 }} class="card p-5 bg-white dark:bg-surface-900 border border-surface-200 dark:border-surface-800 transition-all duration-300 {card.hover} hover:shadow-md cursor-default group overflow-hidden">
-          <div class="w-11 h-11 flex items-center justify-center rounded-xl {card.bg} mb-3.5 transition-transform duration-300 group-hover:scale-110 shadow-sm">
+        <div in:fade={{ duration: 300, delay: i * 60 }} class="card p-5 shadow-sm overflow-hidden">
+          <div class="w-11 h-11 flex items-center justify-center rounded-xl {card.bg} mb-3.5 shadow-sm">
             <Icon class="w-5 h-5 {card.text}" />
           </div>
           <div class="text-2xl sm:text-3xl font-heading font-extrabold tabular-nums tracking-tight leading-none text-surface-900 dark:text-surface-50">
@@ -880,7 +875,7 @@
                   </span>
                 </div>
                 <div class="h-3.5 w-full rounded-full bg-surface-100 dark:bg-surface-800 overflow-hidden">
-                  <div class="h-full rounded-full bg-gradient-to-r from-brand-600 to-brand-400 transition-all duration-700" style="width:{pct}%"></div>
+                  <div class="h-full rounded-full bg-gradient-to-r from-brand-600 to-brand-400 transition-[width] duration-700" style="width:{pct}%"></div>
                 </div>
               </div>
             {/each}
@@ -893,11 +888,11 @@
             <h2 class="font-heading font-bold text-lg text-surface-900 dark:text-surface-100">Responses Per Session</h2>
             <p class="text-xs text-surface-500 dark:text-surface-400 mt-0.5">Total response distribution across all sessions.</p>
           </div>
-          {#each [['#7C3AED','#06B6D4','#10B981','#F59E0B','#EC4899','#EF4444','#8B5CF6','#14B8A6']] as colors}
+          {#each [SERIES_COLORS] as colors}
             {@const total = sessions.reduce((s, r) => s + r.total_responses, 0) || 1}
             {@const segments = (() => { let cum = 0; return sessions.map((s, i) => { const p = s.total_responses / total; const start = cum; cum += p; return { ...s, pct: Math.round(p * 100), startPct: start, endPct: cum, color: colors[i % colors.length] }; }); })()}
             <div class="flex flex-col sm:flex-row sm:items-center gap-6">
-              <svg viewBox="0 0 200 200" class="w-36 h-36 flex-shrink-0 mx-auto sm:mx-0">
+              <svg viewBox="0 0 200 200" class="w-36 h-36 flex-shrink-0 mx-auto sm:mx-0" aria-hidden="true">
                 {#each segments as seg}
                   {@const sa = seg.startPct * 360 - 90}
                   {@const ea = seg.endPct * 360 - 90}
@@ -914,9 +909,9 @@
                     <path d="M {sx} {sy} A 70 70 0 {large} 1 {ex} {ey}" fill="none" stroke={seg.color} stroke-width="22" stroke-linecap="round" />
                   {/if}
                 {/each}
-                <circle cx="100" cy="100" r="52" fill="white" class="dark:fill-surface-900" />
-                <text x="100" y="96" text-anchor="middle" style="font-size:22px; font-weight:800; fill:#0F172A" class="dark:fill-surface-50">{totalResponses}</text>
-                <text x="100" y="114" text-anchor="middle" style="font-size:9px; font-weight:500; fill:#64748B">responses</text>
+                <circle cx="100" cy="100" r="52" class="fill-white dark:fill-surface-900" />
+                <text x="100" y="96" text-anchor="middle" class="fill-surface-900 dark:fill-surface-50" style="font-size:22px; font-weight:800; font-family:var(--font-heading);">{totalResponses}</text>
+                <text x="100" y="114" text-anchor="middle" class="fill-surface-600 dark:fill-surface-400" style="font-size:9px; font-weight:500;">responses</text>
               </svg>
               <div class="space-y-2.5 flex-1 min-w-0">
                 {#each segments as seg}
@@ -957,10 +952,10 @@
             <div class="mt-4">
               <div class="flex justify-between text-xs mb-1.5 font-medium">
                 <span class="text-surface-500 dark:text-surface-400">Engagement</span>
-                <span class="font-bold text-emerald-500">{eng}%</span>
+                <span class="font-bold text-emerald-600 dark:text-emerald-400">{eng}%</span>
               </div>
               <div class="h-2 w-full rounded-full bg-surface-100 dark:bg-surface-800 overflow-hidden">
-                <div class="h-full rounded-full bg-emerald-500 transition-all duration-700" style="width:{eng}%"></div>
+                <div class="h-full rounded-full bg-emerald-500 transition-[width] duration-700" style="width:{eng}%"></div>
               </div>
             </div>
           {/each}
@@ -977,7 +972,7 @@
           <div class="mt-4 flex items-center justify-between text-xs pt-2 border-t border-surface-100 dark:border-surface-800/60">
             <div>
               <span class="text-surface-400 uppercase font-semibold text-[9px] tracking-wider">Avg Rating</span>
-              <div class="text-amber-500 font-bold mt-1 text-sm">
+              <div class="text-amber-600 dark:text-amber-400 font-bold mt-1 text-sm">
                 {#if sessions[0].avg_rating !== null}★ {sessions[0].avg_rating.toFixed(1)} / 5{:else}—{/if}
               </div>
             </div>
@@ -1033,7 +1028,7 @@
       </div>
 
       {#if topSession && sessions.length > 1}
-        <div class="card p-5 bg-white dark:bg-surface-900 border border-surface-200 dark:border-surface-800 shadow-sm hover:shadow-md transition-shadow">
+        <div class="card p-5 shadow-sm">
           <div class="flex flex-col sm:flex-row sm:items-center gap-4">
             <div class="w-10 h-10 flex items-center justify-center rounded-xl bg-brand-500/10 dark:bg-brand-500/15 flex-shrink-0">
               <Zap class="w-5 h-5 text-brand-500 dark:text-brand-400" />
@@ -1042,7 +1037,7 @@
               <div class="text-[10px] text-brand-500 dark:text-brand-400 uppercase tracking-widest font-bold mb-0.5">Most Active Session</div>
               <h3 class="font-heading font-semibold text-base text-surface-900 dark:text-surface-50 truncate">{topSession.title}</h3>
               <div class="flex flex-wrap items-center gap-3 mt-1 text-xs text-surface-500 dark:text-surface-400 font-medium">
-                <span class="flex items-center gap-1"><MessageSquare class="w-3.5 h-3.5 text-violet-400" />{topSession.total_responses} responses</span>
+                <span class="flex items-center gap-1"><MessageSquare class="w-3.5 h-3.5 text-brand-400" />{topSession.total_responses} responses</span>
                 <span class="flex items-center gap-1"><Users class="w-3.5 h-3.5 text-emerald-400" />{topSession.unique_participants} participants</span>
               </div>
             </div>
@@ -1108,10 +1103,10 @@
         <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {#each pagedSessions as s, i (s.session_id)}
             {@const pct = sessionEngagementPct(s)}
-            <div in:fade={{ duration: 250, delay: i * 40 }} class="flex flex-col p-5 rounded-2xl border border-surface-200 dark:border-surface-800 bg-surface-50/40 dark:bg-surface-900/30 hover:border-brand-500/30 hover:shadow-md transition-all duration-200">
+            <div in:fade={{ duration: 250, delay: i * 40 }} class="flex flex-col p-5 rounded-2xl border border-surface-200 dark:border-surface-800 bg-surface-50/40 dark:bg-surface-900/30">
               <div class="flex items-start justify-between gap-2 mb-3">
                 <h3 class="font-heading font-semibold text-sm text-surface-900 dark:text-surface-100 truncate flex-1" title={s.title}>{s.title}</h3>
-                <span class="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold flex-shrink-0 {engBadge(pct)}">{pct}%</span>
+                <span class="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold flex-shrink-0 {engagementBadgeClass(pct)}">{pct}%</span>
               </div>
               {#if s.moderator_name}
                 <div class="flex items-center gap-1.5 text-xs text-surface-500 dark:text-surface-400 mb-4">
@@ -1127,7 +1122,7 @@
                   <span class="font-bold tabular-nums text-surface-900 dark:text-surface-100">{s.unique_participants}</span> participants
                 </div>
                 <div class="flex items-center gap-1.5 text-surface-600 dark:text-surface-300">
-                  <MessageSquare class="w-3.5 h-3.5 text-violet-400 flex-shrink-0" />
+                  <MessageSquare class="w-3.5 h-3.5 text-brand-400 flex-shrink-0" />
                   <span class="font-bold tabular-nums text-surface-900 dark:text-surface-100">{s.total_responses}</span> responses
                 </div>
                 <div class="flex items-center gap-1.5 text-surface-600 dark:text-surface-300">
@@ -1136,7 +1131,7 @@
                 </div>
                 <div class="flex items-center gap-1.5 text-surface-600 dark:text-surface-300">
                   {#if s.avg_rating !== null}
-                    <span class="text-amber-400 text-xs font-bold">{ratingStars(s.avg_rating)}</span>
+                    <span class="text-amber-500 dark:text-amber-400 text-xs font-bold" aria-label={`Average rating ${s.avg_rating.toFixed(1)} of 5`}>{ratingStars(s.avg_rating)}</span>
                   {:else}
                     <span class="text-surface-400">No ratings</span>
                   {/if}
