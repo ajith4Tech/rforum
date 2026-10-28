@@ -76,114 +76,188 @@
   }
 }
 
+/* Theme-specific component rules are scoped with :where([data-theme=…]) so
+   the theme prefix adds no specificity. Markup like `btn-secondary px-2` or
+   `card p-0` must win: utilities come later in the cascade, so at equal
+   specificity they override these defaults. (A plain `[data-theme] .x`
+   prefix outranked every utility and silently ignored such overrides.) */
 @layer components {
+  /* ── Buttons ─────────────────────────────────────────────────────────── */
   .btn-primary {
-    @apply bg-gradient-to-r from-brand-600 to-brand-500 hover:from-brand-700 hover:to-brand-600 text-white font-semibold px-5 py-2.5 rounded-xl
-           transition-all duration-200 active:scale-95 shadow-lg shadow-brand-600/25;
+    @apply bg-gradient-to-r from-brand-600 to-brand-500 text-white font-semibold px-5 py-2.5 rounded-xl
+           transition duration-200 shadow-lg shadow-brand-600/25;
+  }
+
+  .btn-primary:not(:disabled):not([aria-disabled="true"]):hover {
+    @apply from-brand-700 to-brand-600;
+  }
+
+  .btn-primary:not(:disabled):not([aria-disabled="true"]):active {
+    @apply scale-95;
   }
 
   .btn-secondary {
-    @apply transition-all duration-200;
+    @apply font-medium px-4 py-2 rounded-xl border transition-colors duration-200
+           bg-surface-200 text-surface-800 border-surface-300;
   }
 
-  [data-theme="dark"] .btn-secondary {
-    @apply bg-surface-800 hover:bg-surface-700 text-surface-200 font-medium px-4 py-2 rounded-xl
-           border border-surface-700;
+  .btn-secondary:not(:disabled):not([aria-disabled="true"]):hover {
+    @apply bg-surface-300 text-surface-900;
   }
 
-  [data-theme="light"] .btn-secondary {
-    @apply bg-surface-200 hover:bg-surface-300 text-surface-800 font-medium px-4 py-2 rounded-xl
-           border border-surface-300;
+  :where([data-theme="dark"]) .btn-secondary {
+    @apply bg-surface-800 text-surface-200 border-surface-700;
   }
 
+  :where([data-theme="dark"]) .btn-secondary:not(:disabled):not([aria-disabled="true"]):hover {
+    @apply bg-surface-700 text-surface-100;
+  }
+
+  /* Low-emphasis action (toolbar, "Cancel" next to a primary action). */
+  .btn-ghost {
+    @apply font-medium px-3 py-2 rounded-xl transition-colors duration-200 text-surface-700;
+  }
+
+  .btn-ghost:not(:disabled):not([aria-disabled="true"]):hover {
+    @apply bg-surface-200 text-surface-900;
+  }
+
+  :where([data-theme="dark"]) .btn-ghost {
+    @apply text-surface-300;
+  }
+
+  :where([data-theme="dark"]) .btn-ghost:not(:disabled):not([aria-disabled="true"]):hover {
+    @apply bg-surface-800 text-surface-100;
+  }
+
+  /* red-700 / red-300: ≥ 4.5:1 on their tinted backgrounds. The previous
+     red-500 text was ~3.3:1 in the light theme. */
   .btn-danger {
-    @apply bg-danger/10 hover:bg-danger/20 text-danger font-medium px-4 py-2 rounded-xl
-           border border-danger/20 transition-all duration-200;
+    @apply font-medium px-4 py-2 rounded-xl border transition-colors duration-200
+           bg-red-50 text-red-700 border-red-200;
+  }
+
+  .btn-danger:not(:disabled):not([aria-disabled="true"]):hover {
+    @apply bg-red-100 text-red-800 border-red-300;
+  }
+
+  :where([data-theme="dark"]) .btn-danger {
+    @apply bg-danger/10 text-red-300 border-danger/25;
+  }
+
+  :where([data-theme="dark"]) .btn-danger:not(:disabled):not([aria-disabled="true"]):hover {
+    @apply bg-danger/20 text-red-200;
   }
 
   .btn-live {
-    @apply bg-live hover:bg-rose-600 text-white font-bold px-5 py-2.5 rounded-xl
-           animate-pulse-live transition-all duration-200 shadow-lg shadow-live/30;
+    @apply bg-live text-white font-bold px-5 py-2.5 rounded-xl
+           animate-pulse-live transition-colors duration-200 shadow-lg shadow-live/30;
   }
 
+  .btn-live:not(:disabled):not([aria-disabled="true"]):hover {
+    @apply bg-rose-600;
+  }
+
+  .btn-primary:disabled, .btn-primary[aria-disabled="true"],
+  .btn-secondary:disabled, .btn-secondary[aria-disabled="true"],
+  .btn-ghost:disabled, .btn-ghost[aria-disabled="true"],
+  .btn-danger:disabled, .btn-danger[aria-disabled="true"],
+  .btn-live:disabled, .btn-live[aria-disabled="true"] {
+    @apply opacity-50 cursor-not-allowed shadow-none;
+    animation: none;
+  }
+
+  /* Pending action: set aria-busy="true" (and usually disabled) while the
+     request is in flight. */
+  .btn-primary[aria-busy="true"],
+  .btn-secondary[aria-busy="true"],
+  .btn-ghost[aria-busy="true"],
+  .btn-danger[aria-busy="true"],
+  .btn-live[aria-busy="true"] {
+    @apply cursor-wait opacity-75;
+  }
+
+  /* ── Surfaces ────────────────────────────────────────────────────────── */
   .card {
-    @apply rounded-2xl p-4 sm:p-5;
+    @apply rounded-2xl p-4 sm:p-5 border bg-white border-surface-200;
   }
 
-  .skeleton {
-    @apply animate-pulse;
+  :where([data-theme="dark"]) .card {
+    @apply bg-surface-900 border-surface-800;
   }
 
-  [data-theme="dark"] .skeleton {
-    @apply bg-surface-800;
-  }
-
-  [data-theme="light"] .skeleton {
-    @apply bg-surface-200;
-  }
-
-  [data-theme="dark"] .card {
-    @apply bg-surface-900 border border-surface-800;
-  }
-
-  [data-theme="light"] .card {
-    @apply bg-white border border-surface-200;
-  }
-
-  .input-field {
-    @apply w-full rounded-xl px-3.5 py-2.5 placeholder-surface-500 focus:outline-none focus:ring-2
-           focus:ring-brand-600/50 focus:border-brand-600 transition-all duration-200;
-  }
-
-  [data-theme="dark"] .input-field {
-    @apply bg-surface-900 border border-surface-800 text-surface-100;
-  }
-
-  [data-theme="light"] .input-field {
-    @apply bg-surface-50 border border-surface-300 text-surface-950;
-  }
-
-  .badge-live {
-    @apply inline-flex items-center gap-1.5 text-live text-xs font-bold
-           px-3 py-1 rounded-full uppercase tracking-wider;
-  }
-
-  [data-theme="dark"] .badge-live {
-    @apply bg-live/10;
-  }
-
-  [data-theme="light"] .badge-live {
-    @apply bg-live/20;
-  }
-
-  /* Uniform interactive card hover – no hue-shifting, just a subtle surface lift */
+  /* Only for cards/rows that are actually clickable — never on static
+     content, where a hover lift suggests an action that doesn't exist. */
   .card-interactive {
-    @apply transition-all duration-200 cursor-pointer;
+    @apply transition duration-200 cursor-pointer;
   }
 
-  [data-theme="dark"] .card-interactive:hover {
-    @apply border-surface-700 shadow-xl shadow-black/20;
-  }
-
-  [data-theme="light"] .card-interactive:hover {
+  .card-interactive:hover {
     @apply border-surface-300 shadow-lg shadow-black/5;
   }
 
+  :where([data-theme="dark"]) .card-interactive:hover {
+    @apply border-surface-700 shadow-xl shadow-black/20;
+  }
+
+  .skeleton {
+    @apply animate-pulse bg-surface-200;
+  }
+
+  :where([data-theme="dark"]) .skeleton {
+    @apply bg-surface-800;
+  }
+
+  /* ── Form fields ─────────────────────────────────────────────────────── */
+  .input-field {
+    @apply w-full rounded-xl px-3.5 py-2.5 border placeholder-surface-500 focus:outline-none focus:ring-2
+           focus:ring-brand-600/50 focus:border-brand-600 transition-colors duration-200
+           bg-surface-50 border-surface-300 text-surface-950;
+  }
+
+  :where([data-theme="dark"]) .input-field {
+    @apply bg-surface-900 border-surface-800 text-surface-100;
+  }
+
+  .input-field:disabled {
+    @apply opacity-60 cursor-not-allowed;
+  }
+
+  /* ── Badges ──────────────────────────────────────────────────────────── */
+  .badge-live {
+    @apply inline-flex items-center gap-1.5 text-live text-xs font-bold
+           px-3 py-1 rounded-full uppercase tracking-wider bg-live/15;
+  }
+
+  :where([data-theme="dark"]) .badge-live {
+    @apply bg-live/10;
+  }
+
+  /* ── Navigation ──────────────────────────────────────────────────────── */
+  /* The transparent border keeps items the same size when .active adds one. */
   .sidebar-item {
-    @apply flex items-center gap-3 px-3 py-2.5 rounded-xl
-           hover:transition-all duration-200 cursor-pointer;
+    @apply flex items-center gap-3 px-3 py-2.5 rounded-xl border border-transparent
+           transition-colors duration-200 cursor-pointer text-surface-600;
   }
 
-  [data-theme="dark"] .sidebar-item {
-    @apply text-surface-400 hover:text-surface-100 hover:bg-surface-800;
+  .sidebar-item:hover {
+    @apply text-surface-900 bg-surface-100;
   }
 
-  [data-theme="light"] .sidebar-item {
-    @apply text-surface-600 hover:text-surface-900 hover:bg-surface-100;
+  :where([data-theme="dark"]) .sidebar-item {
+    @apply text-surface-400;
+  }
+
+  :where([data-theme="dark"]) .sidebar-item:hover {
+    @apply text-surface-100 bg-surface-800;
   }
 
   .sidebar-item.active {
-    @apply text-brand-400 bg-brand-500/10 border border-brand-500/20;
+    @apply text-brand-700 bg-brand-50 border-brand-200;
+  }
+
+  :where([data-theme="dark"]) .sidebar-item.active {
+    @apply text-brand-300 bg-brand-500/10 border-brand-500/20;
   }
 }
 
@@ -228,10 +302,10 @@
     border: 1px solid;
   }
 
-  [data-theme="dark"] .pres-editor-shell {
+  :where([data-theme="dark"]) .pres-editor-shell {
     @apply border-surface-800 bg-surface-900;
   }
-  [data-theme="light"] .pres-editor-shell {
+  :where([data-theme="light"]) .pres-editor-shell {
     @apply border-surface-200 bg-white;
   }
 
@@ -240,8 +314,8 @@
     @apply flex items-center gap-3 px-4 py-3;
     border-bottom: 1px solid;
   }
-  [data-theme="dark"] .pres-title-bar { @apply border-surface-800 bg-surface-950/60; }
-  [data-theme="light"] .pres-title-bar { @apply border-surface-200 bg-surface-50; }
+  :where([data-theme="dark"]) .pres-title-bar { @apply border-surface-800 bg-surface-950/60; }
+  :where([data-theme="light"]) .pres-title-bar { @apply border-surface-200 bg-surface-50; }
 
   .pres-title-input {
     @apply flex-1 bg-transparent border-none outline-none text-xl font-heading font-bold
@@ -249,8 +323,8 @@
     min-width: 0;
     letter-spacing: 0.02em;
   }
-  [data-theme="dark"] .pres-title-input { @apply text-surface-100; }
-  [data-theme="light"] .pres-title-input { @apply text-surface-950; }
+  :where([data-theme="dark"]) .pres-title-input { @apply text-surface-100; }
+  :where([data-theme="light"]) .pres-title-input { @apply text-surface-950; }
 
   .pres-title-actions {
     @apply flex items-center gap-2 flex-shrink-0;
@@ -277,8 +351,8 @@
     @apply px-4 py-3;
     border-top: 1px solid;
   }
-  [data-theme="dark"] .pres-file-row { @apply border-surface-800; }
-  [data-theme="light"] .pres-file-row { @apply border-surface-200; }
+  :where([data-theme="dark"]) .pres-file-row { @apply border-surface-800; }
+  :where([data-theme="light"]) .pres-file-row { @apply border-surface-200; }
 
   .pres-upload-label {
     @apply inline-flex items-center;
