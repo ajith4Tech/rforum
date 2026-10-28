@@ -5,15 +5,18 @@
     updateEvent,
     deleteEvent,
     setEventSessions,
-    createSession
+    createSession,
+    isAuthFailure
   } from '$lib/api';
   import { getEvents, getSessions, invalidateEvents, invalidateSessions } from '$lib/dataCache';
-  import { Calendar, Plus, Search, X } from 'lucide-svelte';
+  import { Calendar, Plus, Search, X, AlertTriangle, RefreshCw } from 'lucide-svelte';
   import { onMount, tick } from 'svelte';
   import { debounce } from '$lib/debounce';
   import { cycleSearchIndex } from '$lib/search';
   import EventCard from '$lib/components/EventCard.svelte';
   import PaginationBar from '$lib/components/PaginationBar.svelte';
+  import Modal from '$lib/components/Modal.svelte';
+  import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 
   const PAGE_SIZE = 20;
   // Sessions here are only the "assign to event" dropdown source, not a
@@ -51,6 +54,20 @@
   let editEventDate = $state('');
   let editEventDescription = $state('');
   let savingEditEvent = $state(false);
+  let createEventError = $state('');
+  let editEventError = $state('');
+  // Initial-load failure (shown instead of the "No events yet" empty state)
+  // and failures of per-card actions, shown in a dismissible banner.
+  let loadError = $state('');
+  let actionError = $state('');
+  let deleteTarget = $state<any | null>(null);
+  let deletingEvent = $state(false);
+  let deleteError = $state('');
+
+  function reportError(e: any, fallback: string) {
+    if (isAuthFailure(e)) { goto('/login'); return; }
+    actionError = e?.message || fallback;
+  }
 
   async function loadEvents() {
     const myRequest = ++requestId;
@@ -68,15 +85,22 @@
     sessions = result.items;
   }
 
-  onMount(async () => {
+  async function initialLoad() {
+    loading = true;
+    loadError = '';
     try {
       await Promise.all([loadSessionsForDropdown(), loadEvents()]);
-    } catch {
-      goto('/login');
+    } catch (e: any) {
+      if (isAuthFailure(e)) { goto('/login'); return; }
+      loadError = e?.message || 'Could not load events.';
     } finally {
       loading = false;
       didInit = true;
     }
+  }
+
+  onMount(async () => {
+    await initialLoad();
 
     // Deep link from global search (?event=<id>): scroll to and briefly highlight that card
     if (typeof window !== 'undefined') {
@@ -99,7 +123,7 @@
     debouncedQuery;
     if (!didInit) return;
     offset = 0;
-    loadEvents();
+    loadEvents().catch((e) => reportError(e, 'Could not search events.'));
   });
 
   function clearSearch() {
@@ -111,13 +135,13 @@
   async function goToPrevPage() {
     if (offset <= 0) return;
     offset = Math.max(0, offset - PAGE_SIZE);
-    await loadEvents();
+    try { await loadEvents(); } catch (e) { reportError(e, 'Could not load events.'); }
   }
 
   async function goToNextPage() {
     if (offset + events.length >= total) return;
     offset = offset + PAGE_SIZE;
-    await loadEvents();
+    try { await loadEvents(); } catch (e) { reportError(e, 'Could not load events.'); }
   }
 
   function handleSearchKeydown(e: KeyboardEvent) {
@@ -141,6 +165,7 @@
   async function handleCreateEvent() {
     if (!newEventTitle.trim() || !newEventDate) return;
     creatingEvent = true;
+    createEventError = '';
     try {
       await createEvent({
         title: newEventTitle.trim(),
@@ -156,7 +181,7 @@
       newEventDescription = '';
       showCreateEvent = false;
     } catch (e: any) {
-      alert(e.message);
+      createEventError = e?.message || 'Could not create the event.';
     } finally {
       creatingEvent = false;
     }
@@ -169,7 +194,7 @@
       invalidateEvents();
       await loadEvents();
     } catch (e: any) {
-      alert(e.message);
+      reportError(e, 'Could not update this event\'s sessions.');
     } finally {
       savingEventId = null;
     }
@@ -213,21 +238,43 @@
       await loadSessionsForDropdown();
       await handleSaveEventSessions(eventId);
     } catch (e: any) {
-      alert(e.message);
+      reportError(e, 'Could not create the session.');
+      // Rethrow so EventCard keeps the typed title/moderator for a retry.
+      throw e;
     } finally {
       creatingSessionForEventId = null;
     }
   }
 
-  async function handleDeleteEvent(id: string) {
-    if (!confirm('Delete this event?')) return;
-    await deleteEvent(id);
+  function handleDeleteEvent(id: string) {
+    deleteTarget = events.find((e) => e.id === id) ?? null;
+    deleteError = '';
+  }
+
+  async function confirmDeleteEvent() {
+    if (!deleteTarget) return;
+    deletingEvent = true;
+    deleteError = '';
+    try {
+      await deleteEvent(deleteTarget.id);
+    } catch (e: any) {
+      if (isAuthFailure(e)) { goto('/login'); return; }
+      deleteError = e?.message || 'Could not delete the event.';
+      return;
+    } finally {
+      deletingEvent = false;
+    }
+    deleteTarget = null;
     invalidateEvents();
-    await loadEvents();
-    // If deleting emptied this page (and it isn't page 1), step back a page.
-    if (events.length === 0 && offset > 0) {
-      offset = Math.max(0, offset - PAGE_SIZE);
+    try {
       await loadEvents();
+      // If deleting emptied this page (and it isn't page 1), step back a page.
+      if (events.length === 0 && offset > 0) {
+        offset = Math.max(0, offset - PAGE_SIZE);
+        await loadEvents();
+      }
+    } catch (e) {
+      reportError(e, 'Event deleted, but the list could not be refreshed.');
     }
   }
 
@@ -237,7 +284,7 @@
       invalidateEvents();
       await loadEvents();
     } catch (e: any) {
-      alert(e.message);
+      reportError(e, 'Could not change the event\'s visibility.');
     }
   }
 
@@ -246,12 +293,14 @@
     editEventTitle = event.title || '';
     editEventDate = event.event_date || '';
     editEventDescription = event.description || '';
+    editEventError = '';
     showEditEvent = true;
   }
 
   async function handleUpdateEvent() {
     if (!editingEventId || !editEventTitle.trim() || !editEventDate) return;
     savingEditEvent = true;
+    editEventError = '';
     try {
       await updateEvent(editingEventId, {
         title: editEventTitle.trim(),
@@ -263,7 +312,7 @@
       showEditEvent = false;
       editingEventId = null;
     } catch (e: any) {
-      alert(e.message);
+      editEventError = e?.message || 'Could not save the event.';
     } finally {
       savingEditEvent = false;
     }
@@ -279,33 +328,38 @@
     return sessions.filter((session) => !selected.has(session.id));
   }
 
-  function handleGlobalKeydown(e: KeyboardEvent) {
-    if (e.key !== 'Escape') return;
-    if (showCreateEvent) showCreateEvent = false;
-    else if (showEditEvent) showEditEvent = false;
+  function openCreateEvent() {
+    createEventError = '';
+    showCreateEvent = true;
   }
 </script>
-
-<svelte:window onkeydown={handleGlobalKeydown} />
 
 <svelte:head>
   <title>Events – Rforum</title>
 </svelte:head>
 
-<main class="flex-1 max-w-5xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-6 sm:py-7">
+<main class="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
   <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
     <div>
       <h1 class="text-3xl font-heading font-bold tracking-wide">All Events</h1>
       <p class="text-sm text-surface-500 mt-1.5">Manage your events and their sessions</p>
     </div>
-    <button class="btn-primary text-sm flex items-center justify-center gap-2 w-full sm:w-auto" onclick={() => showCreateEvent = true}>
+    <button class="btn-primary text-sm flex items-center justify-center gap-2 w-full sm:w-auto" onclick={openCreateEvent}>
       <Plus class="w-4 h-4" />
       Create Event
     </button>
   </div>
 
+  {#if actionError}
+    <div class="mb-4 px-4 py-3 rounded-xl bg-danger/10 border border-danger/20 text-red-700 dark:text-red-300 text-sm flex items-start gap-2" role="alert">
+      <AlertTriangle class="w-4 h-4 flex-shrink-0 mt-0.5" />
+      <span class="flex-1 min-w-0 break-words">{actionError}</span>
+      <button onclick={() => actionError = ''} class="text-xs underline flex-shrink-0">Dismiss</button>
+    </div>
+  {/if}
+
   {#if loading}
-    <div class="space-y-3" aria-hidden="true">
+    <div class="space-y-3" aria-busy="true" aria-label="Loading events">
       {#each Array(3) as _}
         <div class="card p-6 space-y-3">
           <div class="skeleton h-5 w-1/3 rounded"></div>
@@ -314,10 +368,19 @@
         </div>
       {/each}
     </div>
+  {:else if loadError}
+    <div class="card flex flex-col items-center text-center py-12 gap-3" role="alert">
+      <AlertTriangle class="w-8 h-8 text-danger" />
+      <p class="text-sm font-medium">Couldn't load your events</p>
+      <p class="text-xs text-surface-500 max-w-sm break-words">{loadError}</p>
+      <button onclick={initialLoad} class="btn-secondary text-sm flex items-center gap-2">
+        <RefreshCw class="w-4 h-4" /> Try again
+      </button>
+    </div>
   {:else}
     {#if total > 0 || searchQuery}
       <div class="relative mb-5">
-        <Search class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-400" />
+        <Search class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-500 pointer-events-none" />
         <input
           type="search"
           placeholder="Search events by name, description, or moderator…"
@@ -328,7 +391,7 @@
         />
         {#if searchQuery}
           <button
-            class="absolute right-3 top-1/2 -translate-y-1/2 text-surface-400 hover:text-surface-200"
+            class="absolute right-3 top-1/2 -translate-y-1/2 text-surface-500 hover:text-surface-900 dark:hover:text-surface-200 transition-colors"
             onclick={clearSearch}
             aria-label="Clear search"
           >
@@ -339,20 +402,20 @@
     {/if}
 
     {#if total === 0 && !debouncedQuery}
-      <div class="flex flex-col items-center justify-center text-center gap-4 py-20">
+      <div class="flex flex-col items-center justify-center text-center gap-4 py-16">
         <div class="w-14 h-14 flex items-center justify-center rounded-2xl bg-brand-500/10">
           <Calendar class="w-7 h-7 text-brand-500" />
         </div>
         <div>
-          <h3 class="text-lg font-semibold">No events yet</h3>
-          <p class="text-sm text-surface-400 mt-1">Create your first event to get started</p>
+          <h2 class="text-lg font-semibold">No events yet</h2>
+          <p class="text-sm text-surface-500 mt-1">Create your first event to get started</p>
         </div>
-        <button class="btn-primary text-sm" onclick={() => showCreateEvent = true}>Create Event</button>
+        <button class="btn-primary text-sm" onclick={openCreateEvent}>Create Event</button>
       </div>
     {:else if events.length === 0}
       <div class="flex flex-col items-center justify-center text-center gap-3 py-16">
-        <Search class="w-8 h-8 text-surface-400" />
-        <p class="text-sm text-surface-400">No events match "{searchQuery}"</p>
+        <Search class="w-8 h-8 text-surface-500" />
+        <p class="text-sm text-surface-500">No events match "{searchQuery}"</p>
         <button class="btn-secondary text-sm" onclick={clearSearch}>Clear search</button>
       </div>
     {:else}
@@ -385,54 +448,63 @@
   {/if}
 </main>
 
-{#if showCreateEvent}
-  <div class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center px-4 z-50"
-       onclick={(e) => { if (e.target === e.currentTarget) showCreateEvent = false; }}
-       role="dialog" aria-modal="true" aria-label="Create Event">
-    <div class="card w-full max-w-lg max-h-[90vh] overflow-y-auto">
-      <div class="flex items-center justify-between mb-4">
-        <h2 class="text-lg font-semibold">Create Event</h2>
-        <button class="btn-secondary text-sm" onclick={() => showCreateEvent = false}>Close</button>
-      </div>
-      <form onsubmit={(e) => { e.preventDefault(); handleCreateEvent(); }} class="grid gap-3">
-        <div class="grid gap-3 md:grid-cols-2">
-          <input type="text" bind:value={newEventTitle} placeholder="Event title..." class="input-field" />
-          <input type="date" bind:value={newEventDate} class="input-field" />
-        </div>
-        <textarea rows="2" bind:value={newEventDescription} placeholder="Description (optional)" class="input-field"></textarea>
-        <div class="flex flex-col-reverse sm:flex-row justify-end gap-2">
-          <button type="button" class="btn-secondary" onclick={() => showCreateEvent = false}>Cancel</button>
-          <button type="submit" class="btn-primary text-sm" disabled={creatingEvent}>
-            {creatingEvent ? 'Creating...' : 'Create Event'}
-          </button>
-        </div>
-      </form>
+<Modal open={showCreateEvent} onClose={() => showCreateEvent = false} labelledBy="create-event-title">
+  <h2 id="create-event-title" class="text-lg font-semibold mb-4 pr-8">Create Event</h2>
+  <form onsubmit={(e) => { e.preventDefault(); handleCreateEvent(); }} class="grid gap-3">
+    <div class="grid gap-3 md:grid-cols-2">
+      <input type="text" bind:value={newEventTitle} placeholder="Event title..." aria-label="Event title" class="input-field" />
+      <input type="date" bind:value={newEventDate} aria-label="Event date" class="input-field" />
     </div>
-  </div>
-{/if}
+    <textarea rows="2" bind:value={newEventDescription} placeholder="Description (optional)" aria-label="Description (optional)" class="input-field"></textarea>
+    {#if createEventError}
+      <p class="text-sm text-red-700 dark:text-red-300 flex items-center gap-2" role="alert">
+        <AlertTriangle class="w-4 h-4 flex-shrink-0" /> {createEventError}
+      </p>
+    {/if}
+    <div class="flex flex-col-reverse sm:flex-row justify-end gap-2">
+      <button type="button" class="btn-secondary text-sm" onclick={() => showCreateEvent = false}>Cancel</button>
+      <button type="submit" class="btn-primary text-sm" aria-busy={creatingEvent} disabled={creatingEvent || !newEventTitle.trim() || !newEventDate}>
+        {creatingEvent ? 'Creating...' : 'Create Event'}
+      </button>
+    </div>
+  </form>
+</Modal>
 
-{#if showEditEvent}
-  <div class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center px-4 z-50"
-       onclick={(e) => { if (e.target === e.currentTarget) showEditEvent = false; }}
-       role="dialog" aria-modal="true" aria-label="Edit Event">
-    <div class="card w-full max-w-lg max-h-[90vh] overflow-y-auto">
-      <div class="flex items-center justify-between mb-4">
-        <h2 class="text-lg font-semibold">Edit Event</h2>
-        <button class="btn-secondary text-sm" onclick={() => showEditEvent = false}>Close</button>
-      </div>
-      <form onsubmit={(e) => { e.preventDefault(); handleUpdateEvent(); }} class="grid gap-3">
-        <div class="grid gap-3 md:grid-cols-2">
-          <input type="text" bind:value={editEventTitle} placeholder="Event title..." class="input-field" />
-          <input type="date" bind:value={editEventDate} class="input-field" />
-        </div>
-        <textarea rows="2" bind:value={editEventDescription} placeholder="Description (optional)" class="input-field"></textarea>
-        <div class="flex flex-col-reverse sm:flex-row justify-end gap-2">
-          <button type="button" class="btn-secondary" onclick={() => showEditEvent = false}>Cancel</button>
-          <button type="submit" class="btn-primary text-sm" disabled={savingEditEvent}>
-            {savingEditEvent ? 'Saving...' : 'Save Changes'}
-          </button>
-        </div>
-      </form>
+<Modal open={showEditEvent} onClose={() => showEditEvent = false} labelledBy="edit-event-title">
+  <h2 id="edit-event-title" class="text-lg font-semibold mb-4 pr-8">Edit Event</h2>
+  <form onsubmit={(e) => { e.preventDefault(); handleUpdateEvent(); }} class="grid gap-3">
+    <div class="grid gap-3 md:grid-cols-2">
+      <input type="text" bind:value={editEventTitle} placeholder="Event title..." aria-label="Event title" class="input-field" />
+      <input type="date" bind:value={editEventDate} aria-label="Event date" class="input-field" />
     </div>
-  </div>
-{/if}
+    <textarea rows="2" bind:value={editEventDescription} placeholder="Description (optional)" aria-label="Description (optional)" class="input-field"></textarea>
+    {#if editEventError}
+      <p class="text-sm text-red-700 dark:text-red-300 flex items-center gap-2" role="alert">
+        <AlertTriangle class="w-4 h-4 flex-shrink-0" /> {editEventError}
+      </p>
+    {/if}
+    <div class="flex flex-col-reverse sm:flex-row justify-end gap-2">
+      <button type="button" class="btn-secondary text-sm" onclick={() => showEditEvent = false}>Cancel</button>
+      <button type="submit" class="btn-primary text-sm" aria-busy={savingEditEvent} disabled={savingEditEvent || !editEventTitle.trim() || !editEventDate}>
+        {savingEditEvent ? 'Saving...' : 'Save Changes'}
+      </button>
+    </div>
+  </form>
+</Modal>
+
+<ConfirmDialog
+  open={!!deleteTarget}
+  tone="danger"
+  title="Delete event?"
+  description={deleteTarget ? `“${deleteTarget.title}” will be permanently deleted. Its sessions are kept but no longer assigned to an event.` : ''}
+  confirmLabel="Delete event"
+  loading={deletingEvent}
+  onConfirm={confirmDeleteEvent}
+  onCancel={() => { if (!deletingEvent) deleteTarget = null; }}
+>
+  {#if deleteError}
+    <p class="text-xs text-red-700 dark:text-red-300 flex items-center gap-1.5" role="alert">
+      <AlertTriangle class="w-3.5 h-3.5 flex-shrink-0" /> {deleteError}
+    </p>
+  {/if}
+</ConfirmDialog>
