@@ -4,7 +4,6 @@
   import type { ConnectionStatus as WsStatus } from '$lib/ws';
   import type { VideoControlPayload } from '$lib/components/ContentSlideCanvas.svelte';
   import { onMount, onDestroy, untrack } from 'svelte';
-  import { theme } from '$lib/theme';
   import { BarChart3, MessageSquare, AlignLeft, Cloud, Orbit, Maximize2 } from 'lucide-svelte';
   import JoinScreen from '$lib/components/JoinScreen.svelte';
   import QRModal from '$lib/components/QRModal.svelte';
@@ -60,6 +59,8 @@
   let showQRModal = $state(false);
   let lastScreenControlId = $state('');
   let isStartingSession = $state(false);
+  // Shown on the join screen (a blocking alert() would sit on the projector).
+  let startError = $state('');
   let isClearingResponses = $state(false);
   let screenControlPollTimer: ReturnType<typeof setInterval> | null = null;
   // Live audience count — server-pushed via the 'presence_count' event
@@ -156,12 +157,13 @@
   async function handleStartSession() {
     if (!session || isStartingSession) return;
     isStartingSession = true;
+    startError = '';
     try {
       await startSession(session.id);
       // The session_update websocket message will handle the state update
     } catch (e: any) {
       console.error('[screen] Error starting session:', e);
-      alert('Failed to start session: ' + (e.message || 'Unknown error'));
+      startError = 'Failed to start session: ' + (e.message || 'Unknown error');
     } finally {
       isStartingSession = false;
     }
@@ -533,36 +535,38 @@
     onStartSession={handleStartSession}
     isStarting={isStartingSession}
     isModerator={true}
+    {startError}
   />
 {:else}
-  <!-- LIVE PRESENTATION SCREEN (Theme Aware) -->
-  <div class="h-screen flex flex-col {$theme === 'dark' ? 'bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900'} font-sans select-none overflow-hidden transition-colors">
-    <header class="grid min-h-[64px] flex-shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-4 border-b {$theme === 'dark' ? 'border-slate-800 bg-slate-950' : 'border-slate-200 bg-white'} px-5 py-2 sm:px-8">
+  <!-- LIVE PRESENTATION SCREEN (Theme Aware). Fixed to the viewport on
+       purpose: the stage below scales slides to fit, it never scrolls. -->
+  <div class="h-screen flex flex-col bg-surface-50 text-surface-900 dark:bg-surface-950 dark:text-surface-100 font-sans select-none overflow-hidden transition-colors">
+    <header class="grid min-h-[64px] flex-shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-4 border-b border-surface-200 bg-white dark:border-surface-800 dark:bg-surface-950 px-5 py-2 sm:px-8">
       <div class="flex items-center gap-2.5">
-        <Orbit class="h-6 w-6 text-purple-600 dark:text-purple-400" />
-        <span class="font-heading text-lg font-extrabold tracking-wide text-slate-900 dark:text-white">Rforum</span>
+        <Orbit class="h-6 w-6 text-brand-600 dark:text-brand-400" />
+        <span class="font-heading text-lg font-extrabold tracking-wide text-surface-900 dark:text-white">Rforum</span>
       </div>
       <div class="text-center">
-        <p class="max-w-[16rem] truncate text-sm font-bold text-slate-900 dark:text-white sm:text-base">{session?.title || 'Presentation'}</p>
-        <p class="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-          {#if session?.moderator_name}{session.moderator_name}&nbsp;&middot;&nbsp;{/if}{#if wsStatus === 'offline'}<span class="font-semibold text-red-500">&#9679; Offline — showing last received slide</span>{:else if wsStatus === 'reconnecting'}<span class="font-semibold text-amber-500">&#9679; Reconnecting…</span>{:else}<span class="font-semibold text-emerald-500">&#9679; Live</span>{/if}{#if guestCount !== null}&nbsp;&middot;&nbsp;{guestCount} joined{/if}
+        <p class="max-w-[16rem] truncate text-sm font-bold text-surface-900 dark:text-white sm:text-base">{session?.title || 'Presentation'}</p>
+        <p class="mt-0.5 text-xs text-surface-600 dark:text-surface-400" role="status">
+          {#if session?.moderator_name}{session.moderator_name}&nbsp;&middot;&nbsp;{/if}{#if wsStatus === 'offline'}<span class="font-semibold text-red-600 dark:text-red-400">&#9679; Offline — showing last received slide</span>{:else if wsStatus === 'reconnecting'}<span class="font-semibold text-amber-700 dark:text-amber-400">&#9679; Reconnecting…</span>{:else if wsStatus === 'connected'}<span class="font-semibold text-emerald-700 dark:text-emerald-400">&#9679; Live</span>{:else}<span class="font-semibold text-surface-600 dark:text-surface-400">&#9679; Connecting…</span>{/if}{#if guestCount !== null}&nbsp;&middot;&nbsp;{guestCount} joined{/if}
         </p>
       </div>
       <div class="flex items-center justify-end">
-        <button onclick={() => document.documentElement.requestFullscreen?.()} class="rounded-lg p-2 text-slate-500 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800" title="Fullscreen" aria-label="Fullscreen"><Maximize2 class="h-5 w-5" /></button>
+        <button type="button" onclick={() => document.documentElement.requestFullscreen?.()} class="rounded-lg p-2 text-surface-600 transition-colors hover:bg-surface-100 hover:text-surface-900 dark:text-surface-300 dark:hover:bg-surface-800 dark:hover:text-white" title="Fullscreen" aria-label="Fullscreen"><Maximize2 class="h-5 w-5" /></button>
       </div>
     </header>
 
     {#if slideTotal > 0}
       <div
-        class="h-[3px] flex-shrink-0 {$theme === 'dark' ? 'bg-slate-800' : 'bg-slate-200'}"
+        class="h-[3px] flex-shrink-0 bg-surface-200 dark:bg-surface-800"
         role="progressbar"
         aria-valuenow={slideIndex}
         aria-valuemin="1"
         aria-valuemax={slideTotal}
         aria-label="Slide progress"
       >
-        <div class="h-full bg-purple-500 transition-all duration-500" style={`width: ${slideProgressPct}%`}></div>
+        <div class="h-full bg-brand-500 transition-[width] duration-500" style={`width: ${slideProgressPct}%`}></div>
       </div>
     {/if}
 
@@ -578,31 +582,38 @@
         />
       </div>
 
-      {#if error}
-        <div class="text-center animate-fade-in space-y-4 py-16">
-          <Orbit class="w-16 h-16 mx-auto text-purple-500/40 animate-spin" />
-          <p class="text-2xl font-heading font-bold text-slate-600 dark:text-slate-400">Waiting for session…</p>
-          <p class="text-slate-400 text-base">{error}</p>
-          <div class="mt-4 inline-flex items-center gap-2 bg-purple-50 dark:bg-purple-950/40 px-4 py-2 rounded-xl border border-purple-200 dark:border-purple-800">
-            <span class="text-slate-500 dark:text-slate-400 text-xs font-bold uppercase">Code</span>
-            <span class="font-mono text-2xl font-bold text-purple-600 dark:text-purple-400">{code}</span>
+      {#if loading}
+        <div class="text-center animate-fade-in space-y-4 py-16" role="status">
+          <Orbit class="w-16 h-16 mx-auto text-brand-500 animate-spin" />
+          <p class="text-2xl font-heading font-bold text-surface-700 dark:text-surface-300">Connecting to session…</p>
+          <p class="font-mono text-2xl font-bold text-brand-700 dark:text-brand-300">{code}</p>
+        </div>
+
+      {:else if error}
+        <div class="text-center animate-fade-in space-y-4 py-16 px-4">
+          <Orbit class="w-16 h-16 mx-auto text-brand-500/60 animate-spin" />
+          <p class="text-2xl font-heading font-bold text-surface-700 dark:text-surface-300">Waiting for session…</p>
+          <p class="text-base text-surface-600 dark:text-surface-400 break-words">{error}</p>
+          <div class="mt-4 inline-flex items-center gap-2 bg-brand-50 dark:bg-brand-900/30 px-4 py-2 rounded-xl border border-brand-200 dark:border-brand-800">
+            <span class="text-surface-600 dark:text-surface-400 text-xs font-bold uppercase">Code</span>
+            <span class="font-mono text-2xl font-bold text-brand-700 dark:text-brand-300">{code}</span>
           </div>
         </div>
 
       {:else if !hasActiveContent}
-        <div class="text-center animate-fade-in space-y-4 py-12">
-          <Orbit class="w-16 h-16 mx-auto text-purple-500 animate-spin" />
-          <p class="text-2xl font-heading font-bold text-slate-700 dark:text-slate-300">Waiting for presenter…</p>
-          <p class="text-slate-400 text-base">The presentation session is active. Slides will display automatically.</p>
-          <div class="mt-6 inline-flex items-center gap-2 bg-slate-200 dark:bg-slate-800 px-5 py-2.5 rounded-2xl">
-            <span class="text-xs text-slate-500 dark:text-slate-400 uppercase font-bold tracking-wider">Join at</span>
-            <span class="font-mono text-xl font-bold text-purple-600 dark:text-purple-400">{guestUrl || code}</span>
+        <div class="text-center animate-fade-in space-y-4 py-12 px-4">
+          <Orbit class="w-16 h-16 mx-auto text-brand-500 animate-spin" />
+          <p class="text-2xl font-heading font-bold text-surface-700 dark:text-surface-300">Waiting for presenter…</p>
+          <p class="text-base text-surface-600 dark:text-surface-400">The presentation session is active. Slides will display automatically.</p>
+          <div class="mt-6 inline-flex max-w-full flex-wrap items-center justify-center gap-2 bg-surface-200 dark:bg-surface-800 px-5 py-2.5 rounded-2xl">
+            <span class="text-xs text-surface-600 dark:text-surface-400 uppercase font-bold tracking-wider">Join at</span>
+            <span class="font-mono text-xl font-bold text-brand-700 dark:text-brand-300 break-all">{guestUrl || code}</span>
           </div>
         </div>
 
       {:else if session?.presentation_id}
         <div class="flex min-h-0 flex-1 items-center justify-center px-2 pb-2" style="container-type: size;">
-          <div class="overflow-hidden rounded-xl border p-3 sm:p-4 presentation-stage {$theme === 'dark' ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'}" style="width: min(100cqw, calc(100cqh * 16 / 9)); height: min(100cqh, calc(100cqw * 9 / 16));">
+          <div class="overflow-hidden rounded-xl border p-3 sm:p-4 presentation-stage bg-white border-surface-200 dark:bg-surface-950 dark:border-surface-800" style="width: min(100cqw, calc(100cqh * 16 / 9)); height: min(100cqh, calc(100cqw * 9 / 16));">
           <PresentationLiveView
             activeItem={activeTimelineItem}
             presentationId={session.presentation_id}
@@ -617,7 +628,7 @@
 
       {:else}
         <div class="flex min-h-0 flex-1 items-center justify-center px-2 pb-2" style="container-type: size;">
-          <div class="overflow-hidden rounded-xl border p-3 sm:p-4 presentation-stage transition-colors {$theme === 'dark' ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'}" style="width: min(100cqw, calc(100cqh * 16 / 9)); height: min(100cqh, calc(100cqw * 9 / 16));">
+          <div class="overflow-hidden rounded-xl border p-3 sm:p-4 presentation-stage transition-colors bg-white border-surface-200 dark:bg-surface-950 dark:border-surface-800" style="width: min(100cqw, calc(100cqh * 16 / 9)); height: min(100cqh, calc(100cqw * 9 / 16));">
           {#if activeSlide.type?.toUpperCase() === 'CONTENT'}
             <ContentSlideCanvas slide={activeSlide} sessionId={session?.id} sessionCode={code} variant="screen" {videoCommand} />
           {:else}
@@ -632,16 +643,16 @@
          no manual code-entry anywhere in the app (join is QR/link only), so
          this exists purely as a fallback for reading the code aloud. -->
     <div class="flex flex-shrink-0 items-center justify-center py-1.5">
-      <span class="font-mono text-[11px] tracking-[0.15em] text-slate-400 dark:text-slate-600">{code}</span>
+      <span class="font-mono text-xs tracking-[0.15em] text-surface-600 dark:text-surface-400">{code}</span>
     </div>
 
     <!-- Footer -->
-    <footer class="flex items-center justify-center px-6 py-2.5 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 flex-shrink-0 text-slate-400 text-xs transition-colors">
+    <footer class="flex items-center justify-center px-6 py-2.5 bg-white dark:bg-surface-900 border-t border-surface-200 dark:border-surface-800 flex-shrink-0 text-surface-600 dark:text-surface-400 text-xs transition-colors">
       <div class="flex flex-col sm:flex-row items-center justify-center gap-3">
-        <span>Powered by <span class="font-semibold text-slate-600 dark:text-slate-300">Tech4Good Community</span></span>
-        <span class="hidden sm:inline text-slate-300 dark:text-slate-700">•</span>
+        <span>Powered by <span class="font-semibold text-surface-700 dark:text-surface-300">Tech4Good Community</span></span>
+        <span class="hidden sm:inline text-surface-300 dark:text-surface-700" aria-hidden="true">•</span>
         <span>Built with <span class="text-red-500">❤</span> by Ajith</span>
-        <span class="hidden sm:inline text-slate-300 dark:text-slate-700">•</span>
+        <span class="hidden sm:inline text-surface-300 dark:text-surface-700" aria-hidden="true">•</span>
         <span>Rforum@2026</span>
       </div>
     </footer>

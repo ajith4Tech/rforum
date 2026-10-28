@@ -97,20 +97,20 @@
 <section class="deck-console flex min-h-[calc(100vh-9rem)] flex-col bg-surface-50 dark:bg-surface-950">
   <header class="flex flex-col gap-3 border-b border-surface-200 px-1 py-3 dark:border-surface-800 sm:flex-row sm:items-center sm:justify-between">
     <div class="min-w-0">
-      <p class="text-xs font-semibold uppercase tracking-[0.16em] text-brand-500">{session?.unique_code}</p>
+      <p class="text-xs font-semibold uppercase tracking-[0.16em] text-brand-600 dark:text-brand-400">{session?.unique_code}</p>
       <div class="mt-0.5 flex min-w-0 flex-wrap items-center gap-3">
-        <h1 class="font-heading truncate text-xl font-bold text-surface-900 dark:text-white">{presentation?.title || session?.title}</h1>
+        <h1 class="font-heading min-w-0 truncate text-xl font-bold text-surface-900 dark:text-white">{presentation?.title || session?.title}</h1>
         <ConnectionStatus status={wsStatus} />
       </div>
       <p class="mt-0.5 text-sm text-surface-500">{items.length} {items.length === 1 ? 'slide' : 'slides'} · {session?.is_live ? 'Live' : 'Not live'}</p>
     </div>
     <div class="flex flex-wrap gap-2">
-      <button class="flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed {session?.is_live ? 'rounded-xl px-4 py-2.5 text-sm font-semibold border border-red-200 bg-red-50 text-red-600 hover:bg-red-100 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-400 dark:hover:bg-red-950/50' : 'btn-secondary'}" onclick={onToggleLive} disabled={liveToggleBusy} aria-busy={liveToggleBusy}><Radio class="w-4 h-4" />{#if liveToggleBusy}{session?.is_live ? 'Ending…' : 'Starting…'}{:else}{session?.is_live ? 'End session' : 'Go live'}{/if}</button>
+      <button class="flex items-center gap-2 {session?.is_live ? 'btn-danger' : 'btn-secondary'}" onclick={onToggleLive} disabled={liveToggleBusy} aria-busy={liveToggleBusy}><Radio class="w-4 h-4" />{#if liveToggleBusy}{session?.is_live ? 'Ending…' : 'Starting…'}{:else}{session?.is_live ? 'End session' : 'Go live'}{/if}</button>
       <button class="btn-secondary flex items-center gap-2" onclick={onEdit}><Pencil class="w-4 h-4" />Edit</button>
       <button class="btn-primary flex items-center gap-2" onclick={() => onPresent(selectedId)}><MonitorPlay class="w-4 h-4" />Present</button>
       {#if isQuizSelected && onToggleRevealAnswer}
         <button
-          class="btn-secondary flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+          class="btn-secondary flex items-center gap-2"
           onclick={() => selectedId && onToggleRevealAnswer?.(selectedId)}
           disabled={!quizRevealed && !quizHasAnswer}
           aria-label={quizRevealed ? 'Hide quiz answer' : 'Reveal quiz answer'}
@@ -147,13 +147,13 @@
         <div class="space-y-1.5">
           {#each items as item, index (item.id)}
             {@const Icon = icon(item)}
-            <button onclick={() => selectItem(item.id)} class="w-full rounded-lg px-2.5 py-2 text-left transition {item.id === selectedId ? 'bg-brand-500/10 ring-1 ring-brand-500' : 'hover:bg-surface-100 dark:hover:bg-surface-900'}">
+            <button type="button" onclick={() => selectItem(item.id)} aria-current={item.id === selectedId ? 'true' : undefined} class="w-full rounded-lg px-2.5 py-2 text-left transition-colors {item.id === selectedId ? 'bg-brand-500/10 ring-1 ring-brand-500' : 'hover:bg-surface-100 dark:hover:bg-surface-900'}">
               <div class="flex items-start gap-2">
                 <span class="mt-0.5 w-4 text-right text-[11px] font-mono text-surface-400">{index + 1}</span>
-                <Icon class="mt-0.5 h-4 w-4 shrink-0 text-brand-500" />
-                <span class="line-clamp-2 text-sm font-medium text-surface-800 dark:text-surface-100">{label(item)}</span>
+                <Icon class="mt-0.5 h-4 w-4 shrink-0 text-brand-600 dark:text-brand-400" />
+                <span class="line-clamp-2 break-words text-sm font-medium text-surface-800 dark:text-surface-100">{label(item)}</span>
               </div>
-              {#if item.id === liveId}<span class="ml-6 mt-1 inline-block text-[10px] font-semibold uppercase tracking-wider text-brand-500">On screen</span>{/if}
+              {#if item.id === liveId}<span class="ml-6 mt-1 inline-block text-[10px] font-semibold uppercase tracking-wider text-brand-700 dark:text-brand-300">On screen</span>{/if}
             </button>
           {/each}
         </div>
@@ -216,15 +216,16 @@
     <aside class="max-h-[min(78vh,52rem)] overflow-y-auto border-surface-200 py-4 pl-0 dark:border-surface-800 xl:border-l xl:pl-5">
       <div class="flex items-center justify-between">
         <p class="text-[11px] font-semibold uppercase tracking-widest text-surface-500">Live activity</p>
-        <Users class="h-4 w-4 text-brand-500" />
+        <Users class="h-4 w-4 text-brand-600 dark:text-brand-400" aria-hidden="true" />
       </div>
       {#if isInteractive}
         <h2 class="mt-3 font-heading font-semibold text-surface-900 dark:text-white" style={getFitTitleStyle(promptText, 'question')}>{promptText}</h2>
         <div class="mt-2 flex items-end justify-between gap-2">
-          <p class="text-2xl font-bold text-brand-500">{visibleResponses.length}<span class="ml-1 text-sm font-medium text-surface-500">responses{#if hiddenCount} · {hiddenCount} hidden{/if}</span></p>
+          <p class="font-heading text-2xl font-bold text-brand-600 dark:text-brand-400">{visibleResponses.length}<span class="ml-1 text-sm font-medium text-surface-500">responses{#if hiddenCount} · {hiddenCount} hidden{/if}</span></p>
           {#if onClearResponses && slideResponses.length && selectedSlide?.id}
             <button
-              class="flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-red-600 transition hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/30"
+              type="button"
+              class="flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-red-700 transition-colors hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950/30"
               onclick={() => onClearResponses?.(selectedSlide.id)}
             ><Trash2 class="h-3.5 w-3.5" />Clear</button>
           {/if}
@@ -232,14 +233,15 @@
         <div class="mt-4 space-y-2">
           {#if slideResponses.length}
             {#each [...slideResponses].reverse() as response (response.id)}
-              <div class="flex items-start gap-2 rounded-lg px-3 py-2 text-sm {response.is_hidden ? 'border border-dashed border-surface-300 text-surface-400 dark:border-surface-700 dark:text-surface-500' : 'bg-surface-100 text-surface-700 dark:bg-surface-900 dark:text-surface-200'}">
+              <div class="flex items-start gap-2 rounded-lg px-3 py-2 text-sm {response.is_hidden ? 'border border-dashed border-surface-300 text-surface-600 dark:border-surface-700 dark:text-surface-400' : 'bg-surface-100 text-surface-700 dark:bg-surface-900 dark:text-surface-200'}">
                 <div class="min-w-0 flex-1 break-words">
                   {#if response.is_hidden}<span class="mb-0.5 block text-[10px] font-semibold uppercase tracking-wider">Hidden from audience</span>{/if}
                   {response.value || (response.rating ? `${response.rating} stars` : 'Response')} {#if response.name}<span class="block pt-1 text-xs text-surface-500">{response.name}</span>{/if}
                 </div>
                 {#if onSetResponseHidden && selectedSlide?.id}
                   <button
-                    class="shrink-0 rounded-md p-1 text-surface-500 transition hover:bg-surface-200 hover:text-surface-900 dark:hover:bg-surface-800 dark:hover:text-white"
+                    type="button"
+                    class="shrink-0 rounded-md p-1 text-surface-600 dark:text-surface-400 transition-colors hover:bg-surface-200 hover:text-surface-900 dark:hover:bg-surface-800 dark:hover:text-white"
                     onclick={() => onSetResponseHidden?.(selectedSlide.id, response.id, !response.is_hidden)}
                     aria-label={response.is_hidden ? 'Show this response to the audience again' : 'Hide this response from the audience'}
                     title={response.is_hidden ? 'Unhide' : 'Hide from audience'}

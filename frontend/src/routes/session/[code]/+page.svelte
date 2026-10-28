@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { joinSession, submitResponse, upvoteResponse, listResponses } from '$lib/api';
+  import { joinSession, submitResponse, upvoteResponse, listResponses, ApiError, isConnectivityError } from '$lib/api';
+  import { parseEventDate } from '$lib/dates';
   import { RforumWebSocket } from '$lib/ws';
   import type { ConnectionStatus as WsStatus } from '$lib/ws';
   import { theme, toggleTheme } from '$lib/theme';
@@ -43,7 +44,10 @@
   let wsStatus: WsStatus = $state('disconnected');
   let stopAutoFlush: (() => void) | null = null;
   let error = $state('');
+  // Why the page has no session: drives the copy and whether "Try again" is offered.
+  let errorKind: '' | 'not_found' | 'network' | 'ended' | 'other' = $state('');
   let loading = $state(true);
+  let retrying = $state(false);
   let inputValue = $state('');
   let selectedOption = $state('');
   let submitted = $state(false);
@@ -132,7 +136,7 @@
     const eventDate = session?.event?.event_date;
     if (!eventDate) return null;
     // event_date is YYYY-MM-DD; treat as start of that day in local time
-    return new Date(eventDate + 'T00:00:00');
+    return parseEventDate(eventDate);
   }
 
   function updateCountdown() {
@@ -211,6 +215,7 @@
     const slideChanged = active?.id !== activeSlide?.id;
     session = fresh;
     error = '';
+    errorKind = '';
     activeSlide = active;
     if (slideChanged) restoreSubmittedState(activeSlide);
     responses = nextResponses;
@@ -262,7 +267,7 @@
     try {
       await runSerialized(loadSessionState);
     } catch (e: any) {
-      error = e.message || 'Session not found';
+      setJoinError(e);
     } finally {
       loading = false;
     }
@@ -275,6 +280,27 @@
     updateCountdown();
     countdownInterval = setInterval(updateCountdown, 1000);
   });
+
+  /** 404 = wrong code or not live yet (this page still updates by itself if
+   * it goes live); no response / gateway errors = the venue network. */
+  function setJoinError(e: any) {
+    error = e?.message || 'Session not found';
+    errorKind = e instanceof ApiError && e.status === 404
+      ? 'not_found'
+      : isConnectivityError(e) ? 'network' : 'other';
+  }
+
+  async function retryJoin() {
+    if (retrying) return;
+    retrying = true;
+    try {
+      await runSerialized(loadSessionState);
+    } catch (e: any) {
+      setJoinError(e);
+    } finally {
+      retrying = false;
+    }
+  }
 
   onDestroy(() => {
     stopAutoFlush?.();
@@ -429,6 +455,7 @@
         activeSlide = null;
         presentationTimeline = null;
         error = 'This session has ended.';
+        errorKind = 'ended';
       } else if (msg.data?.is_live === true) {
         try {
           await loadSessionState();
@@ -502,61 +529,65 @@
   <title>Session {code} – Rforum</title>
 </svelte:head>
 
-<div class="min-h-screen flex flex-col bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white">
+<div class="min-h-screen flex flex-col bg-surface-50 dark:bg-surface-950 text-surface-900 dark:text-white">
   <!-- Top Navbar with Logo, Rforum, Theme Toggle, and Code -->
-  <header class="flex items-center justify-between px-4 py-1.5 border-b border-slate-200 dark:border-slate-800">
+  <header class="flex items-center justify-between px-4 py-1.5 border-b border-surface-200 dark:border-surface-800">
     <div class="flex items-center gap-2 flex-shrink-0">
-      <Orbit class="w-5 h-5 text-purple-500" />
+      <Orbit class="w-5 h-5 text-brand-500" />
       <span class="font-heading font-bold text-sm tracking-wide">Rforum</span>
     </div>
     <div class="flex items-center gap-2 flex-shrink-0">
       <button
+        type="button"
         onclick={toggleTheme}
-        class="border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 p-2 rounded-lg transition active:scale-95"
+        class="border border-surface-200 dark:border-surface-700 hover:bg-surface-100 dark:hover:bg-surface-800 p-2.5 rounded-lg transition active:scale-95"
         title="Toggle theme"
+        aria-label={$theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
       >
         {#if $theme === 'dark'}
-          <Sun class="w-4 h-4 text-slate-400" />
+          <Sun class="w-4 h-4 text-surface-300" />
         {:else}
-          <Moon class="w-4 h-4 text-slate-600" />
+          <Moon class="w-4 h-4 text-surface-600" />
         {/if}
       </button>
-      <span class="font-mono text-xs text-slate-500 bg-slate-100 dark:bg-slate-900 px-3 py-1 rounded-lg">{code}</span>
+      <span class="font-mono text-xs text-surface-600 dark:text-surface-400 bg-surface-100 dark:bg-surface-900 px-3 py-1 rounded-lg">{code}</span>
     </div>
   </header>
 
   <!-- Centered Header Section: Logo, Session Title, Moderator -->
-  <div class="w-full px-4 py-3 border-b border-slate-200 dark:border-slate-800">
+  <div class="w-full px-4 py-3 border-b border-surface-200 dark:border-surface-800">
     <div class="flex flex-col items-center gap-2">
       <!-- Logo -->
-      <img src="/logo-mascot.webp" alt="Tech Good Community" class="w-12 h-auto sm:w-14 md:w-16 opacity-90 hover:opacity-100 transition-opacity" />
-      
+      <img src="/logo-mascot.webp" alt="Tech Good Community" width="64" height="80" class="w-12 h-auto sm:w-14 md:w-16 opacity-90" />
+
       <!-- Session Title -->
       {#if session?.title}
-        <h1 class="text-xl sm:text-2xl font-heading font-bold text-center text-slate-900 dark:text-white max-w-full">{session.title}</h1>
+        <h1 class="text-xl sm:text-2xl font-heading font-bold text-center text-surface-900 dark:text-white max-w-full break-words">{session.title}</h1>
+      {:else if loading}
+        <div class="skeleton h-7 w-48 max-w-full rounded-lg" aria-hidden="true"></div>
       {/if}
-      
+
       <!-- Moderator -->
       {#if session?.moderator_name}
-        <p class="text-sm text-slate-600 dark:text-slate-400 text-center">
-          <span class="text-xs uppercase tracking-widest text-slate-500 dark:text-slate-500">Moderator</span> 
+        <p class="text-sm text-surface-600 dark:text-surface-400 text-center break-words">
+          <span class="text-xs uppercase tracking-widest text-surface-600 dark:text-surface-400">Moderator</span>
           <span class="block sm:inline">· {session.moderator_name}</span>
         </p>
       {/if}
-      
+
       <!-- Speakers (if any) -->
       {#if session?.speaker_names && session.speaker_names.length > 0}
         <div class="flex flex-wrap gap-1.5 justify-center mt-1">
-          <p class="w-full text-xs uppercase tracking-widest text-slate-500 dark:text-slate-500 text-center">Speakers</p>
+          <p class="w-full text-xs uppercase tracking-widest text-surface-600 dark:text-surface-400 text-center">Speakers</p>
           {#each session.speaker_names as speaker, index (speaker + index)}
-            <span class="text-xs px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">{speaker}</span>
+            <span class="text-xs px-2 py-0.5 rounded-full bg-surface-100 dark:bg-surface-800 text-surface-700 dark:text-surface-300 break-words">{speaker}</span>
           {/each}
         </div>
       {/if}
     </div>
   </div>
 
-  <main class="flex-1 flex flex-col items-center px-4 pt-4 sm:pt-6 md:pt-8 overflow-y-auto">
+  <main class="flex-1 flex flex-col items-center px-4 pt-4 pb-6 sm:pt-6 md:pt-8 overflow-y-auto">
     {#if !loading && (wsStatus === 'offline' || wsStatus === 'reconnecting')}
       <div class="w-full max-w-lg mb-3 rounded-xl border px-3 py-2 text-sm text-center {wsStatus === 'offline' ? 'border-red-300 bg-red-50 text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300' : 'border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-800/60 dark:bg-amber-950/30 dark:text-amber-300'}" role="status" aria-live="polite">
         {#if wsStatus === 'offline'}
@@ -568,35 +599,65 @@
     {/if}
     {#each $rejectedSubmissions as rejection (rejection.id)}
       <div class="w-full max-w-lg mb-3 flex items-start justify-between gap-3 rounded-xl border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300" role="alert">
-        <span>A response saved while you were offline could not be delivered: {rejection.reason}</span>
-        <button type="button" class="shrink-0 font-semibold underline" onclick={() => dismissRejected(rejection.id)}>Dismiss</button>
+        <span class="min-w-0 break-words">A response saved while you were offline could not be delivered: {rejection.reason}</span>
+        <button type="button" class="shrink-0 -my-1 rounded-lg px-2 py-1 font-semibold underline hover:bg-red-100 dark:hover:bg-red-950/50" onclick={() => dismissRejected(rejection.id)}>Dismiss</button>
       </div>
     {/each}
 
     {#if loading}
-      <p class="text-slate-500">Connecting...</p>
+      <!-- First load: the page shell is already up; only the session itself is pending. -->
+      <div class="w-full max-w-lg mt-6 space-y-3" role="status" aria-live="polite">
+        <p class="text-center text-sm font-medium text-surface-600 dark:text-surface-400">Joining session…</p>
+        <div class="skeleton h-40 rounded-2xl" aria-hidden="true"></div>
+        <div class="skeleton h-12 rounded-xl" aria-hidden="true"></div>
+      </div>
     {:else if error && !hasActiveContent}
-      <div class="text-center">
-        <p class="text-red-500 text-lg mb-2" role="alert" aria-live="polite">{error}</p>
-        <a href="/" class="text-purple-600 hover:underline text-sm">Go home</a>
+      <div class="text-center max-w-sm w-full mt-8 animate-fade-in" role="alert">
+        {#if errorKind === 'ended'}
+          <h2 class="text-xl font-heading font-bold text-surface-900 dark:text-white mb-2">This session has ended</h2>
+          <p class="text-sm text-surface-600 dark:text-surface-400 mb-4">Thanks for taking part.</p>
+        {:else if errorKind === 'not_found'}
+          <h2 class="text-xl font-heading font-bold text-surface-900 dark:text-white mb-2">Session not available</h2>
+          <p class="text-sm text-surface-600 dark:text-surface-400 mb-4">Check the code <span class="font-mono font-semibold">{code}</span>. If the session hasn't started yet, keep this page open — it will update automatically when it goes live.</p>
+        {:else if errorKind === 'network'}
+          <h2 class="text-xl font-heading font-bold text-surface-900 dark:text-white mb-2">Can't reach the session</h2>
+          <p class="text-sm text-surface-600 dark:text-surface-400 mb-4">Check your Wi-Fi connection and try again.</p>
+        {:else}
+          <h2 class="text-xl font-heading font-bold text-surface-900 dark:text-white mb-2">Couldn't join the session</h2>
+          <p class="text-sm text-red-700 dark:text-red-300 mb-4 break-words">{error}</p>
+        {/if}
+        <div class="flex flex-col items-center gap-3">
+          {#if errorKind !== 'ended'}
+            <button
+              type="button"
+              class="btn-primary w-full sm:w-auto"
+              onclick={retryJoin}
+              disabled={retrying}
+              aria-busy={retrying}
+            >
+              {retrying ? 'Trying again…' : 'Try again'}
+            </button>
+          {/if}
+          <a href="/" class="inline-block px-2 py-1 text-sm font-medium text-brand-600 dark:text-brand-400 hover:underline">Go home</a>
+        </div>
       </div>
     {:else if !hasActiveContent}
-      <div class="text-center text-slate-500 animate-fade-in max-w-sm w-full mt-8">
-        <Orbit class="w-16 h-16 mx-auto mb-3 text-purple-400 animate-pulse-live" />
+      <div class="text-center text-surface-600 dark:text-surface-400 animate-fade-in max-w-sm w-full mt-8">
+        <Orbit class="w-16 h-16 mx-auto mb-3 text-brand-500 animate-pulse-live" />
         {#if session?.event?.title}
-          <h2 class="text-xl font-heading font-bold text-slate-900 dark:text-white mb-1">{session.event.title}</h2>
+          <h2 class="text-xl font-heading font-bold text-surface-900 dark:text-white mb-1 break-words">{session.event.title}</h2>
         {/if}
-        <p class="text-base font-medium mb-1">Waiting for the presenter...</p>
+        <p class="text-base font-medium mb-1" role="status">Waiting for the presenter...</p>
         <p class="text-sm mt-1 mb-4">The next slide will appear here automatically</p>
 
         {#if countdown}
           <div class="mt-4">
-            <p class="text-xs uppercase tracking-widest text-slate-400 mb-3">Event starts in</p>
-            <div class="grid grid-cols-4 gap-3">
+            <p class="text-xs uppercase tracking-widest text-surface-600 dark:text-surface-400 mb-3">Event starts in</p>
+            <div class="grid grid-cols-4 gap-2 sm:gap-3">
               {#each [{ label: 'Days', value: countdown.days }, { label: 'Hours', value: countdown.hours }, { label: 'Min', value: countdown.minutes }, { label: 'Sec', value: countdown.seconds }] as unit}
-                <div class="rounded-2xl bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 px-3 py-4 flex flex-col items-center gap-1">
-                  <span class="text-2xl font-heading font-bold text-slate-900 dark:text-white tabular-nums">{String(unit.value).padStart(2, '0')}</span>
-                  <span class="text-xs text-slate-400 uppercase tracking-wider">{unit.label}</span>
+                <div class="rounded-2xl bg-surface-100 dark:bg-surface-900 border border-surface-200 dark:border-surface-800 px-2 sm:px-3 py-4 flex flex-col items-center gap-1">
+                  <span class="text-2xl font-heading font-bold text-surface-900 dark:text-white tabular-nums">{String(unit.value).padStart(2, '0')}</span>
+                  <span class="text-xs text-surface-600 dark:text-surface-400 uppercase tracking-wider">{unit.label}</span>
                 </div>
               {/each}
             </div>
@@ -620,7 +681,7 @@
     {:else}
       <div class="w-full max-w-lg animate-fade-in mt-6">
         {#if activeSlide.type?.toUpperCase() === 'CONTENT'}
-          <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 animate-fade-in min-h-[16rem]">
+          <div class="rounded-2xl border border-surface-200 dark:border-surface-800 bg-white dark:bg-surface-900 p-4 sm:p-6 animate-fade-in min-h-[16rem] break-words">
             <ContentSlideCanvas slide={activeSlide} sessionId={session?.id} sessionCode={code} variant="guest" />
           </div>
         {:else}
@@ -639,11 +700,11 @@
   </main>
 
   <footer class="border-t mt-auto">
-    <div class="flex flex-col sm:flex-row items-center justify-center gap-3 px-4 md:px-8 py-3 text-slate-500 dark:text-slate-400 text-xs">
-      <span>Powered by <span class="font-semibold text-slate-600 dark:text-slate-300">Tech4Good Community</span></span>
-      <span class="hidden sm:inline">•</span>
+    <div class="flex flex-col sm:flex-row items-center justify-center gap-3 px-4 md:px-8 py-3 text-surface-600 dark:text-surface-400 text-xs">
+      <span>Powered by <span class="font-semibold text-surface-700 dark:text-surface-300">Tech4Good Community</span></span>
+      <span class="hidden sm:inline" aria-hidden="true">•</span>
       <span>Built with <span class="text-red-500">❤</span> by Ajith</span>
-      <span class="hidden sm:inline">•</span>
+      <span class="hidden sm:inline" aria-hidden="true">•</span>
       <span>Rforum@2026</span>
     </div>
   </footer>

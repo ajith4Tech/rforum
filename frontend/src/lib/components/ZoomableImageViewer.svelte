@@ -54,7 +54,7 @@
       type="button"
       onclick={zoomOut}
       disabled={!canZoomOut}
-      class="p-1.5 rounded-lg text-surface-500 hover:bg-surface-100 dark:hover:bg-surface-800 transition disabled:opacity-30 disabled:pointer-events-none"
+      class="p-1.5 rounded-lg text-surface-600 hover:bg-surface-100 hover:text-surface-900 dark:text-surface-400 dark:hover:bg-surface-800 dark:hover:text-surface-100 transition-colors disabled:opacity-30 disabled:pointer-events-none"
       aria-label="Zoom out"
       title="Zoom out"
     >
@@ -64,20 +64,20 @@
       type="button"
       onclick={resetFit}
       aria-pressed={fit}
-      class="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium transition {fit
-        ? 'bg-brand-500 text-white'
-        : 'text-surface-500 hover:bg-surface-100 dark:hover:bg-surface-800'}"
+      class="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium transition-colors {fit
+        ? 'bg-brand-600 text-white'
+        : 'text-surface-600 hover:bg-surface-100 hover:text-surface-900 dark:text-surface-400 dark:hover:bg-surface-800 dark:hover:text-surface-100'}"
       aria-label="Fit to screen"
       title="Fit to screen"
     >
       <Maximize2 class="w-3.5 h-3.5" /> Fit
     </button>
-    <span class="text-xs text-surface-400 tabular-nums w-10 text-center" aria-live="polite">{Math.round(zoom * 100)}%</span>
+    <span class="text-xs text-surface-600 dark:text-surface-400 tabular-nums w-10 text-center" aria-live="polite">{Math.round(zoom * 100)}%</span>
     <button
       type="button"
       onclick={zoomIn}
       disabled={!canZoomIn}
-      class="p-1.5 rounded-lg text-surface-500 hover:bg-surface-100 dark:hover:bg-surface-800 transition disabled:opacity-30 disabled:pointer-events-none"
+      class="p-1.5 rounded-lg text-surface-600 hover:bg-surface-100 hover:text-surface-900 dark:text-surface-400 dark:hover:bg-surface-800 dark:hover:text-surface-100 transition-colors disabled:opacity-30 disabled:pointer-events-none"
       aria-label="Zoom in"
       title="Zoom in"
     >

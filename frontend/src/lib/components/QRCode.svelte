@@ -6,9 +6,11 @@
     data?: string;
     size?: number;
     errorCorrectionLevel?: 'L' | 'M' | 'Q' | 'H';
+    /** Accessible name for the code (screen readers can't read the image). */
+    label?: string;
   }
 
-  let { data = '', size = 300, errorCorrectionLevel = 'H' }: Props = $props();
+  let { data = '', size = 300, errorCorrectionLevel = 'H', label = 'QR code' }: Props = $props();
 
   let canvas: HTMLCanvasElement | undefined;
   let svgContainer: HTMLDivElement | undefined;
@@ -51,10 +53,20 @@
   });
 </script>
 
-<div bind:this={svgContainer} class="flex items-center justify-center" style="width: {size}px; height: {size}px;"></div>
+<!-- max-width + aspect-ratio: shrinks with a narrow phone/projector viewport
+     instead of overflowing it, and stays square. -->
+<div
+  bind:this={svgContainer}
+  class="qr-code flex items-center justify-center"
+  role="img"
+  aria-label={label}
+  style="width: {size}px; max-width: 100%; aspect-ratio: 1 / 1;"
+></div>
 
 <style>
-  :global(div > svg) {
+  /* Scoped to this component's container — a bare :global(div > svg) also
+     stretched every other SVG (icons, rich-text content) in the app. */
+  .qr-code > :global(svg) {
     width: 100%;
     height: 100%;
     max-width: 100%;

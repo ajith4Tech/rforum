@@ -83,12 +83,12 @@
 </script>
 
 {#if failed}
-  <div class="flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/40 p-6 text-center {imgClass}">
-    <span class="text-sm text-slate-500 dark:text-slate-400">Couldn't load this slide</span>
+  <div class="flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-surface-300 dark:border-surface-700 bg-surface-50 dark:bg-surface-900/40 p-6 text-center {imgClass}" role="alert">
+    <span class="text-sm text-surface-600 dark:text-surface-400">Couldn't load this slide</span>
     <button
       type="button"
       onclick={manualRetry}
-      class="text-xs font-semibold text-purple-600 dark:text-purple-400 underline underline-offset-2"
+      class="rounded-lg px-3 py-2 text-sm font-semibold text-brand-700 dark:text-brand-300 underline underline-offset-2 transition-colors hover:bg-brand-50 dark:hover:bg-brand-500/10"
     >
       Tap to retry
     </button>
