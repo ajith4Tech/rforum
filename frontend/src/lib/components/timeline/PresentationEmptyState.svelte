@@ -99,13 +99,11 @@
   }
 
   async function handleAttachFromPicker(presentationId: string) {
-    try {
-      await onAttach(presentationId);
-      pickerOpen = false;
-    } catch {
-      // Parent surfaces the failure via its own save-error banner; leave the
-      // picker open so the moderator can retry instead of silently closing it.
-    }
+    // A failure propagates to the preview dialog, which shows it inline (the
+    // page's save-error banner is hidden behind the open dialogs) and keeps
+    // the picker open so the moderator can retry.
+    await onAttach(presentationId);
+    pickerOpen = false;
   }
 </script>
 
@@ -138,7 +136,7 @@
       ondrop={handleDrop}
       onclick={() => document.getElementById('presentation-file-input')?.click()}
       onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); document.getElementById('presentation-file-input')?.click(); } }}
-      class="flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed py-8 px-4 text-center cursor-pointer transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2
+      class="flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed py-8 px-4 text-center cursor-pointer transition duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2
         {dragOver ? 'border-brand-500 bg-brand-500/5 scale-[1.01] shadow-md' : 'border-surface-200 dark:border-surface-800 hover:border-surface-300 dark:hover:border-surface-700'}"
     >
       <UploadCloud class="w-7 h-7 transition-transform duration-150 {dragOver ? 'text-brand-500 scale-110' : 'text-surface-400'}" />

@@ -42,7 +42,7 @@
   const isContentSlide = $derived(activeItem?.slide?.type?.toUpperCase() === 'CONTENT');
 
   const pageImgClass = variant === 'guest'
-    ? 'w-full mt-6 rounded-xl border border-slate-200 dark:border-slate-800 select-none pointer-events-none'
+    ? 'w-full mt-6 rounded-xl border border-surface-200 dark:border-surface-800 select-none pointer-events-none'
     : 'max-h-full max-w-full h-full w-auto object-contain mx-auto';
 </script>
 
@@ -58,7 +58,7 @@
         />
       </div>
       {#if variant === 'guest'}
-        <div class="text-xs text-slate-500 mt-2">Page {activeItem.page.page_number}</div>
+        <div class="text-xs text-surface-500 mt-2">Page {activeItem.page.page_number}</div>
       {/if}
     {:else if isContentSlide}
       <ContentSlideCanvas

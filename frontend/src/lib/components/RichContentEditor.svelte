@@ -185,8 +185,8 @@
     
     <!-- Left: Slide Mode & Ratio badge -->
     <div class="pres-toolbar-meta">
-      <Presentation class="w-4 h-4 text-purple-400" />
-      <span class="text-xs font-semibold text-slate-300 tracking-wide hidden sm:inline">Presentation Slide</span>
+      <Presentation class="w-4 h-4 text-brand-400" />
+      <span class="text-xs font-semibold text-surface-300 tracking-wide hidden sm:inline">Presentation Slide</span>
     </div>
 
     <div class="pres-sep"></div>
@@ -267,7 +267,7 @@
           onclick={() => { showColorPicker = !showColorPicker; showHighlightPicker = showFontSize = showFontFamily = false; }}
           title="Text Color"
         >
-          <span class="underline decoration-purple-400 font-extrabold text-sm">A</span>
+          <span class="underline decoration-brand-400 font-extrabold text-sm">A</span>
           <ChevronDown class="w-2.5 h-2.5 opacity-60" />
         </button>
         {#if showColorPicker}
@@ -326,7 +326,7 @@
         title="Toggle Slide Preview Mode (Dark / Light Canvas)"
       >
         {#if slideTheme === 'dark'}
-          <Moon class="w-3 h-3 text-purple-400" />
+          <Moon class="w-3 h-3 text-brand-400" />
           <span>Dark Canvas</span>
         {:else}
           <Sun class="w-3 h-3 text-amber-400" />
@@ -341,11 +341,11 @@
   <div class="pres-stage">
     
     <!-- 16:9 Presentation Slide Card -->
-    <div class="pres-card {slideTheme === 'light' ? 'bg-white text-slate-900 border-slate-200' : 'bg-slate-950 text-white border-purple-500/20'}">
+    <div class="pres-card {slideTheme === 'light' ? 'bg-white text-surface-900 border-surface-200' : 'bg-surface-950 text-white border-brand-500/20'}">
       
       <!-- Slide Canvas Header Badge -->
       <div class="pres-card-badge">
-        <Sparkles class="w-3 h-3 text-purple-400" />
+        <Sparkles class="w-3 h-3 text-brand-400" />
         <span>PRESENTATION SLIDE</span>
       </div>
 
@@ -428,7 +428,7 @@
     background: transparent;
     color: #cbd5e1;
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition: background-color 0.15s ease, color 0.15s ease;
   }
   .pres-btn:hover {
     background: rgba(255,255,255,0.1);
@@ -510,7 +510,7 @@
     display: flex;
     flex-direction: column;
     padding: 32px 36px;
-    transition: all 0.3s ease;
+    transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
   }
 
   .pres-card-badge {

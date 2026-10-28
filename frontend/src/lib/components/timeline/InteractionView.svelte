@@ -53,6 +53,8 @@
   } = $props();
 
   const cj = $derived(slide?.content_json || {});
+  /** Unique ids tying the moderator edit form's labels to their inputs. */
+  const fieldId = (name: string) => `iv-${slide?.id ?? 'item'}-${name}`;
   const itype = $derived((cj.interaction_type || cj.mode || slide?.type || '').toUpperCase());
 
   const isQuiz = $derived(itype === 'QUIZ' || cj.mode === 'quiz');
@@ -739,8 +741,8 @@
 
 {#if variant === 'guest'}
   <div class="text-center mb-4">
-    <svelte:component this={typeIcon} class="w-10 h-10 text-purple-600 mx-auto mb-2" />
-    <h1 class="font-heading font-bold text-slate-900 dark:text-white leading-tight" style={getFitTitleStyle(displayPrompt, 'question')}>{displayPrompt}</h1>
+    <svelte:component this={typeIcon} class="w-10 h-10 text-brand-600 mx-auto mb-2" />
+    <h1 class="font-heading font-bold text-surface-900 dark:text-white leading-tight" style={getFitTitleStyle(displayPrompt, 'question')}>{displayPrompt}</h1>
   </div>
 
   <!-- POLL & MULTIPLE CHOICE & QUIZ -->
@@ -757,16 +759,16 @@
           {:else}
             <X class="w-12 h-12 text-red-500 mx-auto mb-3" />
             <p class="font-bold text-xl text-red-700 dark:text-red-400">Incorrect</p>
-            <p class="text-sm text-slate-500 mt-1">Your answer: {selectedOption}</p>
+            <p class="text-sm text-surface-500 mt-1">Your answer: {selectedOption}</p>
             <p class="text-sm font-semibold text-emerald-600 dark:text-emerald-400 mt-2">✓ Correct answer: {correctAnswer}</p>
           {/if}
         </div>
       {:else}
-        <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 text-center animate-slide-up" role="status" aria-live="polite">
+        <div class="rounded-2xl border border-surface-200 dark:border-surface-800 bg-white dark:bg-surface-900 p-6 text-center animate-slide-up" role="status" aria-live="polite">
           <CheckCircle2 class="w-12 h-12 text-emerald-500 mx-auto mb-3" />
-          <p class="font-semibold text-slate-900 dark:text-white">{pendingHere ? 'Saved on this device' : isQuiz ? 'Answer submitted!' : 'Vote submitted!'}</p>
-          <p class="text-sm text-slate-500 mt-1">You chose: {selectedOption}</p>
-          {#if isQuiz && !cj.reveal_answer}<p class="text-xs text-slate-400 mt-2">Waiting for the moderator to reveal the answer…</p>{/if}
+          <p class="font-semibold text-surface-900 dark:text-white">{pendingHere ? 'Saved on this device' : isQuiz ? 'Answer submitted!' : 'Vote submitted!'}</p>
+          <p class="text-sm text-surface-500 mt-1">You chose: {selectedOption}</p>
+          {#if isQuiz && !cj.reveal_answer}<p class="text-xs text-surface-400 mt-2">Waiting for the moderator to reveal the answer…</p>{/if}
         </div>
       {/if}
     {:else if isMultipleChoice}
@@ -778,13 +780,13 @@
             onclick={() => toggleMultipleChoiceOption(option)}
             disabled={readOnly}
             aria-pressed={isChecked}
-            class="w-full rounded-2xl border p-4 transition-all duration-200 text-left text-lg font-medium flex items-center gap-3
+            class="w-full rounded-2xl border p-4 transition duration-200 text-left text-lg font-medium flex items-center gap-3
                    active:scale-[0.98] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed
                    {isChecked
-                     ? 'border-purple-500 bg-purple-50 dark:bg-purple-900/30 text-purple-700 dark:text-purple-200 ring-2 ring-purple-500/30'
-                     : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white hover:border-purple-400 dark:hover:border-purple-500/50 hover:bg-purple-50 dark:hover:bg-purple-500/5'}"
+                     ? 'border-brand-500 bg-brand-50 dark:bg-brand-900/30 text-brand-700 dark:text-brand-200 ring-2 ring-brand-500/30'
+                     : 'border-surface-200 dark:border-surface-800 bg-white dark:bg-surface-900 text-surface-900 dark:text-white hover:border-brand-400 dark:hover:border-brand-500/50 hover:bg-brand-50 dark:hover:bg-brand-500/5'}"
           >
-            <span class="flex h-5 w-5 shrink-0 items-center justify-center rounded-md border-2 transition-colors {isChecked ? 'border-purple-500 bg-purple-500' : 'border-slate-300 dark:border-slate-600'}">
+            <span class="flex h-5 w-5 shrink-0 items-center justify-center rounded-md border-2 transition-colors {isChecked ? 'border-brand-500 bg-brand-500' : 'border-surface-300 dark:border-surface-600'}">
               {#if isChecked}<Check class="w-3.5 h-3.5 text-white" />{/if}
             </span>
             {option}
@@ -806,23 +808,23 @@
             onclick={() => handleVote(option)}
             disabled={readOnly}
             aria-pressed={selectedOption === option}
-            class="w-full rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4
-                   hover:border-purple-400 dark:hover:border-purple-500/50 hover:bg-purple-50 dark:hover:bg-purple-500/5
-                   transition-all duration-200 text-left text-lg font-medium text-slate-900 dark:text-white
+            class="w-full rounded-2xl border border-surface-200 dark:border-surface-800 bg-white dark:bg-surface-900 p-4
+                   hover:border-brand-400 dark:hover:border-brand-500/50 hover:bg-brand-50 dark:hover:bg-brand-500/5
+                   transition duration-200 text-left text-lg font-medium text-surface-900 dark:text-white
                    active:scale-[0.98] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
           >{option}</button>
         {/each}
       </div>
     {/if}
-    {#if actionError}<p class="text-red-500 text-sm mt-3 text-center" role="alert">{actionError}</p>{/if}
+    {#if actionError}<p class="text-red-600 dark:text-red-400 text-sm mt-3 text-center" role="alert">{actionError}</p>{/if}
 
   <!-- SCALE SLIDE -->
   {:else if isScale}
     {#if submitted}
-      <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 text-center animate-slide-up" role="status" aria-live="polite">
+      <div class="rounded-2xl border border-surface-200 dark:border-surface-800 bg-white dark:bg-surface-900 p-6 text-center animate-slide-up" role="status" aria-live="polite">
         <CheckCircle2 class="w-12 h-12 text-emerald-500 mx-auto mb-3" />
-        <p class="font-semibold text-slate-900 dark:text-white">{pendingHere ? 'Saved on this device' : 'Rating submitted!'}</p>
-        {#if scaleRating !== null}<p class="text-sm text-slate-500 mt-1">Score: {scaleRating}</p>{/if}
+        <p class="font-semibold text-surface-900 dark:text-white">{pendingHere ? 'Saved on this device' : 'Rating submitted!'}</p>
+        {#if scaleRating !== null}<p class="text-sm text-surface-500 mt-1">Score: {scaleRating}</p>{/if}
       </div>
     {:else}
       <div class="space-y-5">
@@ -833,7 +835,7 @@
               onclick={() => (scaleRating = pt)}
               disabled={readOnly}
               aria-pressed={scaleRating === pt}
-              class="h-12 w-12 rounded-2xl font-mono text-base font-bold transition-all active:scale-90 {scaleRating === pt ? 'bg-purple-600 text-white shadow-lg shadow-purple-500/30 scale-105' : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 hover:border-purple-400'}"
+              class="h-12 w-12 rounded-2xl font-mono text-base font-bold transition active:scale-90 {scaleRating === pt ? 'bg-brand-600 text-white shadow-lg shadow-brand-500/30 scale-105' : 'bg-surface-100 dark:bg-surface-800 text-surface-700 dark:text-surface-200 border border-surface-200 dark:border-surface-700 hover:border-brand-400'}"
             >
               {pt}
             </button>
@@ -841,7 +843,7 @@
         </div>
 
         {#if scaleMinLabel || scaleMaxLabel}
-          <div class="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 px-1">
+          <div class="flex items-center justify-between text-xs text-surface-500 dark:text-surface-400 px-1">
             <span>{scaleMinLabel}</span>
             <span>{scaleMaxLabel}</span>
           </div>
@@ -850,36 +852,37 @@
         <input
           type="text"
           bind:value={guestName}
-          placeholder="Your name (optional)"
+          placeholder="Your name (optional)" aria-label="Your name (optional)"
           disabled={readOnly}
-          class="w-full rounded-xl px-4 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition disabled:opacity-50"
+          class="w-full rounded-xl px-4 py-2 bg-white dark:bg-surface-900 border border-surface-200 dark:border-surface-800 text-surface-900 dark:text-white placeholder-surface-400 focus:outline-none focus:ring-2 focus:ring-brand-500/50 transition disabled:opacity-50"
         />
 
         <button
           onclick={handleScaleSubmit}
           class="btn-primary w-full flex items-center justify-center gap-2 py-3 text-base"
           disabled={scaleRating === null || readOnly || isSubmitting}
+          aria-busy={isSubmitting}
         >
           <Send class="w-4 h-4" /> Submit Score
         </button>
-        {#if actionError}<p class="text-red-500 text-sm text-center" role="alert">{actionError}</p>{/if}
+        {#if actionError}<p class="text-red-600 dark:text-red-400 text-sm text-center" role="alert">{actionError}</p>{/if}
       </div>
     {/if}
 
   <!-- SURVEY SLIDE -->
   {:else if isSurvey}
     {#if submitted}
-      <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 text-center animate-slide-up" role="status" aria-live="polite">
+      <div class="rounded-2xl border border-surface-200 dark:border-surface-800 bg-white dark:bg-surface-900 p-6 text-center animate-slide-up" role="status" aria-live="polite">
         <CheckCircle2 class="w-12 h-12 text-emerald-500 mx-auto mb-3" />
-        <p class="font-semibold text-slate-900 dark:text-white">{pendingHere ? 'Saved on this device' : 'Survey submitted!'}</p>
-        <p class="text-sm text-slate-500 mt-1">Thank you for sharing your responses.</p>
+        <p class="font-semibold text-surface-900 dark:text-white">{pendingHere ? 'Saved on this device' : 'Survey submitted!'}</p>
+        <p class="text-sm text-surface-500 mt-1">Thank you for sharing your responses.</p>
       </div>
     {:else}
       <div class="space-y-6">
         {#each surveyQuestions as q, qIdx}
-          <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 space-y-3">
-            <p class="font-semibold text-slate-900 dark:text-white text-base">
-              <span class="text-purple-600 dark:text-purple-400 font-mono text-xs mr-1.5">{qIdx + 1}.</span> {q.prompt}
+          <div class="rounded-2xl border border-surface-200 dark:border-surface-800 bg-white dark:bg-surface-900 p-4 space-y-3">
+            <p class="font-semibold text-surface-900 dark:text-white text-base">
+              <span class="text-brand-600 dark:text-brand-400 font-mono text-xs mr-1.5">{qIdx + 1}.</span> {q.prompt}
             </p>
 
             {#if q.response_type === 'single_choice'}
@@ -888,7 +891,9 @@
                   <button
                     type="button"
                     onclick={() => { surveyAnswers = { ...surveyAnswers, [qIdx]: opt }; }}
-                    class="w-full text-left px-3.5 py-2.5 rounded-xl border text-sm transition-all {surveyAnswers[qIdx] === opt ? 'border-purple-500 bg-purple-50 dark:bg-purple-500/10 text-purple-700 dark:text-purple-300 font-medium' : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 text-slate-700 dark:text-slate-200'}"
+                    disabled={readOnly}
+                    aria-pressed={surveyAnswers[qIdx] === opt}
+                    class="w-full text-left px-3.5 py-2.5 rounded-xl border text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed {surveyAnswers[qIdx] === opt ? 'border-brand-500 bg-brand-50 dark:bg-brand-500/10 text-brand-700 dark:text-brand-300 font-medium' : 'border-surface-200 dark:border-surface-800 hover:border-surface-300 dark:hover:border-surface-700 text-surface-700 dark:text-surface-200'}"
                   >
                     {opt}
                   </button>
@@ -902,22 +907,26 @@
                   <button
                     type="button"
                     onclick={() => { surveyAnswers = { ...surveyAnswers, [qIdx]: n }; }}
-                    class="h-10 w-10 rounded-xl font-mono text-sm font-bold border transition-all {surveyAnswers[qIdx] === n ? 'bg-purple-600 text-white border-purple-600' : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200'}"
+                    disabled={readOnly}
+                    aria-pressed={surveyAnswers[qIdx] === n}
+                    class="h-10 w-10 rounded-xl font-mono text-sm font-bold border transition-colors disabled:opacity-50 disabled:cursor-not-allowed {surveyAnswers[qIdx] === n ? 'bg-brand-600 text-white border-brand-600' : 'bg-surface-50 dark:bg-surface-800 border-surface-200 dark:border-surface-700 text-surface-700 dark:text-surface-200 hover:border-brand-400'}"
                   >
                     {n}
                   </button>
                 {/each}
               </div>
               {#if q.labels}
-                <p class="text-xs text-slate-400">{typeof q.labels === 'string' ? q.labels : `${q.labels.min || ''} – ${q.labels.max || ''}`}</p>
+                <p class="text-xs text-surface-400">{typeof q.labels === 'string' ? q.labels : `${q.labels.min || ''} – ${q.labels.max || ''}`}</p>
               {/if}
             {:else}
               <textarea
                 value={surveyAnswers[qIdx] || ''}
                 oninput={(e) => { surveyAnswers = { ...surveyAnswers, [qIdx]: (e.currentTarget as HTMLTextAreaElement).value }; }}
                 placeholder="Your response..."
+                aria-label={`Your answer to question ${qIdx + 1}`}
+                disabled={readOnly}
                 rows="2"
-                class="w-full rounded-xl px-3 py-2 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-500/50 text-sm resize-none"
+                class="w-full rounded-xl px-3 py-2 bg-surface-50 dark:bg-surface-800/50 border border-surface-200 dark:border-surface-800 text-surface-900 dark:text-white placeholder-surface-400 focus:outline-none focus:ring-2 focus:ring-brand-500/50 text-sm resize-none"
               ></textarea>
             {/if}
           </div>
@@ -926,49 +935,50 @@
         <input
           type="text"
           bind:value={guestName}
-          placeholder="Your name (optional)"
+          placeholder="Your name (optional)" aria-label="Your name (optional)"
           disabled={readOnly}
-          class="w-full rounded-xl px-4 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition disabled:opacity-50"
+          class="w-full rounded-xl px-4 py-2 bg-white dark:bg-surface-900 border border-surface-200 dark:border-surface-800 text-surface-900 dark:text-white placeholder-surface-400 focus:outline-none focus:ring-2 focus:ring-brand-500/50 transition disabled:opacity-50"
         />
 
         <button
           onclick={handleSurveySubmit}
           class="btn-primary w-full flex items-center justify-center gap-2 py-3 text-base"
           disabled={readOnly || isSubmitting}
+          aria-busy={isSubmitting}
         >
           <Send class="w-4 h-4" /> Submit Survey
         </button>
-        {#if actionError}<p class="text-red-500 text-sm text-center" role="alert">{actionError}</p>{/if}
+        {#if actionError}<p class="text-red-600 dark:text-red-400 text-sm text-center" role="alert">{actionError}</p>{/if}
       </div>
     {/if}
 
   <!-- QNA -->
   {:else if isQna}
     <form onsubmit={(e) => { e.preventDefault(); handleTextSubmit(); }} class="space-y-2 mb-4">
-      <input type="text" bind:value={guestName} placeholder="Your name (optional)"
-        class="w-full rounded-xl px-4 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition" />
+      <input type="text" bind:value={guestName} placeholder="Your name (optional)" aria-label="Your name (optional)"
+        class="w-full rounded-xl px-4 py-2 bg-white dark:bg-surface-900 border border-surface-200 dark:border-surface-800 text-surface-900 dark:text-white placeholder-surface-400 focus:outline-none focus:ring-2 focus:ring-brand-500/50 transition" />
       <div class="flex gap-2">
-        <input type="text" bind:value={inputValue} placeholder="Type your question..." disabled={readOnly}
-          class="flex-1 rounded-xl px-4 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition disabled:opacity-50" />
-        <button type="submit" class="btn-primary p-2" disabled={readOnly || isSubmitting} aria-label="Submit question"><Send class="w-5 h-5" /></button>
+        <input type="text" bind:value={inputValue} placeholder="Type your question..." aria-label="Your question" disabled={readOnly}
+          class="flex-1 rounded-xl px-4 py-2 bg-white dark:bg-surface-900 border border-surface-200 dark:border-surface-800 text-surface-900 dark:text-white placeholder-surface-400 focus:outline-none focus:ring-2 focus:ring-brand-500/50 transition disabled:opacity-50" />
+        <button type="submit" class="btn-primary p-2" disabled={readOnly || isSubmitting} aria-busy={isSubmitting} aria-label="Submit question"><Send class="w-5 h-5" /></button>
       </div>
     </form>
     {#if thankYou}
-      <div class="flex items-center justify-center gap-2 mb-4 text-sm text-emerald-500 animate-fade-in" role="status" aria-live="polite">
+      <div class="flex items-center justify-center gap-2 mb-4 text-sm text-emerald-700 dark:text-emerald-400 animate-fade-in" role="status" aria-live="polite">
         <CheckCircle2 class="w-4 h-4" /> {pendingHere ? 'Saved on this device — not sent yet' : 'Thanks for submitting your question!'}
       </div>
     {/if}
-    {#if actionError}<p class="text-red-500 text-sm mb-4 text-center" role="alert">{actionError}</p>{/if}
+    {#if actionError}<p class="text-red-600 dark:text-red-400 text-sm mb-4 text-center" role="alert">{actionError}</p>{/if}
     <div class="space-y-3 max-h-[50vh] overflow-y-auto">
       {#each [...responses].sort((a, b) => b.upvotes - a.upvotes) as response (response.id)}
-        <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 flex items-start gap-3 animate-slide-up">
-          <button onclick={() => handleUpvote(response.id)} disabled={readOnly} aria-label={`Upvote (${response.upvotes} votes)`} class="flex flex-col items-center text-slate-400 hover:text-purple-600 transition-colors shrink-0 disabled:opacity-50">
+        <div class="rounded-2xl border border-surface-200 dark:border-surface-800 bg-white dark:bg-surface-900 p-4 flex items-start gap-3 animate-slide-up">
+          <button onclick={() => handleUpvote(response.id)} disabled={readOnly} aria-label={`Upvote (${response.upvotes} votes)`} class="flex flex-col items-center rounded-lg text-surface-400 hover:text-brand-600 dark:hover:text-brand-400 transition-colors shrink-0 disabled:opacity-50">
             <ChevronUp class="w-5 h-5" />
             <span class="text-xs font-bold">{response.upvotes}</span>
           </button>
           <div>
-            <p class="text-slate-700 dark:text-slate-200 text-sm">{response.value}</p>
-            {#if response.name}<p class="text-xs text-slate-500 mt-1">{response.name}</p>{/if}
+            <p class="text-surface-700 dark:text-surface-200 text-sm">{response.value}</p>
+            {#if response.name}<p class="text-xs text-surface-500 mt-1">{response.name}</p>{/if}
           </div>
         </div>
       {/each}
@@ -977,63 +987,63 @@
   <!-- WORD CLOUD -->
   {:else if isWordCloud}
     <form onsubmit={(e) => { e.preventDefault(); handleTextSubmit(); }} class="space-y-2 mb-4">
-      <input type="text" bind:value={guestName} placeholder="Your name (optional)"
-        class="w-full rounded-xl px-4 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition" />
+      <input type="text" bind:value={guestName} placeholder="Your name (optional)" aria-label="Your name (optional)"
+        class="w-full rounded-xl px-4 py-2 bg-white dark:bg-surface-900 border border-surface-200 dark:border-surface-800 text-surface-900 dark:text-white placeholder-surface-400 focus:outline-none focus:ring-2 focus:ring-brand-500/50 transition" />
       <div class="flex gap-2">
-        <input type="text" bind:value={inputValue} placeholder="Type your answer..." disabled={readOnly}
-          class="flex-1 rounded-xl px-4 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition disabled:opacity-50" />
-        <button type="submit" class="btn-primary p-2" disabled={readOnly || isSubmitting} aria-label="Submit answer"><Send class="w-5 h-5" /></button>
+        <input type="text" bind:value={inputValue} placeholder="Type your answer..." aria-label="Your answer" disabled={readOnly}
+          class="flex-1 rounded-xl px-4 py-2 bg-white dark:bg-surface-900 border border-surface-200 dark:border-surface-800 text-surface-900 dark:text-white placeholder-surface-400 focus:outline-none focus:ring-2 focus:ring-brand-500/50 transition disabled:opacity-50" />
+        <button type="submit" class="btn-primary p-2" disabled={readOnly || isSubmitting} aria-busy={isSubmitting} aria-label="Submit answer"><Send class="w-5 h-5" /></button>
       </div>
     </form>
     {#if thankYou}
-      <div class="flex items-center justify-center gap-2 text-sm text-emerald-500 animate-fade-in" role="status" aria-live="polite">
+      <div class="flex items-center justify-center gap-2 text-sm text-emerald-700 dark:text-emerald-400 animate-fade-in" role="status" aria-live="polite">
         <CheckCircle2 class="w-4 h-4" /> {pendingHere ? 'Saved on this device — not sent yet' : 'Thanks for your answer!'}
       </div>
     {/if}
-    {#if actionError}<p class="text-red-500 text-sm text-center" role="alert">{actionError}</p>{/if}
+    {#if actionError}<p class="text-red-600 dark:text-red-400 text-sm text-center" role="alert">{actionError}</p>{/if}
 
   <!-- FEEDBACK / RATING ONLY -->
   {:else if isRatingOnly}
     {#if submitted}
-      <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 text-center animate-slide-up" role="status" aria-live="polite">
+      <div class="rounded-2xl border border-surface-200 dark:border-surface-800 bg-white dark:bg-surface-900 p-6 text-center animate-slide-up" role="status" aria-live="polite">
         <CheckCircle2 class="w-12 h-12 text-emerald-500 mx-auto mb-3" />
-        <p class="font-semibold text-slate-900 dark:text-white">{pendingHere ? 'Saved on this device' : 'Thanks for rating!'}</p>
+        <p class="font-semibold text-surface-900 dark:text-white">{pendingHere ? 'Saved on this device' : 'Thanks for rating!'}</p>
       </div>
     {:else}
       <form onsubmit={(e) => { e.preventDefault(); handleTextSubmit(); }} class="text-center space-y-4">
         <div class="flex items-center justify-center gap-2">
           {#each [1, 2, 3, 4, 5] as n}
             <button type="button" onclick={() => (starRating = n)} disabled={readOnly} class="transition-transform active:scale-90 disabled:opacity-50" aria-label={`${n} star${n === 1 ? '' : 's'}`} aria-pressed={starRating === n}>
-              <Star class="w-9 h-9 {n <= starRating ? 'text-amber-400 fill-amber-400' : 'text-slate-300 dark:text-slate-700'}" />
+              <Star class="w-9 h-9 {n <= starRating ? 'text-amber-400 fill-amber-400' : 'text-surface-300 dark:text-surface-700'}" />
             </button>
           {/each}
         </div>
-        <input type="text" bind:value={guestName} placeholder="Your name (optional)" disabled={readOnly}
-          class="w-full rounded-xl px-4 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition disabled:opacity-50" />
-        <button type="submit" class="btn-primary w-full flex items-center justify-center gap-2" disabled={!starRating || readOnly || isSubmitting}>
+        <input type="text" bind:value={guestName} placeholder="Your name (optional)" aria-label="Your name (optional)" disabled={readOnly}
+          class="w-full rounded-xl px-4 py-2 bg-white dark:bg-surface-900 border border-surface-200 dark:border-surface-800 text-surface-900 dark:text-white placeholder-surface-400 focus:outline-none focus:ring-2 focus:ring-brand-500/50 transition disabled:opacity-50" />
+        <button type="submit" class="btn-primary w-full flex items-center justify-center gap-2" disabled={!starRating || readOnly || isSubmitting} aria-busy={isSubmitting}>
           <Send class="w-4 h-4" /> Submit Rating
         </button>
-        {#if actionError}<p class="text-red-500 text-sm text-center" role="alert">{actionError}</p>{/if}
+        {#if actionError}<p class="text-red-600 dark:text-red-400 text-sm text-center" role="alert">{actionError}</p>{/if}
       </form>
     {/if}
 
   <!-- FEEDBACK (TEXT) -->
   {:else}
     {#if submitted}
-      <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 text-center animate-slide-up" role="status" aria-live="polite">
+      <div class="rounded-2xl border border-surface-200 dark:border-surface-800 bg-white dark:bg-surface-900 p-6 text-center animate-slide-up" role="status" aria-live="polite">
         <CheckCircle2 class="w-12 h-12 text-emerald-500 mx-auto mb-3" />
-        <p class="font-semibold text-slate-900 dark:text-white">{pendingHere ? 'Saved on this device' : 'Thanks for your feedback!'}</p>
+        <p class="font-semibold text-surface-900 dark:text-white">{pendingHere ? 'Saved on this device' : 'Thanks for your feedback!'}</p>
       </div>
     {:else}
       <form onsubmit={(e) => { e.preventDefault(); handleTextSubmit(); }}>
-        <input type="text" bind:value={guestName} placeholder="Your name (optional)" disabled={readOnly}
-          class="w-full rounded-xl px-4 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition mb-2 disabled:opacity-50" />
-        <textarea bind:value={inputValue} placeholder="Share your thoughts..." rows="4" disabled={readOnly}
-          class="w-full rounded-xl px-4 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition mb-2 resize-none disabled:opacity-50"></textarea>
-        <button type="submit" class="btn-primary w-full flex items-center justify-center gap-2" disabled={readOnly || isSubmitting}>
+        <input type="text" bind:value={guestName} placeholder="Your name (optional)" aria-label="Your name (optional)" disabled={readOnly}
+          class="w-full rounded-xl px-4 py-2 bg-white dark:bg-surface-900 border border-surface-200 dark:border-surface-800 text-surface-900 dark:text-white placeholder-surface-400 focus:outline-none focus:ring-2 focus:ring-brand-500/50 transition mb-2 disabled:opacity-50" />
+        <textarea bind:value={inputValue} placeholder="Share your thoughts..." aria-label="Your feedback" rows="4" disabled={readOnly}
+          class="w-full rounded-xl px-4 py-2 bg-white dark:bg-surface-900 border border-surface-200 dark:border-surface-800 text-surface-900 dark:text-white placeholder-surface-400 focus:outline-none focus:ring-2 focus:ring-brand-500/50 transition mb-2 resize-none disabled:opacity-50"></textarea>
+        <button type="submit" class="btn-primary w-full flex items-center justify-center gap-2" disabled={readOnly || isSubmitting} aria-busy={isSubmitting}>
           <Send class="w-4 h-4" /> Submit Feedback
         </button>
-        {#if actionError}<p class="text-red-500 text-sm mt-2 text-center" role="alert">{actionError}</p>{/if}
+        {#if actionError}<p class="text-red-600 dark:text-red-400 text-sm mt-2 text-center" role="alert">{actionError}</p>{/if}
       </form>
     {/if}
   {/if}
@@ -1053,11 +1063,11 @@
 {:else if variant === 'screen'}
   <div class="flex flex-col gap-4 w-full h-full justify-between">
     <div class="text-center space-y-1">
-      <div class="inline-flex items-center gap-2 bg-purple-500/10 text-purple-600 dark:text-purple-400 text-xs font-bold uppercase tracking-widest px-3 py-1 rounded-full border border-purple-500/20">
+      <div class="inline-flex items-center gap-2 bg-brand-500/10 text-brand-600 dark:text-brand-400 text-xs font-bold uppercase tracking-widest px-3 py-1 rounded-full border border-brand-500/20">
         <svelte:component this={typeIcon} class="w-3.5 h-3.5" /> {typeLabel}
       </div>
-      <h1 class="font-heading font-bold text-slate-900 dark:text-slate-100 leading-snug" style={getFitTitleStyle(displayPrompt, 'question')}>{displayPrompt}</h1>
-      <p class="text-slate-400 text-xs">{responses.length} response{responses.length === 1 ? '' : 's'}</p>
+      <h1 class="font-heading font-bold text-surface-900 dark:text-surface-100 leading-snug" style={getFitTitleStyle(displayPrompt, 'question')}>{displayPrompt}</h1>
+      <p class="text-surface-400 text-xs">{responses.length} response{responses.length === 1 ? '' : 's'}</p>
     </div>
 
     <!-- POLL & MULTIPLE CHOICE & QUIZ SCREEN -->
@@ -1071,11 +1081,11 @@
         {/if}
 
         {#each pollResults() as row, i}
-          {@const hues = ['bg-purple-600', 'bg-emerald-500', 'bg-cyan-500', 'bg-amber-500', 'bg-rose-500']}
+          {@const hues = ['bg-brand-600', 'bg-emerald-500', 'bg-cyan-500', 'bg-amber-500', 'bg-rose-500']}
           {@const isRevealedCorrect = isQuiz && cj.reveal_answer && row.isCorrect}
           <div class="space-y-1">
             <div class="flex items-center justify-between text-sm sm:text-base">
-              <span class="font-semibold flex items-center gap-1.5 {isRevealedCorrect ? 'text-emerald-600 dark:text-emerald-400 font-bold' : 'text-slate-800 dark:text-slate-200'}">
+              <span class="font-semibold flex items-center gap-1.5 {isRevealedCorrect ? 'text-emerald-600 dark:text-emerald-400 font-bold' : 'text-surface-800 dark:text-surface-200'}">
                 {row.label}
                 {#if isRevealedCorrect}
                   <span class="inline-flex items-center gap-1 text-[11px] bg-emerald-500 text-white px-2 py-0.5 rounded-full uppercase tracking-wider font-bold">
@@ -1083,14 +1093,14 @@
                   </span>
                 {/if}
               </span>
-              <span class="font-mono font-bold {isRevealedCorrect ? 'text-emerald-600 dark:text-emerald-400' : 'text-purple-600 dark:text-purple-400'}">{row.percent}%</span>
+              <span class="font-mono font-bold {isRevealedCorrect ? 'text-emerald-600 dark:text-emerald-400' : 'text-brand-600 dark:text-brand-400'}">{row.percent}%</span>
             </div>
-            <div class="relative h-9 bg-slate-100 dark:bg-slate-950 rounded-xl overflow-hidden border {isRevealedCorrect ? 'border-emerald-500 ring-2 ring-emerald-500/30' : 'border-slate-200 dark:border-slate-800'}">
+            <div class="relative h-9 bg-surface-100 dark:bg-surface-950 rounded-xl overflow-hidden border {isRevealedCorrect ? 'border-emerald-500 ring-2 ring-emerald-500/30' : 'border-surface-200 dark:border-surface-800'}">
               <div
-                class="absolute inset-y-0 left-0 rounded-xl transition-all duration-700 {isRevealedCorrect ? 'bg-emerald-500' : hues[i % hues.length]}"
+                class="absolute inset-y-0 left-0 rounded-xl transition-[width,background-color] duration-700 {isRevealedCorrect ? 'bg-emerald-500' : hues[i % hues.length]}"
                 style={`width: ${row.percent}%; min-width: ${row.percent > 0 ? '12px' : '0'}`}
               ></div>
-              <span class="absolute inset-y-0 right-3 flex items-center text-slate-500 dark:text-slate-400 text-xs font-mono">{row.count}</span>
+              <span class="absolute inset-y-0 right-3 flex items-center text-surface-500 dark:text-surface-400 text-xs font-mono">{row.count}</span>
             </div>
           </div>
         {/each}
@@ -1104,24 +1114,24 @@
           <div class="text-5xl sm:text-6xl font-heading font-extrabold text-teal-600 dark:text-teal-400 tracking-tight">
             {res.average}
           </div>
-          <p class="text-xs text-slate-400 uppercase tracking-widest mt-1">Average Rating (out of {scaleMax})</p>
+          <p class="text-xs text-surface-400 uppercase tracking-widest mt-1">Average Rating (out of {scaleMax})</p>
         </div>
 
         <div class="space-y-2">
           <div class="grid gap-1.5" style={`grid-template-columns: repeat(${res.distribution.length}, minmax(0, 1fr));`}>
             {#each res.distribution as d}
               <div class="flex flex-col items-center gap-1.5">
-                <div class="relative w-full h-24 bg-slate-100 dark:bg-slate-950 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-800 flex flex-col justify-end">
-                  <div class="w-full bg-teal-500 rounded-t-lg transition-all duration-700" style={`height: ${d.percent}%; min-height: ${d.percent > 0 ? '4px' : '0'}`}></div>
+                <div class="relative w-full h-24 bg-surface-100 dark:bg-surface-950 rounded-lg overflow-hidden border border-surface-200 dark:border-surface-800 flex flex-col justify-end">
+                  <div class="w-full bg-teal-500 rounded-t-lg transition-[height] duration-700" style={`height: ${d.percent}%; min-height: ${d.percent > 0 ? '4px' : '0'}`}></div>
                 </div>
-                <span class="font-mono text-xs font-bold text-slate-700 dark:text-slate-300">{d.point}</span>
-                <span class="font-mono text-[10px] text-slate-400">{d.count}</span>
+                <span class="font-mono text-xs font-bold text-surface-700 dark:text-surface-300">{d.point}</span>
+                <span class="font-mono text-[10px] text-surface-400">{d.count}</span>
               </div>
             {/each}
           </div>
 
           {#if scaleMinLabel || scaleMaxLabel}
-            <div class="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 pt-1">
+            <div class="flex items-center justify-between text-xs text-surface-500 dark:text-surface-400 pt-1">
               <span>{scaleMinLabel}</span>
               <span>{scaleMaxLabel}</span>
             </div>
@@ -1134,24 +1144,24 @@
       {@const aggs = surveyAggregates()}
       <div class="max-h-[60vh] overflow-y-auto space-y-4 max-w-2xl mx-auto w-full my-auto px-2">
         {#each aggs as q}
-          <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/50 p-4 space-y-3">
+          <div class="rounded-2xl border border-surface-200 dark:border-surface-800 bg-surface-50/50 dark:bg-surface-950/50 p-4 space-y-3">
             <div class="flex items-center justify-between">
-              <h3 class="font-bold text-slate-900 dark:text-white text-sm">
-                <span class="text-purple-600 font-mono text-xs">{q.qIndex + 1}.</span> {q.prompt}
+              <h3 class="font-bold text-surface-900 dark:text-white text-sm">
+                <span class="text-brand-600 dark:text-brand-400 font-mono text-xs">{q.qIndex + 1}.</span> {q.prompt}
               </h3>
-              <span class="text-xs text-slate-400 font-mono">{q.totalResponses} answer{q.totalResponses === 1 ? '' : 's'}</span>
+              <span class="text-xs text-surface-400 font-mono">{q.totalResponses} answer{q.totalResponses === 1 ? '' : 's'}</span>
             </div>
 
             {#if q.type === 'single_choice'}
               <div class="space-y-1.5">
                 {#each q.optionsData as opt, oi}
-                  {@const colors = ['bg-purple-600', 'bg-emerald-500', 'bg-cyan-500', 'bg-amber-500']}
+                  {@const colors = ['bg-brand-600', 'bg-emerald-500', 'bg-cyan-500', 'bg-amber-500']}
                   <div class="space-y-0.5">
                     <div class="flex justify-between text-xs font-medium">
-                      <span class="text-slate-700 dark:text-slate-300">{opt.label}</span>
-                      <span class="font-mono text-purple-600 dark:text-purple-400">{opt.percent}% ({opt.count})</span>
+                      <span class="text-surface-700 dark:text-surface-300">{opt.label}</span>
+                      <span class="font-mono text-brand-600 dark:text-brand-400">{opt.percent}% ({opt.count})</span>
                     </div>
-                    <div class="h-4 bg-slate-100 dark:bg-slate-900 rounded-full overflow-hidden">
+                    <div class="h-4 bg-surface-100 dark:bg-surface-900 rounded-full overflow-hidden">
                       <div class="h-full rounded-full {colors[oi % colors.length]}" style={`width: ${opt.percent}%; min-width: ${opt.percent > 0 ? '6px' : '0'}`}></div>
                     </div>
                   </div>
@@ -1161,11 +1171,11 @@
               <div class="flex items-center gap-4">
                 <div class="text-2xl font-bold font-mono text-teal-600 dark:text-teal-400">{q.average}</div>
                 <div class="flex-1">
-                  <p class="text-xs text-slate-400">Average score (scale {q.min}–{q.max})</p>
+                  <p class="text-xs text-surface-400">Average score (scale {q.min}–{q.max})</p>
                 </div>
               </div>
             {:else}
-              <p class="text-xs text-slate-500 dark:text-slate-400 italic">
+              <p class="text-xs text-surface-500 dark:text-surface-400 italic">
                 {q.totalResponses} text response{q.totalResponses === 1 ? '' : 's'} recorded
               </p>
             {/if}
@@ -1176,18 +1186,18 @@
     <!-- QNA SCREEN -->
     {:else if isQna}
       {#if responses.length === 0}
-        <div class="text-center text-slate-400 text-base py-8">No questions submitted yet…</div>
+        <div class="text-center text-surface-400 text-base py-8">No questions submitted yet…</div>
       {:else}
         <div class="max-h-[60vh] overflow-y-auto space-y-3 pr-1 my-auto">
           {#each [...responses].sort((a, b) => (b.upvotes ?? 0) - (a.upvotes ?? 0)) as response (response.id)}
-            <div class="flex items-start gap-4 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl p-4">
-              <div class="flex flex-col items-center justify-center shrink-0 px-3 py-1.5 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400 font-bold">
+            <div class="flex items-start gap-4 bg-surface-50 dark:bg-surface-950 border border-surface-200 dark:border-surface-800 rounded-2xl p-4">
+              <div class="flex flex-col items-center justify-center shrink-0 px-3 py-1.5 rounded-xl bg-brand-500/10 text-brand-600 dark:text-brand-400 font-bold">
                 <span class="text-xl font-bold">{response.upvotes ?? 0}</span>
                 <span class="text-[9px] uppercase tracking-wider">votes</span>
               </div>
               <div class="flex-1 min-w-0">
-                <p class="text-slate-800 dark:text-slate-200 text-base font-medium leading-relaxed">{response.value}</p>
-                <p class="text-slate-400 text-xs mt-1">{response.name || response.guest_identifier || 'Anonymous'}</p>
+                <p class="text-surface-800 dark:text-surface-200 text-base font-medium leading-relaxed">{response.value}</p>
+                <p class="text-surface-400 text-xs mt-1">{response.name || response.guest_identifier || 'Anonymous'}</p>
               </div>
             </div>
           {/each}
@@ -1197,12 +1207,12 @@
     <!-- WORD CLOUD SCREEN -->
     {:else if isWordCloud}
       {#if responses.length === 0}
-        <div class="text-center text-slate-400 text-base py-8">Waiting for audience words…</div>
+        <div class="text-center text-surface-400 text-base py-8">Waiting for audience words…</div>
       {:else}
-        {@const palette = ['text-purple-600 dark:text-purple-400', 'text-cyan-600 dark:text-cyan-400', 'text-emerald-600 dark:text-emerald-400', 'text-amber-600 dark:text-amber-400', 'text-rose-600 dark:text-rose-400']}
+        {@const palette = ['text-brand-600 dark:text-brand-400', 'text-cyan-600 dark:text-cyan-400', 'text-emerald-600 dark:text-emerald-400', 'text-amber-600 dark:text-amber-400', 'text-rose-600 dark:text-rose-400']}
         <div class="flex flex-wrap items-center justify-center gap-x-6 gap-y-4 max-h-[60vh] overflow-y-auto p-4 my-auto">
           {#each wordCloudData() as item, i}
-            <span class="font-heading font-extrabold transition-all duration-500 {palette[i % palette.length]}"
+            <span class="font-heading font-extrabold transition-[font-size,opacity] duration-500 {palette[i % palette.length]}"
               style={`font-size: ${item.size * 1.2}rem; opacity: ${0.6 + (item.count / (responses.length || 1)) * 0.4}`}>{item.word}</span>
           {/each}
         </div>
@@ -1214,7 +1224,7 @@
         <div class="text-6xl font-heading font-bold text-amber-500">{averageRating().toFixed(1)}</div>
         <div class="flex items-center justify-center gap-1 mt-2">
           {#each [1, 2, 3, 4, 5] as n}
-            <Star class="w-6 h-6 {n <= Math.round(averageRating()) ? 'text-amber-400 fill-amber-400' : 'text-slate-300 dark:text-slate-700'}" />
+            <Star class="w-6 h-6 {n <= Math.round(averageRating()) ? 'text-amber-400 fill-amber-400' : 'text-surface-300 dark:text-surface-700'}" />
           {/each}
         </div>
       </div>
@@ -1222,16 +1232,16 @@
     <!-- FEEDBACK SCREEN -->
     {:else}
       {#if responses.length === 0}
-        <div class="text-center text-slate-400 text-base py-8">No feedback responses yet…</div>
+        <div class="text-center text-surface-400 text-base py-8">No feedback responses yet…</div>
       {:else}
         <div class="max-h-[60vh] overflow-y-auto space-y-3 pr-1 my-auto">
           {#each responses as response (response.id)}
-            <div class="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl p-4">
-              <div class="flex items-center justify-between mb-1 text-xs text-slate-400">
+            <div class="bg-surface-50 dark:bg-surface-950 border border-surface-200 dark:border-surface-800 rounded-2xl p-4">
+              <div class="flex items-center justify-between mb-1 text-xs text-surface-400">
                 <span>{response.name || response.guest_identifier || 'Anonymous'}</span>
                 {#if response.rating}<span class="text-amber-400 font-bold">{'★'.repeat(response.rating)}{'☆'.repeat(5 - response.rating)}</span>{/if}
               </div>
-              <p class="text-slate-800 dark:text-slate-200 text-base">{response.value}</p>
+              <p class="text-surface-800 dark:text-surface-200 text-base">{response.value}</p>
             </div>
           {/each}
         </div>
@@ -1244,7 +1254,7 @@
   <div class="card p-4 sm:p-5 space-y-4">
     <div class="flex items-center justify-between">
       <div class="flex items-center gap-2">
-        <svelte:component this={typeIcon} class="w-5 h-5 text-purple-600 dark:text-purple-400" />
+        <svelte:component this={typeIcon} class="w-5 h-5 text-brand-600 dark:text-brand-400" />
         <span class="text-lg font-bold">{typeLabel}</span>
       </div>
       <div class="flex items-center gap-2">
@@ -1261,17 +1271,17 @@
       <!-- MODERATOR EDIT FORM -->
       <div class="space-y-3 pt-2 border-t border-surface-200 dark:border-surface-800">
         {#if isPoll || isMultipleChoice}
-          <label class="block text-xs font-semibold uppercase tracking-wider text-surface-500">Question</label>
-          <input class="input-field" type="text" bind:value={editQuestion} placeholder="Question..." />
+          <label for={fieldId('question')} class="block text-xs font-semibold uppercase tracking-wider text-surface-500">Question</label>
+          <input id={fieldId('question')} class="input-field" type="text" bind:value={editQuestion} placeholder="Question..." />
           
-          <label class="block text-xs font-semibold uppercase tracking-wider text-surface-500 pt-1">Options</label>
+          <span class="block text-xs font-semibold uppercase tracking-wider text-surface-500 pt-1">Options</span>
           <div class="space-y-2">
             {#each editOptions as option, index (index)}
               <div class="flex items-center gap-2">
                 <input class="input-field flex-1" type="text" value={option}
                   oninput={(e) => updateEditOption(index, (e.currentTarget as HTMLInputElement).value)}
-                  placeholder={`Option ${index + 1}`} />
-                <button onclick={() => removeEditOption(index)} class="btn-danger text-xs px-3 py-1.5">Remove</button>
+                  placeholder={`Option ${index + 1}`} aria-label={`Option ${index + 1}`} />
+                <button onclick={() => removeEditOption(index)} class="btn-danger text-xs px-3 py-1.5" aria-label={`Remove option ${index + 1}`}>Remove</button>
               </div>
             {/each}
           </div>
@@ -1281,10 +1291,10 @@
           </div>
 
         {:else if isQuiz}
-          <label class="block text-xs font-semibold uppercase tracking-wider text-surface-500">Quiz Question</label>
-          <input class="input-field" type="text" bind:value={editQuestion} placeholder="Quiz Question..." />
+          <label for={fieldId('quiz-question')} class="block text-xs font-semibold uppercase tracking-wider text-surface-500">Quiz Question</label>
+          <input id={fieldId('quiz-question')} class="input-field" type="text" bind:value={editQuestion} placeholder="Quiz Question..." />
 
-          <label class="block text-xs font-semibold uppercase tracking-wider text-surface-500 pt-1">Options (Select Correct Answer)</label>
+          <span class="block text-xs font-semibold uppercase tracking-wider text-surface-500 pt-1">Options (Select Correct Answer)</span>
           <div class="space-y-2">
             {#each editOptions as option, index (index)}
               <div class="flex items-center gap-2">
@@ -1292,16 +1302,17 @@
                   type="button"
                   onclick={() => (editCorrectIndex = index)}
                   aria-pressed={editCorrectIndex === index}
-                  class="h-8 px-2.5 rounded-lg border text-xs font-semibold flex items-center gap-1 transition {editCorrectIndex === index ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400 font-bold' : 'border-surface-200 text-surface-400 hover:border-surface-300'}"
+                  class="h-8 px-2.5 rounded-lg border text-xs font-semibold flex items-center gap-1 transition-colors {editCorrectIndex === index ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-400 font-bold' : 'border-surface-200 text-surface-600 hover:border-surface-300 hover:text-surface-900 dark:border-surface-700 dark:text-surface-400 dark:hover:border-surface-600 dark:hover:text-surface-100'}"
                   title="Mark as correct answer"
+                  aria-label={editCorrectIndex === index ? `Option ${index + 1} is the correct answer` : `Mark option ${index + 1} as correct`}
                 >
                   <Check class="w-3.5 h-3.5" />
                   {editCorrectIndex === index ? 'Correct' : 'Mark'}
                 </button>
                 <input class="input-field flex-1" type="text" value={option}
                   oninput={(e) => updateEditOption(index, (e.currentTarget as HTMLInputElement).value)}
-                  placeholder={`Option ${index + 1}`} />
-                <button onclick={() => removeEditOption(index)} class="btn-danger text-xs px-3 py-1.5">Remove</button>
+                  placeholder={`Option ${index + 1}`} aria-label={`Option ${index + 1}`} />
+                <button onclick={() => removeEditOption(index)} class="btn-danger text-xs px-3 py-1.5" aria-label={`Remove option ${index + 1}`}>Remove</button>
               </div>
             {/each}
           </div>
@@ -1311,37 +1322,37 @@
           </div>
 
         {:else if isScale}
-          <label class="block text-xs font-semibold uppercase tracking-wider text-surface-500">Prompt</label>
-          <input class="input-field" type="text" bind:value={editPrompt} placeholder="Prompt..." />
+          <label for={fieldId('scale-prompt')} class="block text-xs font-semibold uppercase tracking-wider text-surface-500">Prompt</label>
+          <input id={fieldId('scale-prompt')} class="input-field" type="text" bind:value={editPrompt} placeholder="Prompt..." />
           <div class="grid grid-cols-3 gap-3">
             <div>
-              <label class="block text-xs text-surface-500 mb-1">Min</label>
-              <input class="input-field" type="number" bind:value={editMin} />
+              <label for={fieldId('scale-min')} class="block text-xs text-surface-500 mb-1">Min</label>
+              <input id={fieldId('scale-min')} class="input-field" type="number" bind:value={editMin} />
             </div>
             <div>
-              <label class="block text-xs text-surface-500 mb-1">Max</label>
-              <input class="input-field" type="number" bind:value={editMax} />
+              <label for={fieldId('scale-max')} class="block text-xs text-surface-500 mb-1">Max</label>
+              <input id={fieldId('scale-max')} class="input-field" type="number" bind:value={editMax} />
             </div>
             <div>
-              <label class="block text-xs text-surface-500 mb-1">Step</label>
-              <input class="input-field" type="number" bind:value={editStep} min="1" />
+              <label for={fieldId('scale-step')} class="block text-xs text-surface-500 mb-1">Step</label>
+              <input id={fieldId('scale-step')} class="input-field" type="number" bind:value={editStep} min="1" />
             </div>
           </div>
           <div class="grid grid-cols-2 gap-3">
             <div>
-              <label class="block text-xs text-surface-500 mb-1">Min Label</label>
-              <input class="input-field" type="text" bind:value={editMinLabel} placeholder="e.g. 1 = Disagree" />
+              <label for={fieldId('scale-min-label')} class="block text-xs text-surface-500 mb-1">Min Label</label>
+              <input id={fieldId('scale-min-label')} class="input-field" type="text" bind:value={editMinLabel} placeholder="e.g. 1 = Disagree" />
             </div>
             <div>
-              <label class="block text-xs text-surface-500 mb-1">Max Label</label>
-              <input class="input-field" type="text" bind:value={editMaxLabel} placeholder="e.g. 10 = Agree" />
+              <label for={fieldId('scale-max-label')} class="block text-xs text-surface-500 mb-1">Max Label</label>
+              <input id={fieldId('scale-max-label')} class="input-field" type="text" bind:value={editMaxLabel} placeholder="e.g. 10 = Agree" />
             </div>
           </div>
           <button onclick={saveEdit} class="btn-primary text-xs mt-2">Save Scale</button>
 
         {:else if isSurvey}
-          <label class="block text-xs font-semibold uppercase tracking-wider text-surface-500">Survey Title / Prompt</label>
-          <input class="input-field" type="text" bind:value={editPrompt} placeholder="Survey title..." />
+          <label for={fieldId('survey-prompt')} class="block text-xs font-semibold uppercase tracking-wider text-surface-500">Survey Title / Prompt</label>
+          <input id={fieldId('survey-prompt')} class="input-field" type="text" bind:value={editPrompt} placeholder="Survey title..." />
           
           <div class="space-y-3 pt-2">
             <div class="flex items-center justify-between">
@@ -1353,13 +1364,13 @@
                 <!-- Header row: prompt + type selector + delete -->
                 <div class="flex items-start gap-2">
                   <span class="font-mono text-[10px] text-surface-400 pt-2 w-4 shrink-0">{qi + 1}.</span>
-                  <input class="input-field flex-1" type="text" bind:value={q.prompt} placeholder="Question prompt..." />
-                  <select bind:value={q.response_type} class="input-field text-xs w-36 shrink-0">
+                  <input class="input-field flex-1" type="text" bind:value={q.prompt} placeholder="Question prompt..." aria-label={`Question ${qi + 1} prompt`} />
+                  <select bind:value={q.response_type} class="input-field text-xs w-36 shrink-0" aria-label={`Question ${qi + 1} answer type`}>
                     <option value="single_choice">Single Choice</option>
                     <option value="scale">Scale</option>
                     <option value="text">Text</option>
                   </select>
-                  <button onclick={() => removeSurveyQuestion(qi)} class="btn-danger text-xs p-2 shrink-0"><Trash2 class="w-3.5 h-3.5" /></button>
+                  <button onclick={() => removeSurveyQuestion(qi)} class="btn-danger text-xs p-2 shrink-0" aria-label={`Remove question ${qi + 1}`} title="Remove question"><Trash2 class="w-3.5 h-3.5" /></button>
                 </div>
                 <!-- Type-specific config -->
                 {#if q.response_type === 'single_choice'}
@@ -1377,16 +1388,18 @@
                             q.options = opts;
                           }}
                           placeholder={`Option ${oi + 1}`}
+                          aria-label={`Question ${qi + 1}, option ${oi + 1}`}
                         />
                         <button
                           onclick={() => { q.options = (q.options || []).filter((_: string, i: number) => i !== oi); }}
-                          class="text-red-400 hover:text-red-600 text-xs p-1"
+                          class="rounded text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 text-xs p-1"
+                          aria-label={`Remove option ${oi + 1} from question ${qi + 1}`}
                         >✕</button>
                       </div>
                     {/each}
                     <button
                       onclick={() => { q.options = [...(q.options || []), `Option ${(q.options || []).length + 1}`]; }}
-                      class="text-xs text-purple-600 dark:text-purple-400 hover:underline font-semibold"
+                      class="text-xs text-brand-600 dark:text-brand-400 hover:underline font-semibold"
                     >+ Add option</button>
                   </div>
                 {:else if q.response_type === 'scale'}
@@ -1394,22 +1407,22 @@
                     <span class="text-[10px] uppercase tracking-wider text-surface-400 font-semibold">Scale Config</span>
                     <div class="grid grid-cols-3 gap-2">
                       <div>
-                        <label class="block text-[10px] text-surface-400 mb-0.5">Min</label>
-                        <input class="input-field text-xs" type="number"
+                        <label for={fieldId(`q${qi}-min`)} class="block text-[10px] text-surface-500 dark:text-surface-400 mb-0.5">Min</label>
+                        <input id={fieldId(`q${qi}-min`)} class="input-field text-xs" type="number"
                           value={typeof q.min === 'number' ? q.min : 1}
                           oninput={(e) => { q.min = parseInt((e.currentTarget as HTMLInputElement).value) || 1; }}
                         />
                       </div>
                       <div>
-                        <label class="block text-[10px] text-surface-400 mb-0.5">Max</label>
-                        <input class="input-field text-xs" type="number"
+                        <label for={fieldId(`q${qi}-max`)} class="block text-[10px] text-surface-500 dark:text-surface-400 mb-0.5">Max</label>
+                        <input id={fieldId(`q${qi}-max`)} class="input-field text-xs" type="number"
                           value={typeof q.max === 'number' ? q.max : 5}
                           oninput={(e) => { q.max = parseInt((e.currentTarget as HTMLInputElement).value) || 5; }}
                         />
                       </div>
                       <div>
-                        <label class="block text-[10px] text-surface-400 mb-0.5">Step</label>
-                        <input class="input-field text-xs" type="number" min="1"
+                        <label for={fieldId(`q${qi}-step`)} class="block text-[10px] text-surface-500 dark:text-surface-400 mb-0.5">Step</label>
+                        <input id={fieldId(`q${qi}-step`)} class="input-field text-xs" type="number" min="1"
                           value={typeof q.step === 'number' ? q.step : 1}
                           oninput={(e) => { q.step = parseInt((e.currentTarget as HTMLInputElement).value) || 1; }}
                         />
@@ -1417,12 +1430,12 @@
                     </div>
                     <div class="grid grid-cols-2 gap-2">
                       <div>
-                        <label class="block text-[10px] text-surface-400 mb-0.5">Min Label</label>
-                        <input class="input-field text-xs" type="text" bind:value={q.min_label} placeholder="e.g. Strongly Disagree" />
+                        <label for={fieldId(`q${qi}-min-label`)} class="block text-[10px] text-surface-500 dark:text-surface-400 mb-0.5">Min Label</label>
+                        <input id={fieldId(`q${qi}-min-label`)} class="input-field text-xs" type="text" bind:value={q.min_label} placeholder="e.g. Strongly Disagree" />
                       </div>
                       <div>
-                        <label class="block text-[10px] text-surface-400 mb-0.5">Max Label</label>
-                        <input class="input-field text-xs" type="text" bind:value={q.max_label} placeholder="e.g. Strongly Agree" />
+                        <label for={fieldId(`q${qi}-max-label`)} class="block text-[10px] text-surface-500 dark:text-surface-400 mb-0.5">Max Label</label>
+                        <input id={fieldId(`q${qi}-max-label`)} class="input-field text-xs" type="text" bind:value={q.max_label} placeholder="e.g. Strongly Agree" />
                       </div>
                     </div>
                   </div>
@@ -1437,7 +1450,7 @@
           <button onclick={saveEdit} class="btn-primary text-xs mt-2">Save Survey</button>
 
         {:else}
-          <input class="input-field" type="text" bind:value={editPrompt} placeholder="Prompt..." />
+          <input class="input-field" type="text" bind:value={editPrompt} placeholder="Prompt..." aria-label="Prompt" />
           <button onclick={saveEdit} class="btn-primary text-xs mt-2">Save prompt</button>
         {/if}
       </div>
@@ -1451,7 +1464,7 @@
           {#each pollResults() as row}
             <div class="flex flex-col items-center gap-2 flex-1">
               <div class="relative w-full h-28 bg-surface-100 dark:bg-surface-800 rounded-lg overflow-hidden">
-                <div class="absolute bottom-0 left-0 right-0 bg-brand-500 rounded-lg transition-all duration-500"
+                <div class="absolute bottom-0 left-0 right-0 bg-brand-500 rounded-lg transition-[height] duration-500"
                   style={`height: ${row.percent}%; min-height: ${row.percent > 0 ? '6px' : '0px'}`}></div>
               </div>
               <div class="text-xs text-surface-500 truncate max-w-[5rem]" title={row.label}>{row.label}</div>
@@ -1477,7 +1490,7 @@
           {#each pollResults() as row}
             <div class="flex flex-col items-center gap-2 flex-1">
               <div class="relative w-full h-28 bg-surface-100 dark:bg-surface-800 rounded-lg overflow-hidden">
-                <div class="absolute bottom-0 left-0 right-0 {row.isCorrect ? 'bg-emerald-500' : 'bg-brand-500'} rounded-lg transition-all duration-500"
+                <div class="absolute bottom-0 left-0 right-0 {row.isCorrect ? 'bg-emerald-500' : 'bg-brand-500'} rounded-lg transition-[height,background-color] duration-500"
                   style={`height: ${row.percent}%; min-height: ${row.percent > 0 ? '6px' : '0px'}`}></div>
               </div>
               <div class="text-xs text-surface-500 flex items-center gap-1 truncate max-w-[5rem]" title={row.label}>
@@ -1531,7 +1544,7 @@
       {:else}
         <div class="border border-surface-200 dark:border-surface-800 rounded-xl p-4 sm:p-5 flex flex-wrap items-center justify-center gap-3 min-h-[140px]">
           {#each wordCloudData() as item}
-            <span class="text-brand-600 font-semibold transition-all"
+            <span class="text-brand-600 dark:text-brand-400 font-semibold transition-[font-size,opacity]"
               style={`font-size: ${item.size}rem; opacity: ${0.5 + (item.count / (responses.length || 1)) * 0.5}`}>{item.word}</span>
           {/each}
         </div>

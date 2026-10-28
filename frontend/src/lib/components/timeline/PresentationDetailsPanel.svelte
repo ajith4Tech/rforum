@@ -61,6 +61,7 @@
 
   async function handleConfirmDetach() {
     detaching = true;
+    error = '';
     try {
       await onDetach();
       confirmingDetach = false;
@@ -135,10 +136,10 @@
       <div class="h-20 rounded bg-surface-200 dark:bg-surface-800"></div>
     </div>
   {:else if error && !details}
-    <div class="text-center py-8 text-danger text-sm">{error}</div>
+    <div class="text-center py-8 text-red-600 dark:text-red-400 text-sm" role="alert">{error}</div>
   {:else if details}
-    {#if error}
-      <div class="mb-4 px-3 py-2 rounded-lg bg-danger/10 border border-danger/20 text-danger text-xs">{error}</div>
+    {#if error && !confirmingDetach}
+      <div class="mb-4 px-3 py-2 rounded-lg bg-danger/10 border border-danger/20 text-red-700 dark:text-red-300 text-xs" role="alert">{error}</div>
     {/if}
 
     <div class="grid grid-cols-2 gap-x-4 gap-y-3 mb-5 text-sm">
@@ -164,13 +165,13 @@
       </div>
       <div>
         <p class="text-xs text-surface-500 flex items-center gap-1"><HardDrive class="w-3 h-3" /> Storage status</p>
-        <span class="inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-full {details.storage_status === 'active' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-surface-200 dark:bg-surface-800 text-surface-500'}">
+        <span class="inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-full {details.storage_status === 'active' ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400' : 'bg-surface-200 dark:bg-surface-800 text-surface-600 dark:text-surface-400'}">
           {details.storage_status === 'active' ? 'Active' : 'Detached'}
         </span>
       </div>
       <div>
         <p class="text-xs text-surface-500">Conversion status</p>
-        <span class="inline-flex items-center gap-1 text-xs font-medium {details.status === 'FAILED' ? 'text-danger' : details.conversion_warnings?.length ? 'text-warning' : 'text-emerald-500'}">
+        <span class="inline-flex items-center gap-1 text-xs font-medium {details.status === 'FAILED' ? 'text-red-600 dark:text-red-400' : details.conversion_warnings?.length ? 'text-amber-700 dark:text-amber-400' : 'text-emerald-700 dark:text-emerald-400'}">
           {#if details.status === 'FAILED'}
             <AlertTriangle class="w-3 h-3" />
           {:else}
@@ -194,7 +195,7 @@
           {#each details.attached_sessions as s (s.id)}
             <li class="text-xs text-surface-500 flex items-center gap-1.5">
               <span class="w-1.5 h-1.5 rounded-full bg-brand-500 flex-shrink-0"></span>
-              {s.title} <span class="font-mono text-surface-600">({s.unique_code})</span>
+              {s.title} <span class="font-mono text-surface-600 dark:text-surface-400">({s.unique_code})</span>
             </li>
           {/each}
         </ul>
@@ -208,7 +209,8 @@
       <button
         onclick={handleDownload}
         disabled={downloading}
-        class="btn-secondary text-xs flex items-center justify-center gap-1.5 py-2 disabled:opacity-50"
+        aria-busy={downloading}
+        class="btn-secondary text-xs flex items-center justify-center gap-1.5 py-2"
       >
         {#if downloading}
           <RefreshCw class="w-3.5 h-3.5 animate-spin" />
@@ -227,7 +229,7 @@
         onclick={() => (confirmingDelete = true)}
         disabled={details.storage_status === 'active'}
         title={details.storage_status === 'active' ? 'This presentation is still attached to a session — detach it first' : 'Delete permanently'}
-        class="text-xs flex items-center justify-center gap-1.5 py-2 rounded-xl font-medium border border-danger/20 bg-danger/10 text-danger transition disabled:opacity-40"
+        class="btn-danger text-xs flex items-center justify-center gap-1.5 py-2"
       >
         <Trash2 class="w-3.5 h-3.5" /> Delete
       </button>
@@ -249,6 +251,7 @@
     Detaching does not delete any assets and does not affect existing analytics or responses. You can reattach this
     presentation to any session later via "Choose Existing Presentation."
   </p>
+  {#if error}<p class="mt-3 text-sm text-red-600 dark:text-red-400" role="alert">{error}</p>{/if}
 </ConfirmDialog>
 
 <ConfirmDialog

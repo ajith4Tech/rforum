@@ -322,6 +322,24 @@
     void saveActiveSlideContent();
   }
 
+  // Toolbar menus close on Escape (returning focus to their trigger) or on a
+  // click anywhere outside them.
+  function handleMenuKeydown(e: KeyboardEvent) {
+    if (e.key !== 'Escape' || (!showAddMenu && !showLayoutMenu)) return;
+    const trigger = showAddMenu ? addMenuTrigger : layoutMenuTrigger;
+    showAddMenu = false;
+    showLayoutMenu = false;
+    trigger?.focus();
+  }
+  function handleMenuOutsideClick(e: MouseEvent) {
+    if (!showAddMenu && !showLayoutMenu) return;
+    if ((e.target as HTMLElement | null)?.closest('[data-deck-menu]')) return;
+    showAddMenu = false;
+    showLayoutMenu = false;
+  }
+  let addMenuTrigger: HTMLButtonElement | null = $state(null);
+  let layoutMenuTrigger: HTMLButtonElement | null = $state(null);
+
   const isDirty = $derived.by(() => {
     if (!activeSlide) return false;
     if (savePending) return true;
@@ -349,42 +367,47 @@
   });
 </script>
 
-<div class="deck-editor flex flex-col h-full w-full bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-slate-100 rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-800 shadow-2xl transition-colors">
+<svelte:window onclick={handleMenuOutsideClick} onkeydown={handleMenuKeydown} />
+
+<div class="deck-editor flex flex-col h-full w-full bg-surface-100 dark:bg-surface-950 text-surface-900 dark:text-surface-100 rounded-2xl overflow-hidden border border-surface-200 dark:border-surface-800 shadow-2xl transition-colors">
 
   <!-- TOP COMPACT TOOLBAR -->
-  <header class="deck-toolbar flex items-center justify-between px-3.5 py-2 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 gap-2 select-none flex-wrap">
+  <header class="deck-toolbar flex items-center justify-between px-3.5 py-2 bg-white dark:bg-surface-900 border-b border-surface-200 dark:border-surface-800 gap-2 select-none flex-wrap">
     
     <!-- Left Group: Undo/Redo & Add Slide -->
     <div class="flex items-center gap-1.5">
-      <button onclick={onUndo} disabled={!canUndo} class="deck-btn" title="Undo (Ctrl+Z)"><Undo2 class="w-4 h-4" /></button>
-      <button onclick={onRedo} disabled={!canRedo} class="deck-btn" title="Redo (Ctrl+Y)"><Redo2 class="w-4 h-4" /></button>
+      <button onclick={onUndo} disabled={!canUndo} class="deck-btn" title="Undo (Ctrl+Z)" aria-label="Undo"><Undo2 class="w-4 h-4" /></button>
+      <button onclick={onRedo} disabled={!canRedo} class="deck-btn" title="Redo (Ctrl+Y)" aria-label="Redo"><Redo2 class="w-4 h-4" /></button>
       
-      <div class="h-4 w-px bg-slate-200 dark:bg-slate-800 mx-1"></div>
+      <div class="h-4 w-px bg-surface-200 dark:bg-surface-800 mx-1"></div>
 
       <!-- Add Slide Menu Trigger -->
-      <div class="relative">
+      <div class="relative" data-deck-menu>
         <button
-          onclick={() => showAddMenu = !showAddMenu}
-          class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold shadow-md transition active:scale-95"
+          bind:this={addMenuTrigger}
+          onclick={() => { showAddMenu = !showAddMenu; showLayoutMenu = false; }}
+          aria-haspopup="true"
+          aria-expanded={showAddMenu}
+          class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-brand-600 hover:bg-brand-700 text-white text-xs font-semibold shadow-md transition active:scale-95"
         >
           <Plus class="w-4 h-4" />
           <span>New Slide</span>
         </button>
 
         {#if showAddMenu}
-          <div class="absolute left-0 top-full mt-1.5 z-50 w-56 p-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-2xl space-y-1">
-            <div class="text-[10px] font-bold uppercase tracking-wider text-slate-400 px-2 py-1">Content Layouts</div>
-            <button onclick={() => { onCreateSlide('CONTENT', 'title_content'); showAddMenu = false; }} class="deck-menu-item"><FileText class="w-3.5 h-3.5 text-purple-500" /> Content</button>
-            <button onclick={() => { onCreateSlide('CONTENT', 'image'); showAddMenu = false; }} class="deck-menu-item"><ImageIcon class="w-3.5 h-3.5 text-purple-500" /> Image</button>
-            <button onclick={() => { onCreateSlide('CONTENT', 'image_text'); showAddMenu = false; }} class="deck-menu-item"><Columns class="w-3.5 h-3.5 text-purple-500" /> Image + Text</button>
-            <button onclick={() => { onCreateSlide('CONTENT', 'two_column'); showAddMenu = false; }} class="deck-menu-item"><Columns class="w-3.5 h-3.5 text-purple-500" /> Two Column</button>
-            <button onclick={() => { onCreateSlide('CONTENT', 'video'); showAddMenu = false; }} class="deck-menu-item"><Video class="w-3.5 h-3.5 text-purple-500" /> Video</button>
+          <div class="absolute left-0 top-full mt-1.5 z-50 w-56 p-2 rounded-xl bg-white dark:bg-surface-900 border border-surface-200 dark:border-surface-700 shadow-2xl space-y-1">
+            <div class="text-[10px] font-bold uppercase tracking-wider text-surface-500 px-2 py-1">Content Layouts</div>
+            <button onclick={() => { onCreateSlide('CONTENT', 'title_content'); showAddMenu = false; }} class="deck-menu-item"><FileText class="w-3.5 h-3.5 text-brand-500" /> Content</button>
+            <button onclick={() => { onCreateSlide('CONTENT', 'image'); showAddMenu = false; }} class="deck-menu-item"><ImageIcon class="w-3.5 h-3.5 text-brand-500" /> Image</button>
+            <button onclick={() => { onCreateSlide('CONTENT', 'image_text'); showAddMenu = false; }} class="deck-menu-item"><Columns class="w-3.5 h-3.5 text-brand-500" /> Image + Text</button>
+            <button onclick={() => { onCreateSlide('CONTENT', 'two_column'); showAddMenu = false; }} class="deck-menu-item"><Columns class="w-3.5 h-3.5 text-brand-500" /> Two Column</button>
+            <button onclick={() => { onCreateSlide('CONTENT', 'video'); showAddMenu = false; }} class="deck-menu-item"><Video class="w-3.5 h-3.5 text-brand-500" /> Video</button>
             
-            <div class="h-px bg-slate-200 dark:bg-slate-800 my-1"></div>
-            <div class="text-[10px] font-bold uppercase tracking-wider text-slate-400 px-2 py-1">Interactions</div>
+            <div class="h-px bg-surface-200 dark:bg-surface-800 my-1"></div>
+            <div class="text-[10px] font-bold uppercase tracking-wider text-surface-500 px-2 py-1">Interactions</div>
             <button onclick={() => { onCreateSlide('POLL'); showAddMenu = false; }} class="deck-menu-item"><BarChart3 class="w-3.5 h-3.5 text-emerald-500" /> Poll</button>
             <button onclick={() => { onCreateSlide('MULTIPLE_CHOICE'); showAddMenu = false; }} class="deck-menu-item"><ListChecks class="w-3.5 h-3.5 text-indigo-500" /> Multiple Choice</button>
-            <button onclick={() => { onCreateSlide('QUIZ'); showAddMenu = false; }} class="deck-menu-item"><HelpCircle class="w-3.5 h-3.5 text-violet-500" /> Quiz</button>
+            <button onclick={() => { onCreateSlide('QUIZ'); showAddMenu = false; }} class="deck-menu-item"><HelpCircle class="w-3.5 h-3.5 text-brand-500" /> Quiz</button>
             <button onclick={() => { onCreateSlide('QNA'); showAddMenu = false; }} class="deck-menu-item"><MessageSquare class="w-3.5 h-3.5 text-cyan-500" /> Q&A</button>
             <button onclick={() => { onCreateSlide('RATING'); showAddMenu = false; }} class="deck-menu-item"><Star class="w-3.5 h-3.5 text-amber-500" /> Rating</button>
             <button onclick={() => { onCreateSlide('SCALE'); showAddMenu = false; }} class="deck-menu-item"><Sliders class="w-3.5 h-3.5 text-teal-500" /> Scale</button>
@@ -397,17 +420,20 @@
 
       <!-- Layout Selector -->
       {#if activeType === 'CONTENT'}
-        <div class="relative">
+        <div class="relative" data-deck-menu>
           <button
-            onclick={() => showLayoutMenu = !showLayoutMenu}
-            class="deck-btn text-xs gap-1.5 px-2.5 font-medium border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700/80"
+            bind:this={layoutMenuTrigger}
+            onclick={() => { showLayoutMenu = !showLayoutMenu; showAddMenu = false; }}
+            aria-haspopup="true"
+            aria-expanded={showLayoutMenu}
+            class="deck-btn text-xs gap-1.5 px-2.5 font-medium border border-surface-200 dark:border-surface-700 bg-surface-100 dark:bg-surface-800 hover:bg-surface-200 dark:hover:bg-surface-700/80"
             title="Change Slide Layout"
           >
-            <Layout class="w-3.5 h-3.5 text-slate-600 dark:text-slate-300" />
+            <Layout class="w-3.5 h-3.5 text-surface-600 dark:text-surface-300" />
             <span class="capitalize hidden sm:inline">{activeLayout.replace('_', ' ')}</span>
           </button>
           {#if showLayoutMenu}
-            <div class="absolute left-0 top-full mt-1.5 z-50 w-44 p-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-2xl">
+            <div class="absolute left-0 top-full mt-1.5 z-50 w-44 p-1.5 rounded-xl bg-white dark:bg-surface-900 border border-surface-200 dark:border-surface-700 shadow-2xl">
               <button onclick={() => changeLayout('title')} class="deck-menu-item">Title Slide</button>
               <button onclick={() => changeLayout('title_content')} class="deck-menu-item">Content</button>
               <button onclick={() => changeLayout('two_column')} class="deck-menu-item">Two Columns</button>
@@ -423,11 +449,11 @@
 
     <!-- Center Group: Rich Text Formatting Tools -->
     {#if activeType === 'CONTENT' && activeLayout !== 'video'}
-      <div class="flex items-center gap-1 bg-slate-100 dark:bg-slate-950/70 p-1 rounded-lg border border-slate-200 dark:border-slate-800 overflow-x-auto">
+      <div class="flex items-center gap-1 bg-surface-100 dark:bg-surface-950/70 p-1 rounded-lg border border-surface-200 dark:border-surface-800 overflow-x-auto">
         <button onclick={() => toggleBlock('h1')} class="deck-btn text-xs font-bold" title="Heading 1">H1</button>
         <button onclick={() => toggleBlock('h2')} class="deck-btn text-xs font-bold" title="Heading 2">H2</button>
         <button onclick={() => toggleBlock('p')} class="deck-btn text-xs font-semibold" title="Paragraph">¶</button>
-        <div class="h-3.5 w-px bg-slate-200 dark:bg-slate-800"></div>
+        <div class="h-3.5 w-px bg-surface-200 dark:bg-surface-800"></div>
         <button onclick={() => exec('bold')} class="deck-btn" title="Bold (Ctrl+B)"><Bold class="w-3.5 h-3.5" /></button>
         <button onclick={() => exec('italic')} class="deck-btn" title="Italic (Ctrl+I)"><Italic class="w-3.5 h-3.5" /></button>
         <button onclick={() => exec('underline')} class="deck-btn" title="Underline (Ctrl+U)"><Underline class="w-3.5 h-3.5" /></button>
@@ -437,14 +463,15 @@
 
     <!-- Right Group: Save State & Toggle Properties -->
     <div class="flex items-center gap-2">
-      <span class="text-xs text-slate-400 font-medium">
+      <span class="text-xs text-surface-500 dark:text-surface-400 font-medium" role="status">
         {#if saveState === 'saving'}Saving…
         {:else if saveState === 'saved'}Saved ✓
         {/if}
       </span>
       <button
         onclick={() => showProperties = !showProperties}
-        class="deck-btn text-xs gap-1.5 border border-slate-200 dark:border-slate-700 {showProperties ? 'bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-300' : ''}"
+        aria-pressed={showProperties}
+        class="deck-btn text-xs gap-1.5 border border-surface-200 dark:border-surface-700 {showProperties ? 'bg-brand-50 dark:bg-brand-900/30 text-brand-600 dark:text-brand-300' : ''}"
         title="Toggle Properties Panel"
       >
         <SlidersHorizontal class="w-3.5 h-3.5" />
@@ -457,8 +484,8 @@
   <div class="flex-1 flex min-h-0 overflow-hidden relative">
 
     <!-- LEFT SLIDE FILMSTRIP -->
-    <aside class="w-56 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 flex flex-col flex-shrink-0 select-none transition-colors">
-      <div class="p-3 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs font-semibold text-slate-500">
+    <aside class="w-56 bg-white dark:bg-surface-900 border-r border-surface-200 dark:border-surface-800 flex flex-col flex-shrink-0 select-none transition-colors">
+      <div class="p-3 border-b border-surface-200 dark:border-surface-800 flex items-center justify-between text-xs font-semibold text-surface-500 dark:text-surface-400">
         <span>SLIDES ({slides.length})</span>
       </div>
 
@@ -472,13 +499,17 @@
             onclick={() => onSelectSlide(s.id)}
             role="button"
             tabindex="0"
-            onkeydown={(e) => { if (e.key === 'Enter') onSelectSlide(s.id); }}
-            class="group relative flex items-start gap-2 p-2 rounded-xl border transition-all cursor-pointer {s.id === activeSlideId ? 'border-purple-500 bg-purple-50/70 dark:bg-purple-950/40 ring-2 ring-purple-500/20' : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 bg-slate-50/50 dark:bg-slate-950/30'}"
+            onkeydown={(e) => {
+              if (e.target !== e.currentTarget) return;
+              if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelectSlide(s.id); }
+            }}
+            aria-current={s.id === activeSlideId ? 'true' : undefined}
+            class="group relative flex items-start gap-2 p-2 rounded-xl border transition cursor-pointer {s.id === activeSlideId ? 'border-brand-500 bg-brand-50/70 dark:bg-brand-900/40 ring-2 ring-brand-500/20' : 'border-surface-200 dark:border-surface-800 hover:border-surface-300 dark:hover:border-surface-700 bg-surface-50/50 dark:bg-surface-950/30'}"
           >
-            <span class="font-mono text-[10px] text-slate-400 font-bold mt-0.5 w-3 text-right">{idx + 1}</span>
+            <span class="font-mono text-[10px] text-surface-400 font-bold mt-0.5 w-3 text-right">{idx + 1}</span>
             <div class="flex-1 min-w-0">
-              <div class="flex items-center gap-1 text-xs font-semibold truncate text-slate-800 dark:text-slate-200">
-                {#if s.type === 'POLL' && s.content_json?.mode === 'quiz'}<HelpCircle class="w-3.5 h-3.5 text-violet-500 shrink-0" />
+              <div class="flex items-center gap-1 text-xs font-semibold truncate text-surface-800 dark:text-surface-200">
+                {#if s.type === 'POLL' && s.content_json?.mode === 'quiz'}<HelpCircle class="w-3.5 h-3.5 text-brand-500 shrink-0" />
                 {:else if s.type === 'POLL' && s.content_json?.mode === 'multiple_choice'}<ListChecks class="w-3.5 h-3.5 text-indigo-500 shrink-0" />
                 {:else if s.type === 'POLL'}<BarChart3 class="w-3.5 h-3.5 text-emerald-500 shrink-0" />
                 {:else if s.type === 'FEEDBACK' && s.content_json?.mode === 'scale'}<Sliders class="w-3.5 h-3.5 text-teal-500 shrink-0" />
@@ -487,15 +518,15 @@
                 {:else if s.type === 'FEEDBACK'}<FeedbackIcon class="w-3.5 h-3.5 text-rose-500 shrink-0" />
                 {:else if s.type === 'QNA'}<MessageSquare class="w-3.5 h-3.5 text-cyan-500 shrink-0" />
                 {:else if s.type === 'WORD_CLOUD'}<Cloud class="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-                {:else if s.content_json?.layout === 'video'}<Video class="w-3.5 h-3.5 text-purple-500 shrink-0" />
-                {:else}<FileText class="w-3.5 h-3.5 text-purple-500 shrink-0" />
+                {:else if s.content_json?.layout === 'video'}<Video class="w-3.5 h-3.5 text-brand-500 shrink-0" />
+                {:else}<FileText class="w-3.5 h-3.5 text-brand-500 shrink-0" />
                 {/if}
                 <span class="truncate">{s.content_json?.title || s.content_json?.question || s.content_json?.prompt || s.type}</span>
               </div>
             </div>
-            <div class="opacity-0 group-hover:opacity-100 flex items-center gap-1">
-              <button onclick={(e) => { e.stopPropagation(); onDuplicateSlide?.(s.id); }} class="text-slate-400 hover:text-purple-500 p-0.5"><Copy class="w-3 h-3" /></button>
-              <button onclick={(e) => { e.stopPropagation(); onDeleteSlide(s.id); }} class="text-slate-400 hover:text-red-500 p-0.5"><Trash2 class="w-3 h-3" /></button>
+            <div class="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity flex items-center gap-1">
+              <button onclick={(e) => { e.stopPropagation(); onDuplicateSlide?.(s.id); }} class="rounded text-surface-400 hover:text-brand-600 dark:hover:text-brand-400 p-0.5" title="Duplicate slide" aria-label="Duplicate slide {idx + 1}"><Copy class="w-3 h-3" /></button>
+              <button onclick={(e) => { e.stopPropagation(); onDeleteSlide(s.id); }} class="rounded text-surface-400 hover:text-red-600 dark:hover:text-red-400 p-0.5" title="Delete slide" aria-label="Delete slide {idx + 1}"><Trash2 class="w-3 h-3" /></button>
             </div>
           </div>
         {/each}
@@ -503,12 +534,12 @@
     </aside>
 
     <!-- CENTER SLIDE CANVAS -->
-    <main class="flex-1 flex items-center justify-center p-4 sm:p-6 overflow-hidden bg-slate-100 dark:bg-slate-950/80">
+    <main class="flex-1 flex items-center justify-center p-4 sm:p-6 overflow-hidden bg-surface-100 dark:bg-surface-950/80">
       
       {#if activeSlide}
         <!-- 16:9 Aspect Ratio Container -->
         <div
-          class="w-full max-w-5xl rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl p-6 sm:p-8 flex flex-col relative overflow-hidden transition-all"
+          class="w-full max-w-5xl rounded-2xl bg-white dark:bg-surface-900 border border-surface-200 dark:border-surface-800 shadow-2xl p-6 sm:p-8 flex flex-col relative overflow-hidden transition-colors"
           style="aspect-ratio: 16/9; max-height: calc(100vh - 180px);"
         >
 
@@ -520,27 +551,29 @@
                 bind:value={localTitle}
                 oninput={() => debouncedSave()}
                 placeholder="Video Title"
-                class="w-full font-bold bg-transparent outline-none border-b border-transparent hover:border-purple-400 focus:border-purple-500 transition px-2 py-1 text-xl"
+                aria-label="Video title"
+                class="w-full font-bold bg-transparent outline-none border-b border-transparent hover:border-brand-400 focus:border-brand-500 transition px-2 py-1 text-xl"
                 style={getFitTitleStyle(localTitle, 'title')}
               />
               <div class="flex items-center gap-2">
-                <Video class="w-4 h-4 text-purple-500 shrink-0" />
+                <Video class="w-4 h-4 text-brand-500 shrink-0" />
                 <input
                   type="text"
                   bind:value={localVideoUrl}
                   oninput={() => debouncedSave()}
                   placeholder="Paste YouTube, Vimeo, or direct MP4/WebM video URL..."
-                  class="flex-1 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-xs text-slate-800 dark:text-slate-200 outline-none focus:ring-2 focus:ring-purple-500"
+                  aria-label="Video URL"
+                  class="flex-1 px-3 py-1.5 rounded-lg border border-surface-200 dark:border-surface-800 bg-surface-50 dark:bg-surface-950 text-xs text-surface-800 dark:text-surface-200 outline-none focus:ring-2 focus:ring-brand-500"
                 />
               </div>
-              <div class="flex-1 min-h-0 rounded-xl bg-black/90 flex items-center justify-center overflow-hidden border border-slate-800">
+              <div class="flex-1 min-h-0 rounded-xl bg-black/90 flex items-center justify-center overflow-hidden border border-surface-800">
                 {#if localVideoUrl}
-                  <div class="text-center text-slate-400 text-xs flex flex-col items-center gap-2">
-                    <Tv class="w-8 h-8 text-purple-400" />
+                  <div class="text-center text-surface-300 text-xs flex flex-col items-center gap-2">
+                    <Tv class="w-8 h-8 text-brand-400" />
                     <span>Video configured ({localVideoUrl.slice(0, 45)}...)</span>
                   </div>
                 {:else}
-                  <div class="text-center text-slate-500 text-xs">Enter a video URL above to preview playback</div>
+                  <div class="text-center text-white/60 text-xs">Enter a video URL above to preview playback</div>
                 {/if}
               </div>
             </div>
@@ -553,7 +586,8 @@
                 bind:value={localTitle}
                 oninput={() => debouncedSave()}
                 placeholder="Slide Title"
-                class="w-full font-bold bg-transparent outline-none border-b border-transparent hover:border-purple-400 focus:border-purple-500 transition px-2 py-1"
+                aria-label="Slide title"
+                class="w-full font-bold bg-transparent outline-none border-b border-transparent hover:border-brand-400 focus:border-brand-500 transition px-2 py-1"
                 style={getFitTitleStyle(localTitle, 'title')}
               />
               <div class="flex-1 grid grid-cols-2 gap-4 min-h-0 overflow-hidden">
@@ -564,7 +598,8 @@
                   contenteditable="true"
                   role="textbox"
                   aria-multiline="true"
-                  class="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/40 outline-none focus:ring-2 focus:ring-purple-500 overflow-y-auto text-base leading-relaxed prose dark:prose-invert max-w-none"
+                  aria-label="Left column"
+                  class="p-4 rounded-xl border border-surface-200 dark:border-surface-800 bg-surface-50 dark:bg-surface-950/40 outline-none focus:ring-2 focus:ring-brand-500 overflow-y-auto text-base leading-relaxed prose dark:prose-invert max-w-none"
                 ></div>
                 <div
                   bind:this={body2EditorEl}
@@ -573,7 +608,8 @@
                   contenteditable="true"
                   role="textbox"
                   aria-multiline="true"
-                  class="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/40 outline-none focus:ring-2 focus:ring-purple-500 overflow-y-auto text-base leading-relaxed prose dark:prose-invert max-w-none"
+                  aria-label="Right column"
+                  class="p-4 rounded-xl border border-surface-200 dark:border-surface-800 bg-surface-50 dark:bg-surface-950/40 outline-none focus:ring-2 focus:ring-brand-500 overflow-y-auto text-base leading-relaxed prose dark:prose-invert max-w-none"
                 ></div>
               </div>
             </div>
@@ -581,7 +617,7 @@
           <!-- CONTENT SLIDE: IMAGE & TEXT LAYOUT -->
           {:else if activeType === 'CONTENT' && activeLayout === 'image_text'}
             <div class="flex-1 grid grid-cols-12 gap-6 items-center h-full overflow-hidden">
-              <div class="col-span-5 h-full rounded-xl bg-slate-50 dark:bg-slate-950/40 border border-slate-200 dark:border-slate-800 flex flex-col items-center justify-center overflow-hidden p-2">
+              <div class="col-span-5 h-full rounded-xl bg-surface-50 dark:bg-surface-950/40 border border-surface-200 dark:border-surface-800 flex flex-col items-center justify-center overflow-hidden p-2">
                 {#if activeSlide.content_json?.file_url || activeSlide.content_json?.has_file}
                   <ZoomableImageViewer
                     src={getPageImageUrl(sessionId, activeSlide.id, activeSlide.content_json?.file_page || 1)}
@@ -590,10 +626,10 @@
                     imgClass="max-h-full rounded-lg object-contain"
                   />
                 {:else}
-                  <ImageIcon class="w-10 h-10 text-slate-400 dark:text-slate-600 mb-2" />
-                  <label class="cursor-pointer text-xs text-purple-600 dark:text-purple-400 hover:underline font-semibold">
+                  <ImageIcon class="w-10 h-10 text-surface-400 dark:text-surface-600 mb-2" />
+                  <label class="cursor-pointer text-xs text-brand-600 dark:text-brand-400 hover:underline font-semibold rounded focus-within:ring-2 focus-within:ring-brand-500">
                     Upload slide image
-                    <input type="file" accept=".pdf,.ppt,.pptx,.png,.jpg,.jpeg,.webp" class="hidden" onchange={handleFileUploadChange} />
+                    <input type="file" accept=".pdf,.ppt,.pptx,.png,.jpg,.jpeg,.webp" class="sr-only" onchange={handleFileUploadChange} />
                   </label>
                 {/if}
               </div>
@@ -603,7 +639,8 @@
                   bind:value={localTitle}
                   oninput={() => debouncedSave()}
                   placeholder="Slide Title"
-                  class="w-full font-bold bg-transparent outline-none border-b border-transparent hover:border-purple-400 focus:border-purple-500 transition px-1 py-1"
+                  aria-label="Slide title"
+                  class="w-full font-bold bg-transparent outline-none border-b border-transparent hover:border-brand-400 focus:border-brand-500 transition px-1 py-1"
                   style={getFitTitleStyle(localTitle, 'title')}
                 />
                 <div
@@ -613,7 +650,8 @@
                   contenteditable="true"
                   role="textbox"
                   aria-multiline="true"
-                  class="flex-1 p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/40 outline-none focus:ring-2 focus:ring-purple-500 overflow-y-auto text-base leading-relaxed prose dark:prose-invert max-w-none"
+                  aria-label="Slide body"
+                  class="flex-1 p-4 rounded-xl border border-surface-200 dark:border-surface-800 bg-surface-50 dark:bg-surface-950/40 outline-none focus:ring-2 focus:ring-brand-500 overflow-y-auto text-base leading-relaxed prose dark:prose-invert max-w-none"
                 ></div>
               </div>
             </div>
@@ -626,7 +664,8 @@
                 bind:value={localTitle}
                 oninput={() => debouncedSave()}
                 placeholder="Click to add slide title"
-                class="w-full font-bold bg-transparent outline-none border-b border-transparent hover:border-purple-400/50 focus:border-purple-500 transition px-2 py-1 placeholder-slate-400 dark:placeholder-slate-600"
+                aria-label="Slide title"
+                class="w-full font-bold bg-transparent outline-none border-b border-transparent hover:border-brand-400/50 focus:border-brand-500 transition px-2 py-1 placeholder-surface-400 dark:placeholder-surface-600"
                 style={getFitTitleStyle(localTitle, 'title')}
               />
               <div
@@ -636,14 +675,15 @@
                 contenteditable="true"
                 role="textbox"
                 aria-multiline="true"
-                class="flex-1 p-5 rounded-xl border border-slate-200 dark:border-slate-800/80 bg-slate-50 dark:bg-slate-950/30 outline-none focus:ring-2 focus:ring-purple-500 overflow-y-auto text-lg leading-relaxed prose dark:prose-invert max-w-none"
+                aria-label="Slide body"
+                class="flex-1 p-5 rounded-xl border border-surface-200 dark:border-surface-800/80 bg-surface-50 dark:bg-surface-950/30 outline-none focus:ring-2 focus:ring-brand-500 overflow-y-auto text-lg leading-relaxed prose dark:prose-invert max-w-none"
               ></div>
             </div>
 
           <!-- INTERACTIVE: QUIZ -->
           {:else if isQuiz}
             <div class="flex-1 flex flex-col items-center justify-center text-center max-w-3xl mx-auto space-y-4 w-full h-full overflow-hidden">
-              <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-widest bg-violet-500/10 text-violet-600 dark:text-violet-400 border border-violet-500/20">
+              <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-widest bg-brand-500/10 text-brand-600 dark:text-brand-400 border border-brand-500/20">
                 <HelpCircle class="w-4 h-4" /> Quiz Slide
               </div>
               <textarea
@@ -651,16 +691,18 @@
                 bind:value={localQuestion}
                 oninput={() => debouncedSave()}
                 placeholder="Type your quiz question here…"
-                class="w-full font-bold bg-transparent text-center outline-none border-b border-transparent hover:border-purple-400 focus:border-purple-500 transition py-1 resize-none text-lg"
+                aria-label="Quiz question"
+                class="w-full font-bold bg-transparent text-center outline-none border-b border-transparent hover:border-brand-400 focus:border-brand-500 transition py-1 resize-none text-lg"
               ></textarea>
               <div class="w-full space-y-2 text-left max-h-[50%] overflow-y-auto pr-1">
                 {#each localOptions as opt, i}
-                  <div class="flex items-center gap-2 bg-slate-50 dark:bg-slate-950/50 p-2.5 rounded-xl border {localCorrectIndex === i ? 'border-emerald-500 ring-1 ring-emerald-500/30 bg-emerald-50/20 dark:bg-emerald-950/20' : 'border-slate-200 dark:border-slate-800'}">
+                  <div class="flex items-center gap-2 bg-surface-50 dark:bg-surface-950/50 p-2.5 rounded-xl border {localCorrectIndex === i ? 'border-emerald-500 ring-1 ring-emerald-500/30 bg-emerald-50/20 dark:bg-emerald-950/20' : 'border-surface-200 dark:border-surface-800'}">
                     <button
                       type="button"
                       onclick={() => { localCorrectIndex = i; debouncedSave(); }}
                       aria-pressed={localCorrectIndex === i}
-                      class="h-7 px-2 rounded-lg border text-xs font-semibold flex items-center gap-1 transition {localCorrectIndex === i ? 'bg-emerald-500 text-white border-emerald-500' : 'border-slate-300 text-slate-500 hover:border-slate-400'}"
+                      aria-label={localCorrectIndex === i ? `Option ${i + 1} is the correct answer` : `Mark option ${i + 1} as correct`}
+                      class="h-7 px-2 rounded-lg border text-xs font-semibold flex items-center gap-1 transition {localCorrectIndex === i ? 'bg-emerald-600 text-white border-emerald-600' : 'border-surface-300 text-surface-600 hover:border-surface-400 hover:text-surface-900 dark:border-surface-700 dark:text-surface-400 dark:hover:border-surface-600 dark:hover:text-surface-100'}"
                     >
                       <Check class="w-3 h-3" /> {localCorrectIndex === i ? 'Correct' : 'Mark'}
                     </button>
@@ -668,13 +710,14 @@
                       type="text"
                       value={opt}
                       oninput={(e) => { localOptions[i] = (e.currentTarget as HTMLInputElement).value; debouncedSave(); }}
-                      class="flex-1 bg-transparent outline-none font-medium text-sm text-slate-800 dark:text-slate-200"
+                      class="flex-1 bg-transparent outline-none font-medium text-sm text-surface-800 dark:text-surface-200"
                       placeholder={`Option ${i + 1}`}
+                      aria-label={`Option ${i + 1}`}
                     />
-                    <button onclick={() => removePollOption(i)} class="text-slate-400 hover:text-red-500 text-xs font-bold px-1">✕</button>
+                    <button onclick={() => removePollOption(i)} class="rounded text-surface-400 hover:text-red-600 dark:hover:text-red-400 text-xs font-bold px-1" aria-label={`Remove option ${i + 1}`}>✕</button>
                   </div>
                 {/each}
-                <button onclick={addPollOption} class="text-xs text-purple-600 dark:text-purple-400 hover:underline font-semibold text-center w-full pt-1">+ Add Option</button>
+                <button onclick={addPollOption} class="text-xs text-brand-600 dark:text-brand-400 hover:underline font-semibold text-center w-full pt-1">+ Add Option</button>
               </div>
               {#if correctOptionIssue}
                 <p class="text-xs font-medium text-amber-600 dark:text-amber-400" role="status">
@@ -696,17 +739,18 @@
                 bind:value={localPrompt}
                 oninput={() => debouncedSave()}
                 placeholder="Type your rating/scale prompt here…"
-                class="w-full font-bold bg-transparent text-center outline-none border-b border-transparent hover:border-purple-400 focus:border-purple-500 transition py-1 resize-none text-lg"
+                aria-label="Scale prompt"
+                class="w-full font-bold bg-transparent text-center outline-none border-b border-transparent hover:border-brand-400 focus:border-brand-500 transition py-1 resize-none text-lg"
               ></textarea>
               <div class="flex items-center gap-2 justify-center py-2 flex-wrap">
                 {#each Array.from({ length: Math.min(10, Math.floor((localMax - localMin) / (localStep || 1)) + 1) }, (_, i) => localMin + i * (localStep || 1)) as n}
-                  <div class="h-10 w-10 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center font-mono font-bold text-sm text-slate-700 dark:text-slate-300">
+                  <div class="h-10 w-10 rounded-xl bg-surface-100 dark:bg-surface-800 border border-surface-200 dark:border-surface-700 flex items-center justify-center font-mono font-bold text-sm text-surface-700 dark:text-surface-300">
                     {n}
                   </div>
                 {/each}
               </div>
               {#if localMinLabel || localMaxLabel}
-                <div class="flex items-center justify-between w-full max-w-md text-xs text-slate-400 px-2">
+                <div class="flex items-center justify-between w-full max-w-md text-xs text-surface-500 dark:text-surface-400 px-2">
                   <span>{localMinLabel}</span>
                   <span>{localMaxLabel}</span>
                 </div>
@@ -724,13 +768,14 @@
                 bind:value={localPrompt}
                 oninput={() => debouncedSave()}
                 placeholder="Survey Title / Prompt…"
-                class="w-full font-bold bg-transparent text-center outline-none border-b border-transparent hover:border-purple-400 focus:border-purple-500 transition py-1 resize-none text-lg"
+                aria-label="Survey prompt"
+                class="w-full font-bold bg-transparent text-center outline-none border-b border-transparent hover:border-brand-400 focus:border-brand-500 transition py-1 resize-none text-lg"
               ></textarea>
               <div class="w-full max-h-[55%] overflow-y-auto space-y-2 text-left pr-1">
                 {#each localQuestions as q, qi}
-                  <div class="p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/50 space-y-2">
+                  <div class="p-3 rounded-xl border border-surface-200 dark:border-surface-800 bg-surface-50 dark:bg-surface-950/50 space-y-2">
                     <div class="flex items-start gap-2">
-                      <span class="font-mono text-[10px] text-slate-400 pt-2 w-4 shrink-0">{qi + 1}.</span>
+                      <span class="font-mono text-[10px] text-surface-400 pt-2 w-4 shrink-0">{qi + 1}.</span>
                       <input
                         type="text"
                         value={q.prompt}
@@ -740,7 +785,8 @@
                           debouncedSave();
                         }}
                         placeholder="Question prompt..."
-                        class="flex-1 bg-transparent outline-none font-medium text-sm text-slate-800 dark:text-slate-200 border-b border-transparent hover:border-purple-300 focus:border-purple-500"
+                        aria-label={`Question ${qi + 1} prompt`}
+                        class="flex-1 bg-transparent outline-none font-medium text-sm text-surface-800 dark:text-surface-200 border-b border-transparent hover:border-brand-300 focus:border-brand-500"
                       />
                       <select
                         value={q.response_type}
@@ -749,13 +795,14 @@
                           localQuestions = [...localQuestions];
                           debouncedSave();
                         }}
-                        class="text-[10px] font-mono uppercase bg-slate-200 dark:bg-slate-800 px-2 py-1 rounded text-slate-600 dark:text-slate-400 shrink-0"
+                        aria-label={`Question ${qi + 1} answer type`}
+                        class="text-[10px] font-mono uppercase bg-surface-200 dark:bg-surface-800 px-2 py-1 rounded text-surface-600 dark:text-surface-400 shrink-0"
                       >
                         <option value="single_choice">Single Choice</option>
                         <option value="scale">Scale</option>
                         <option value="text">Text</option>
                       </select>
-                      <button onclick={() => removeSurveyQuestion(qi)} class="text-slate-400 hover:text-red-500 text-xs shrink-0">✕</button>
+                      <button onclick={() => removeSurveyQuestion(qi)} class="rounded text-surface-400 hover:text-red-600 dark:hover:text-red-400 text-xs shrink-0" aria-label={`Remove question ${qi + 1}`}>✕</button>
                     </div>
 
                     {#if q.response_type === 'single_choice'}
@@ -772,8 +819,9 @@
                                 localQuestions = [...localQuestions];
                                 debouncedSave();
                               }}
-                              class="flex-1 bg-transparent outline-none text-xs border-b border-slate-200 dark:border-slate-700"
+                              class="flex-1 bg-transparent outline-none text-xs border-b border-surface-200 dark:border-surface-700"
                               placeholder={`Option ${oi + 1}`}
+                              aria-label={`Question ${qi + 1}, option ${oi + 1}`}
                             />
                             <button
                               onclick={() => {
@@ -782,7 +830,8 @@
                                 localQuestions = [...localQuestions];
                                 debouncedSave();
                               }}
-                              class="text-red-400 hover:text-red-600 text-xs"
+                              class="rounded text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 text-xs"
+                              aria-label={`Remove option ${oi + 1} from question ${qi + 1}`}
                             >✕</button>
                           </div>
                         {/each}
@@ -793,36 +842,36 @@
                             localQuestions = [...localQuestions];
                             debouncedSave();
                           }}
-                          class="text-xs text-purple-600 dark:text-purple-400 hover:underline font-semibold"
+                          class="text-xs text-brand-600 dark:text-brand-400 hover:underline font-semibold"
                         >+ Add option</button>
                       </div>
                     {:else if q.response_type === 'scale'}
                       <div class="pl-6 grid grid-cols-3 gap-2">
                         <div>
-                          <label class="block text-[10px] text-slate-400 mb-0.5">Min</label>
-                          <input type="number" value={typeof q.min === 'number' ? q.min : 1}
+                          <label for="survey-q{qi}-min" class="block text-[10px] text-surface-500 dark:text-surface-400 mb-0.5">Min</label>
+                          <input id="survey-q{qi}-min" type="number" value={typeof q.min === 'number' ? q.min : 1}
                             oninput={(e) => { localQuestions[qi] = { ...q, min: parseInt((e.currentTarget as HTMLInputElement).value) || 1 }; localQuestions = [...localQuestions]; debouncedSave(); }}
-                            class="w-full text-xs px-2 py-1 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900" />
+                            class="w-full text-xs px-2 py-1 rounded border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900" />
                         </div>
                         <div>
-                          <label class="block text-[10px] text-slate-400 mb-0.5">Max</label>
-                          <input type="number" value={typeof q.max === 'number' ? q.max : 5}
+                          <label for="survey-q{qi}-max" class="block text-[10px] text-surface-500 dark:text-surface-400 mb-0.5">Max</label>
+                          <input id="survey-q{qi}-max" type="number" value={typeof q.max === 'number' ? q.max : 5}
                             oninput={(e) => { localQuestions[qi] = { ...q, max: parseInt((e.currentTarget as HTMLInputElement).value) || 5 }; localQuestions = [...localQuestions]; debouncedSave(); }}
-                            class="w-full text-xs px-2 py-1 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900" />
+                            class="w-full text-xs px-2 py-1 rounded border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900" />
                         </div>
                         <div>
-                          <label class="block text-[10px] text-slate-400 mb-0.5">Step</label>
-                          <input type="number" min="1" value={typeof q.step === 'number' ? q.step : 1}
+                          <label for="survey-q{qi}-step" class="block text-[10px] text-surface-500 dark:text-surface-400 mb-0.5">Step</label>
+                          <input id="survey-q{qi}-step" type="number" min="1" value={typeof q.step === 'number' ? q.step : 1}
                             oninput={(e) => { localQuestions[qi] = { ...q, step: parseInt((e.currentTarget as HTMLInputElement).value) || 1 }; localQuestions = [...localQuestions]; debouncedSave(); }}
-                            class="w-full text-xs px-2 py-1 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900" />
+                            class="w-full text-xs px-2 py-1 rounded border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900" />
                         </div>
                       </div>
                     {:else}
-                      <p class="pl-6 text-[10px] text-slate-400 italic">Participants type a free-form text answer.</p>
+                      <p class="pl-6 text-[10px] text-surface-500 dark:text-surface-400 italic">Participants type a free-form text answer.</p>
                     {/if}
                   </div>
                 {/each}
-                <button onclick={addSurveyQuestion} class="text-xs text-purple-600 dark:text-purple-400 hover:underline font-semibold text-center w-full pt-1">+ Add Survey Question</button>
+                <button onclick={addSurveyQuestion} class="text-xs text-brand-600 dark:text-brand-400 hover:underline font-semibold text-center w-full pt-1">+ Add Survey Question</button>
               </div>
             </div>
 
@@ -837,30 +886,32 @@
                 bind:value={localQuestion}
                 oninput={() => debouncedSave()}
                 placeholder="Type your question here…"
-                class="w-full font-bold bg-transparent text-center outline-none border-b border-transparent hover:border-purple-400 focus:border-purple-500 transition py-1 resize-none"
+                aria-label="Question"
+                class="w-full font-bold bg-transparent text-center outline-none border-b border-transparent hover:border-brand-400 focus:border-brand-500 transition py-1 resize-none"
                 style={getFitTitleStyle(localQuestion, 'question')}
               ></textarea>
               <div class="w-full space-y-2 text-left max-h-[50%] overflow-y-auto pr-1">
                 {#each localOptions as opt, i}
-                  <div class="flex items-center gap-2 bg-slate-50 dark:bg-slate-950/50 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
+                  <div class="flex items-center gap-2 bg-surface-50 dark:bg-surface-950/50 p-3 rounded-xl border border-surface-200 dark:border-surface-800">
                     <input
                       type="text"
                       value={opt}
                       oninput={(e) => { localOptions[i] = (e.currentTarget as HTMLInputElement).value; debouncedSave(); }}
-                      class="flex-1 bg-transparent outline-none font-medium text-sm text-slate-800 dark:text-slate-200"
+                      class="flex-1 bg-transparent outline-none font-medium text-sm text-surface-800 dark:text-surface-200"
                       placeholder={`Option ${i + 1}`}
+                      aria-label={`Option ${i + 1}`}
                     />
-                    <button onclick={() => removePollOption(i)} class="text-slate-400 hover:text-red-500 text-xs font-bold px-1">✕</button>
+                    <button onclick={() => removePollOption(i)} class="rounded text-surface-400 hover:text-red-600 dark:hover:text-red-400 text-xs font-bold px-1" aria-label={`Remove option ${i + 1}`}>✕</button>
                   </div>
                 {/each}
-                <button onclick={addPollOption} class="text-xs text-purple-600 dark:text-purple-400 hover:underline font-semibold text-center w-full pt-1">+ Add Option</button>
+                <button onclick={addPollOption} class="text-xs text-brand-600 dark:text-brand-400 hover:underline font-semibold text-center w-full pt-1">+ Add Option</button>
               </div>
             </div>
 
           <!-- INTERACTIVE: QNA / WORD CLOUD / FEEDBACK / RATING -->
           {:else}
             <div class="flex-1 flex flex-col items-center justify-center text-center max-w-3xl mx-auto space-y-5 w-full h-full overflow-hidden">
-              <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-widest bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20">
+              <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-widest bg-brand-500/10 text-brand-600 dark:text-brand-400 border border-brand-500/20">
                 {#if activeType === 'QNA'}<MessageSquare class="w-4 h-4 text-cyan-500" /> Interactive Q&A
                 {:else if activeType === 'WORD_CLOUD'}<Cloud class="w-4 h-4 text-amber-500" /> Word Cloud
                 {:else if isRatingOnly}<Star class="w-4 h-4 text-amber-500" /> Rating Slide
@@ -872,10 +923,11 @@
                 bind:value={localPrompt}
                 oninput={() => debouncedSave()}
                 placeholder="Type your audience prompt here…"
-                class="w-full font-bold bg-transparent text-center outline-none border-b border-transparent hover:border-purple-400 focus:border-purple-500 transition py-1 resize-none"
+                aria-label="Audience prompt"
+                class="w-full font-bold bg-transparent text-center outline-none border-b border-transparent hover:border-brand-400 focus:border-brand-500 transition py-1 resize-none"
                 style={getFitTitleStyle(localPrompt, 'question')}
               ></textarea>
-              <div class="p-6 rounded-2xl bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 text-xs w-full">
+              <div class="p-6 rounded-2xl bg-surface-50 dark:bg-surface-950/50 border border-surface-200 dark:border-surface-800 text-surface-500 dark:text-surface-400 text-xs w-full">
                 Live responses from audience members will display here during the presentation session.
               </div>
             </div>
@@ -888,17 +940,17 @@
 
     <!-- RIGHT CONTEXTUAL PROPERTIES PANEL -->
     {#if showProperties}
-      <aside class="w-72 bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-slate-800 p-4 flex flex-col space-y-5 flex-shrink-0 select-none overflow-y-auto transition-colors">
-        <div class="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-2">
-          <span class="text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">Slide Properties</span>
-          <button onclick={() => showProperties = false} class="text-slate-400 hover:text-slate-700 dark:hover:text-white text-xs">✕</button>
+      <aside class="w-72 bg-white dark:bg-surface-900 border-l border-surface-200 dark:border-surface-800 p-4 flex flex-col space-y-5 flex-shrink-0 select-none overflow-y-auto transition-colors">
+        <div class="flex items-center justify-between border-b border-surface-200 dark:border-surface-800 pb-2">
+          <span class="text-xs font-bold uppercase tracking-wider text-surface-600 dark:text-surface-300">Slide Properties</span>
+          <button onclick={() => showProperties = false} class="rounded text-surface-400 hover:text-surface-700 dark:hover:text-white text-xs" aria-label="Close properties panel">✕</button>
         </div>
 
         {#if activeSlide}
           <!-- Slide Type Info -->
           <div class="space-y-1">
-            <span class="text-[10px] font-bold uppercase text-slate-400">Slide Type</span>
-            <div class="text-sm font-semibold text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-950/30 p-2.5 rounded-lg border border-purple-200 dark:border-purple-500/20 capitalize">
+            <span class="text-[10px] font-bold uppercase text-surface-400">Slide Type</span>
+            <div class="text-sm font-semibold text-brand-600 dark:text-brand-400 bg-brand-50 dark:bg-brand-900/30 p-2.5 rounded-lg border border-brand-200 dark:border-brand-500/20 capitalize">
               {activeType} ({activeLayout})
             </div>
           </div>
@@ -906,7 +958,7 @@
           <!-- Slide Layout Switcher -->
           {#if activeType === 'CONTENT'}
             <div class="space-y-2">
-              <span class="text-[10px] font-bold uppercase text-slate-400">Slide Layout</span>
+              <span class="text-[10px] font-bold uppercase text-surface-400">Slide Layout</span>
               <div class="grid grid-cols-2 gap-2">
                 {#each [
                   { id: 'title', label: 'Title' },
@@ -919,7 +971,8 @@
                 ] as l}
                   <button
                     onclick={() => changeLayout(l.id)}
-                    class="p-2 text-xs font-medium rounded-lg border text-left transition {activeLayout === l.id ? 'bg-purple-600 text-white border-purple-500' : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:border-slate-300 dark:hover:border-slate-700'}"
+                    aria-pressed={activeLayout === l.id}
+                    class="p-2 text-xs font-medium rounded-lg border text-left transition {activeLayout === l.id ? 'bg-brand-600 text-white border-brand-500' : 'bg-surface-50 dark:bg-surface-950 border-surface-200 dark:border-surface-800 text-surface-700 dark:text-surface-300 hover:border-surface-300 dark:hover:border-surface-700'}"
                   >{l.label}</button>
                 {/each}
               </div>
@@ -928,21 +981,21 @@
 
           <!-- Media Attachment / File Settings -->
           {#if activeType === 'CONTENT' && activeLayout !== 'video'}
-            <div class="space-y-2 border-t border-slate-200 dark:border-slate-800 pt-3">
-              <span class="text-[10px] font-bold uppercase text-slate-400">Media & Attachments</span>
+            <div class="space-y-2 border-t border-surface-200 dark:border-surface-800 pt-3">
+              <span class="text-[10px] font-bold uppercase text-surface-400">Media & Attachments</span>
               {#if activeSlide.content_json?.file_url || activeSlide.content_json?.has_file}
-                <div class="text-xs text-slate-700 dark:text-slate-300 bg-slate-50 dark:bg-slate-950 p-3 rounded-lg border border-slate-200 dark:border-slate-800 space-y-2">
+                <div class="text-xs text-surface-700 dark:text-surface-300 bg-surface-50 dark:bg-surface-950 p-3 rounded-lg border border-surface-200 dark:border-surface-800 space-y-2">
                   <div class="font-mono truncate">Page {activeSlide.content_json?.file_page || 1} of {activeSlide.content_json?.total_pages || 1}</div>
-                  <label class="cursor-pointer inline-block text-purple-600 dark:text-purple-400 hover:underline">
+                  <label class="cursor-pointer inline-block rounded text-brand-600 dark:text-brand-400 hover:underline focus-within:ring-2 focus-within:ring-brand-500">
                     Replace slide file
-                    <input type="file" accept=".pdf,.ppt,.pptx,.png,.jpg,.jpeg,.webp" class="hidden" onchange={handleFileUploadChange} />
+                    <input type="file" accept=".pdf,.ppt,.pptx,.png,.jpg,.jpeg,.webp" class="sr-only" onchange={handleFileUploadChange} />
                   </label>
                 </div>
               {:else}
-                <label class="flex flex-col items-center justify-center p-4 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 hover:border-purple-500 cursor-pointer text-xs text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition">
-                  <Upload class="w-5 h-5 mb-1 text-purple-500" />
+                <label class="flex flex-col items-center justify-center p-4 rounded-xl border border-dashed border-surface-300 dark:border-surface-700 hover:border-brand-500 focus-within:border-brand-500 focus-within:ring-2 focus-within:ring-brand-500/40 cursor-pointer text-xs text-surface-500 dark:text-surface-400 hover:text-surface-900 dark:hover:text-white transition">
+                  <Upload class="w-5 h-5 mb-1 text-brand-500" />
                   <span>Upload PDF / PPTX slide</span>
-                  <input type="file" accept=".pdf,.ppt,.pptx,.png,.jpg,.jpeg,.webp" class="hidden" onchange={handleFileUploadChange} />
+                  <input type="file" accept=".pdf,.ppt,.pptx,.png,.jpg,.jpeg,.webp" class="sr-only" onchange={handleFileUploadChange} />
                 </label>
               {/if}
             </div>
@@ -963,10 +1016,14 @@
     justify-content: center;
     padding: 4px 6px;
     border-radius: 6px;
-    transition: all 0.12s ease;
+    transition: background-color 0.12s ease, color 0.12s ease;
   }
-  .deck-btn:hover {
+  .deck-btn:not(:disabled):hover {
     background: rgba(148, 163, 184, 0.2);
+  }
+  .deck-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
   }
   .deck-menu-item {
     display: flex;

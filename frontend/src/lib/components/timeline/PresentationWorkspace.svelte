@@ -167,12 +167,20 @@
     previewVariant = previewVariant === variant ? null : variant;
   }
 
+  // Mirror the sidebar's confirm-before-delete gate — Delete/Backspace
+  // must not remove an interaction with fewer steps than the mouse path.
+  let confirmingDeleteItem: { id: string; label: string } | null = $state(null);
+
   function requestDeleteActive() {
-    // Mirror the sidebar's confirm-before-delete gate — Delete/Backspace
-    // must not remove an interaction with fewer steps than the mouse path.
-    if (activeItem && activeItem.item_type !== 'PAGE' && confirm(`Delete this ${activeMeta?.label ?? 'interaction'}?`)) {
-      onDeleteItem(activeItem.id);
+    if (activeItem && activeItem.item_type !== 'PAGE') {
+      confirmingDeleteItem = { id: activeItem.id, label: activeMeta?.label ?? 'interaction' };
     }
+  }
+
+  function confirmDeleteActive() {
+    const item = confirmingDeleteItem;
+    confirmingDeleteItem = null;
+    if (item) onDeleteItem(item.id);
   }
 
   $effect(() => {
@@ -228,7 +236,7 @@
   class="grid grid-cols-12 gap-5 {isFullscreen ? 'h-screen overflow-y-auto bg-surface-50 dark:bg-surface-950 p-4 sm:p-6' : ''}"
 >
   {#if isFullscreen && errorMessage}
-    <div class="col-span-12 px-4 py-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-sm text-red-500" role="alert">{errorMessage}</div>
+    <div class="col-span-12 px-4 py-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-sm text-red-700 dark:text-red-300" role="alert">{errorMessage}</div>
   {/if}
   <TimelineSidebar
     {session}
@@ -302,21 +310,21 @@
             <button
               onclick={() => (previewVariant = null)}
               aria-pressed={previewVariant === null}
-              class="px-2.5 py-1.5 flex items-center gap-1 transition {previewVariant === null ? 'bg-brand-500 text-white' : 'text-surface-500 hover:bg-surface-100 dark:hover:bg-surface-800'}"
+              class="px-2.5 py-1.5 flex items-center gap-1 transition {previewVariant === null ? 'bg-brand-600 text-white' : 'text-surface-600 dark:text-surface-400 hover:bg-surface-100 dark:hover:bg-surface-800'}"
             >
               <Pencil class="w-3.5 h-3.5" /> Editor
             </button>
             <button
               onclick={() => togglePreview('guest')}
               aria-pressed={previewVariant === 'guest'}
-              class="px-2.5 py-1.5 flex items-center gap-1 border-l border-surface-200 dark:border-surface-800 transition {previewVariant === 'guest' ? 'bg-brand-500 text-white' : 'text-surface-500 hover:bg-surface-100 dark:hover:bg-surface-800'}"
+              class="px-2.5 py-1.5 flex items-center gap-1 border-l border-surface-200 dark:border-surface-800 transition {previewVariant === 'guest' ? 'bg-brand-600 text-white' : 'text-surface-600 dark:text-surface-400 hover:bg-surface-100 dark:hover:bg-surface-800'}"
             >
               <Eye class="w-3.5 h-3.5" /> Guest
             </button>
             <button
               onclick={() => togglePreview('screen')}
               aria-pressed={previewVariant === 'screen'}
-              class="px-2.5 py-1.5 flex items-center gap-1 border-l border-surface-200 dark:border-surface-800 transition {previewVariant === 'screen' ? 'bg-brand-500 text-white' : 'text-surface-500 hover:bg-surface-100 dark:hover:bg-surface-800'}"
+              class="px-2.5 py-1.5 flex items-center gap-1 border-l border-surface-200 dark:border-surface-800 transition {previewVariant === 'screen' ? 'bg-brand-600 text-white' : 'text-surface-600 dark:text-surface-400 hover:bg-surface-100 dark:hover:bg-surface-800'}"
             >
               <Eye class="w-3.5 h-3.5" /> Screen
             </button>
@@ -360,7 +368,7 @@
                   src={getPresentationPageImageUrl(presentation.id, activeItem.page.page_number)}
                   page={activeItem.page.page_number}
                   alt={`Page ${activeItem.page.page_number}`}
-                  imgClass="rounded-xl border border-surface-200 mx-auto"
+                  imgClass="rounded-xl border border-surface-200 dark:border-surface-800 mx-auto"
                   onLoad={() => (pageImageLoaded = true)}
                   onError={() => { pageImageErrored = true; }}
                 />
@@ -395,6 +403,15 @@
     onDeleteSuccess={() => { detailsOpen = false; onDetailsClosedAfterChange(); }}
   />
 </Modal>
+
+<ConfirmDialog
+  open={confirmingDeleteItem !== null}
+  title={`Delete this ${confirmingDeleteItem?.label ?? 'interaction'}?`}
+  description="It is removed from the timeline. Undo (Ctrl+Z) restores the interaction, but not any responses it collected."
+  confirmLabel="Delete"
+  onConfirm={confirmDeleteActive}
+  onCancel={() => (confirmingDeleteItem = null)}
+/>
 
 <ConfirmDialog
   open={!!confirmingReplaceFile}

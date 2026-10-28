@@ -68,6 +68,8 @@
   let leavePromptTitle = $state('');
   let leavePromptDescription = $state('');
   let pendingLeaveUrl = $state('');
+  let leavePromptSaving = $state(false);
+  let leavePromptError = $state('');
   let bypassLeaveGuard = false;
   const activeSlide = $derived(getActiveSlide());
   // `activeSlideId` is the slide selected for editing; the slide actually on
@@ -191,6 +193,7 @@
   beforeNavigate((nav) => {
     if (bypassLeaveGuard) return;
     if (hasUnsavedChanges && nav.to?.url) {
+      leavePromptError = '';
       pendingLeaveUrl = nav.to.url.pathname + nav.to.url.search + nav.to.url.hash;
       leavePromptTitle = 'Unsaved changes';
       leavePromptDescription = 'Save your changes before leaving Edit Deck?';
@@ -391,6 +394,7 @@
 
   function requestNavigation(url: string) {
     if (hasUnsavedChanges) {
+      leavePromptError = '';
       pendingLeaveUrl = url;
       leavePromptTitle = 'Unsaved changes';
       leavePromptDescription = 'Save your changes before leaving Edit Deck?';
@@ -417,6 +421,7 @@
   }
 
   function handleLeavePromptCancel() {
+    if (leavePromptSaving) return;
     leavePromptOpen = false;
     pendingLeaveUrl = '';
   }
@@ -426,9 +431,23 @@
       leavePromptOpen = false;
       return;
     }
+    if (leavePromptSaving) return;
+    leavePromptSaving = true;
+    leavePromptError = '';
+    // The editor's save handlers report failures through withSaveState
+    // (saveError) rather than throwing, so check it before leaving — a failed
+    // save must keep the moderator on the page with their edits.
+    saveError = '';
     try {
       await saveDeckEditor();
-    } catch {
+    } catch (err) {
+      leavePromptError = err instanceof Error ? err.message : 'Save failed';
+      return;
+    } finally {
+      leavePromptSaving = false;
+    }
+    if (saveError) {
+      leavePromptError = saveError;
       return;
     }
     bypassLeaveGuard = true;
@@ -906,23 +925,48 @@
     }
   }
 
-  async function removeSlide(slideId: string) {
-    if (!confirm('Delete this slide?')) return;
-    // Optimistic removal
+  // Deleting a slide (legacy deck editor) asks first; the dialog stays open
+  // with a spinner while the request runs and shows a failure inline.
+  let deleteSlideConfirmId = $state<string | null>(null);
+  let deletingSlide = $state(false);
+  let deleteSlideError = $state('');
+
+  function removeSlide(slideId: string) {
+    deleteSlideError = '';
+    deleteSlideConfirmId = slideId;
+  }
+
+  function cancelDeleteSlide() {
+    if (deletingSlide) return;
+    deleteSlideConfirmId = null;
+  }
+
+  async function confirmDeleteSlide() {
+    const slideId = deleteSlideConfirmId;
+    if (!slideId || deletingSlide) return;
     const removedSlide = slides.find((s) => s.id === slideId);
+    if (!removedSlide) {
+      deleteSlideConfirmId = null;
+      return;
+    }
     const removedIndex = slides.indexOf(removedSlide);
+    deletingSlide = true;
+    deleteSlideError = '';
+    try {
+      await deleteSlide(sessionId, slideId);
+    } catch (err) {
+      deleteSlideError = err instanceof Error && err.message ? err.message : 'Could not delete the slide.';
+      return;
+    } finally {
+      deletingSlide = false;
+    }
     slides = slides.filter((s) => s.id !== slideId);
     if (activeSlideId === slideId) {
       activeSlideId = null;
       slideResponses = [];
     }
-    try {
-      await deleteSlide(sessionId, slideId);
-      pushDeletedSlideUndo(removedSlide, removedIndex, 'Delete slide');
-    } catch {
-      // Revert on failure
-      slides = [...slides.slice(0, removedIndex), removedSlide, ...slides.slice(removedIndex)];
-    }
+    pushDeletedSlideUndo(removedSlide, removedIndex, 'Delete slide');
+    deleteSlideConfirmId = null;
   }
 
   async function reorderSlideIds(orderedIds: string[]) {
@@ -1486,15 +1530,15 @@
 
 <div>
   <!-- Sub-header with session actions -->
-  <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5 px-4 sm:px-6 lg:px-8 py-2.5 border-b border-surface-200 backdrop-blur-sm">
-      <button
-        onclick={() => requestNavigation('/dashboard')}
-      class="text-sm font-medium text-surface-500 hover:text-surface-100 transition"
+  <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5 px-4 sm:px-6 lg:px-8 py-2.5 border-b border-surface-200 dark:border-surface-800 backdrop-blur-sm">
+    <button
+      onclick={() => requestNavigation('/dashboard')}
+      class="self-start sm:self-auto text-sm font-medium text-surface-600 hover:text-surface-900 dark:text-surface-400 dark:hover:text-surface-100 transition-colors"
     >&larr; Back to dashboard</button>
     <div class="flex items-center justify-between sm:justify-end gap-3 w-full sm:w-auto">
       <span class="sr-only" role="status" aria-live="polite">{undoRedoLabel}</span>
       {#if hasUnsavedChanges}
-        <span class="text-xs text-amber-500 font-medium" role="status">Unsaved changes</span>
+        <span class="text-xs text-amber-700 dark:text-amber-400 font-medium" role="status">Unsaved changes</span>
       {/if}
       {#if canUndo || canRedo}
         <div class="flex items-center rounded-lg border border-surface-200 dark:border-surface-800 overflow-hidden text-xs font-medium">
@@ -1503,27 +1547,27 @@
             disabled={!canUndo || undoRedoBusy}
             aria-label="Undo"
             title="Undo (Ctrl+Z)"
-            class="px-2.5 py-1.5 text-surface-500 hover:bg-surface-100 dark:hover:bg-surface-800 transition disabled:opacity-30 disabled:pointer-events-none"
+            class="px-2.5 py-1.5 text-surface-600 hover:bg-surface-100 hover:text-surface-900 dark:text-surface-400 dark:hover:bg-surface-800 dark:hover:text-surface-100 transition-colors disabled:opacity-30 disabled:pointer-events-none"
           >↶ Undo</button>
           <button
             onclick={performRedo}
             disabled={!canRedo || undoRedoBusy}
             aria-label="Redo"
             title="Redo (Ctrl+Shift+Z)"
-            class="px-2.5 py-1.5 border-l border-surface-200 dark:border-surface-800 text-surface-500 hover:bg-surface-100 dark:hover:bg-surface-800 transition disabled:opacity-30 disabled:pointer-events-none"
+            class="px-2.5 py-1.5 border-l border-surface-200 dark:border-surface-800 text-surface-600 hover:bg-surface-100 hover:text-surface-900 dark:text-surface-400 dark:hover:bg-surface-800 dark:hover:text-surface-100 transition-colors disabled:opacity-30 disabled:pointer-events-none"
           >↷ Redo</button>
         </div>
       {/if}
       {#if editorMode}<button class="btn-secondary" onclick={() => requestNavigation(`/dashboard/${sessionId}`)}>Back to deck</button>{/if}
-      <span class="text-sm text-surface-400 font-mono">{session?.unique_code}</span>
+      <span class="text-sm text-surface-600 dark:text-surface-400 font-mono" title="Session code">{session?.unique_code}</span>
     </div>
   </div>
 
-  <main class="flex-1 px-4 sm:px-6 py-6 sm:py-7">
+  <main class="flex-1 px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
     {#if saveError}
-      <div class="mb-4 px-4 py-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-sm text-red-500 flex items-center justify-between gap-3" role="alert">
+      <div class="mb-4 px-4 py-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-sm text-red-700 dark:text-red-300 flex items-center justify-between gap-3" role="alert">
         <span>{saveError}</span>
-        <button class="text-red-500/70 hover:text-red-500" onclick={() => (saveError = '')} aria-label="Dismiss">&times;</button>
+        <button class="px-1 rounded text-red-700/70 hover:text-red-800 dark:text-red-300/70 dark:hover:text-red-200 transition-colors" onclick={() => (saveError = '')} aria-label="Dismiss error">&times;</button>
       </div>
     {/if}
     {#if loading}
@@ -1539,7 +1583,7 @@
         </div>
       </div>
     {:else if errorMessage}
-      <div class="card text-center text-red-500 py-10 px-6">{errorMessage}</div>
+      <div class="card text-center text-red-600 dark:text-red-400 py-10 px-6" role="alert">{errorMessage}</div>
     {:else if !editorMode}
       <DeckView
         {session}
@@ -1592,7 +1636,7 @@
           onRedo={performRedo}
         />
     {:else if slides.length > 0 || startNativeEditor}
-        <div class="h-[calc(100vh-140px)] min-h-[600px] w-full">
+        <div class="h-[calc(100dvh-140px)] min-h-[600px] w-full">
           <DeckEditor
             {sessionId}
             {slides}
@@ -1674,12 +1718,17 @@
 
     <Modal open={leavePromptOpen} onClose={handleLeavePromptCancel} ariaLabel={leavePromptTitle} maxWidth="max-w-md">
       <div class="p-6">
-        <h2 class="text-lg font-heading font-bold text-slate-900 dark:text-white">{leavePromptTitle}</h2>
-        <p class="mt-2 text-sm text-slate-500 dark:text-slate-400">{leavePromptDescription}</p>
+        <h2 class="text-lg font-heading font-bold text-surface-900 dark:text-white">{leavePromptTitle}</h2>
+        <p class="mt-2 text-sm text-surface-600 dark:text-surface-400">{leavePromptDescription}</p>
+        {#if leavePromptError}
+          <p class="mt-3 text-sm text-red-600 dark:text-red-400" role="alert">Couldn't save: {leavePromptError}</p>
+        {/if}
         <div class="mt-5 flex flex-col gap-2 sm:flex-row">
-          <button class="btn-primary flex-1" onclick={handleLeavePromptSave}>Save</button>
-          <button class="btn-secondary flex-1" onclick={handleLeavePromptDiscard}>Discard</button>
-          <button class="btn-secondary flex-1" onclick={handleLeavePromptCancel}>Cancel</button>
+          <button class="btn-primary flex-1" onclick={handleLeavePromptSave} disabled={leavePromptSaving} aria-busy={leavePromptSaving}>
+            {leavePromptSaving ? 'Saving…' : 'Save'}
+          </button>
+          <button class="btn-secondary flex-1" onclick={handleLeavePromptDiscard} disabled={leavePromptSaving}>Discard</button>
+          <button class="btn-ghost flex-1" onclick={handleLeavePromptCancel} disabled={leavePromptSaving}>Cancel</button>
         </div>
       </div>
     </Modal>
@@ -1693,7 +1742,7 @@
       onConfirm={confirmEndSession}
       onCancel={cancelEndSession}
     >
-      {#if endSessionError}<p class="text-sm text-red-500" role="alert">{endSessionError}</p>{/if}
+      {#if endSessionError}<p class="text-sm text-red-600 dark:text-red-400" role="alert">{endSessionError}</p>{/if}
     </ConfirmDialog>
 
     <ConfirmDialog
@@ -1705,11 +1754,23 @@
       onConfirm={confirmClearResponses}
       onCancel={cancelClearResponses}
     >
-      {#if clearResponsesError}<p class="text-sm text-red-500" role="alert">{clearResponsesError}</p>{/if}
+      {#if clearResponsesError}<p class="text-sm text-red-600 dark:text-red-400" role="alert">{clearResponsesError}</p>{/if}
+    </ConfirmDialog>
+
+    <ConfirmDialog
+      open={deleteSlideConfirmId !== null}
+      title="Delete this slide?"
+      description="The slide is removed from the deck. Undo (Ctrl+Z) restores its content, but not any responses it collected."
+      confirmLabel="Delete slide"
+      loading={deletingSlide}
+      onConfirm={confirmDeleteSlide}
+      onCancel={cancelDeleteSlide}
+    >
+      {#if deleteSlideError}<p class="text-sm text-red-600 dark:text-red-400" role="alert">{deleteSlideError}</p>{/if}
     </ConfirmDialog>
 
     {#if screenCommandFlash}
-      <div class="fixed bottom-4 right-4 z-50 rounded-xl border border-brand-200 bg-white px-4 py-2 text-sm font-medium text-brand-700 shadow-lg dark:border-brand-500/30 dark:bg-slate-950 dark:text-brand-300">
+      <div role="status" class="fixed bottom-4 right-4 z-50 rounded-xl border border-brand-200 bg-white px-4 py-2 text-sm font-medium text-brand-700 shadow-lg dark:border-brand-500/30 dark:bg-surface-950 dark:text-brand-300">
         {screenCommandFlash}
       </div>
     {/if}
@@ -1754,16 +1815,16 @@
           {#if speakerNames.length > 0}
             <div class="sm:col-span-2 flex flex-wrap gap-2">
               {#each speakerNames as speaker, index (speaker + index)}
-                <span class="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-surface-200 text-xs">
+                <span class="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-surface-200 dark:border-surface-700 text-xs">
                   <UserRound class="w-3 h-3" />
                   {speaker}
-                  <button type="button" class="text-surface-500 hover:text-danger" onclick={() => removeSpeakerName(index)}>x</button>
+                  <button type="button" class="rounded text-surface-500 hover:text-red-600 dark:hover:text-red-400 transition-colors" onclick={() => removeSpeakerName(index)} aria-label="Remove {speaker}">&times;</button>
                 </span>
               {/each}
             </div>
           {/if}
           <div class="sm:col-span-2">
-            <button type="button" class="btn-primary" onclick={saveModeratorSetup} disabled={savingModeratorSetup}>
+            <button type="button" class="btn-primary" onclick={saveModeratorSetup} disabled={savingModeratorSetup} aria-busy={savingModeratorSetup}>
               {savingModeratorSetup ? 'Saving...' : 'Save moderator setup'}
             </button>
           </div>
@@ -1779,9 +1840,10 @@
             <NotebookPen class="w-4 h-4 text-brand-500" />
             <h2 class="font-heading font-semibold text-sm uppercase tracking-widest text-surface-500">Moderator Notes</h2>
           </div>
-          <span class="text-xs transition-opacity duration-300 {notesSavedFlash ? 'text-emerald-500 opacity-100' : 'opacity-0'}">Saved</span>
+          <span class="text-xs transition-opacity duration-300 {notesSavedFlash ? 'text-emerald-600 dark:text-emerald-400 opacity-100' : 'opacity-0'}" aria-hidden={!notesSavedFlash}>Saved</span>
         </div>
         <textarea
+          aria-label="Moderator notes"
           class="input-field w-full resize-y text-sm"
           rows="5"
           placeholder="Jot down notes for this session — talking points, reminders, cues… Only you can see this."

@@ -55,7 +55,7 @@
         <div class="h-4 rounded bg-surface-200 dark:bg-surface-800 w-1/2"></div>
       </div>
     {:else if error && !details}
-      <div class="text-center py-8 text-danger text-sm">{error}</div>
+      <div class="text-center py-8 text-red-600 dark:text-red-400 text-sm" role="alert">{error}</div>
     {:else if details}
       <div class="flex items-center gap-3 mb-4">
         <div class="w-10 h-10 flex items-center justify-center rounded-xl bg-brand-500/10 flex-shrink-0">
@@ -88,12 +88,12 @@
       </div>
 
       {#if error}
-        <p class="text-xs text-danger mb-3" role="alert">{error}</p>
+        <p class="text-xs text-red-600 dark:text-red-400 mb-3" role="alert">{error}</p>
       {/if}
 
       <div class="flex gap-3">
         <button onclick={onClose} class="btn-secondary flex-1 text-sm">Cancel</button>
-        <button onclick={handleUse} disabled={attaching} class="btn-primary flex-1 text-sm disabled:opacity-50">
+        <button onclick={handleUse} disabled={attaching} aria-busy={attaching} class="btn-primary flex-1 text-sm">
           {attaching ? 'Attaching…' : 'Use this presentation'}
         </button>
       </div>

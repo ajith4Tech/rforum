@@ -23,6 +23,7 @@
   let previewId: string | null = $state(null);
   let deleteTarget: any = $state(null);
   let deleting = $state(false);
+  let deleteError = $state('');
 
   let searchDebounce: ReturnType<typeof setTimeout> | null = null;
 
@@ -58,15 +59,21 @@
     await onAttach(presentationId);
   }
 
+  function requestDelete(p: any) {
+    deleteError = '';
+    deleteTarget = p;
+  }
+
   async function confirmDelete() {
     if (!deleteTarget) return;
     deleting = true;
+    deleteError = '';
     try {
       await deletePresentation(deleteTarget.id);
       presentations = presentations.filter((p) => p.id !== deleteTarget.id);
       deleteTarget = null;
     } catch (e: any) {
-      error = e?.message || 'Failed to delete presentation';
+      deleteError = e?.message || 'Failed to delete presentation';
     } finally {
       deleting = false;
     }
@@ -85,12 +92,13 @@
         <input
           type="text"
           placeholder="Search by filename…"
+          aria-label="Search presentations by filename"
           value={search}
           oninput={(e) => handleSearchInput((e.currentTarget as HTMLInputElement).value)}
           class="input-field pl-9 text-sm py-2"
         />
       </div>
-      <select bind:value={sort} class="input-field text-sm py-2 w-40">
+      <select bind:value={sort} class="input-field text-sm py-2 w-40" aria-label="Sort presentations">
         <option value="recent">Most recent</option>
         <option value="last_used">Last used</option>
         <option value="name">Name (A–Z)</option>
@@ -98,7 +106,10 @@
     </div>
 
     {#if error}
-      <div class="mb-4 px-3 py-2 rounded-lg bg-danger/10 border border-danger/20 text-danger text-xs">{error}</div>
+      <div class="mb-4 flex items-center justify-between gap-3 px-3 py-2 rounded-lg bg-danger/10 border border-danger/20 text-red-700 dark:text-red-300 text-xs" role="alert">
+        <span>{error}</span>
+        <button type="button" class="font-semibold underline-offset-2 hover:underline" onclick={load}>Retry</button>
+      </div>
     {/if}
 
     {#if loading}
@@ -111,11 +122,13 @@
           </div>
         {/each}
       </div>
+    {:else if error && presentations.length === 0}
+      <!-- Load failed: the error banner above says so; don't claim there are none. -->
     {:else if presentations.length === 0}
       <div class="flex flex-col items-center py-14 gap-3 text-surface-500">
         <Inbox class="w-9 h-9 opacity-30" />
         <p class="text-sm">No existing presentations yet.</p>
-        <p class="text-xs text-surface-600 max-w-xs text-center">
+        <p class="text-xs text-surface-600 dark:text-surface-400 max-w-xs text-center">
           Decks you've uploaded — or that are already attached to a session in this event — will show up here.
         </p>
       </div>
@@ -140,10 +153,10 @@
             </button>
             {#if p.storage_status === 'detached'}
               <button
-                onclick={() => (deleteTarget = p)}
-                class="absolute top-1.5 right-1.5 p-1.5 rounded-lg bg-surface-950/60 text-white opacity-0 group-hover:opacity-100 hover:bg-danger transition"
+                onclick={() => requestDelete(p)}
+                class="absolute top-1.5 right-1.5 p-1.5 rounded-lg bg-surface-950/60 text-white opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:bg-red-600 transition"
                 title="Delete this unattached presentation"
-                aria-label="Delete presentation"
+                aria-label={`Delete ${p.original_file_name}`}
               >
                 <Trash2 class="w-3.5 h-3.5" />
               </button>
@@ -178,4 +191,5 @@
       {deleteTarget.original_file_name}
     </p>
   {/if}
+  {#if deleteError}<p class="mt-3 text-sm text-red-600 dark:text-red-400" role="alert">{deleteError}</p>{/if}
 </ConfirmDialog>

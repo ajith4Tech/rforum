@@ -37,47 +37,47 @@
   ondragstart={() => { isDragging = true; }}
   ondragend={() => { isDragging = false; }}
   aria-current={active ? 'true' : undefined}
-  class="group flex items-center justify-between gap-2 p-2.5 rounded-xl border transition-all duration-200 cursor-grab active:cursor-grabbing {isDragging ? 'opacity-40 scale-[0.98]' : ''} {active
-    ? 'border-purple-500/60 bg-purple-500/5 dark:bg-purple-500/10 shadow-sm'
-    : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/50'}"
+  class="group flex items-center justify-between gap-2 p-2.5 rounded-xl border transition duration-200 cursor-grab active:cursor-grabbing {isDragging ? 'opacity-40 scale-[0.98]' : ''} {active
+    ? 'border-brand-500/60 bg-brand-500/5 dark:bg-brand-500/10 shadow-sm'
+    : 'border-surface-200 dark:border-surface-800 hover:border-surface-300 dark:hover:border-surface-700 hover:bg-surface-50 dark:hover:bg-surface-800/50'}"
 >
-  <button class="flex items-center gap-2.5 text-left flex-1 min-w-0" onclick={() => onActivate(slide.id)}>
-    <span class="flex-shrink-0 w-5 h-5 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-slate-400 dark:text-slate-600">
+  <button class="flex items-center gap-2.5 text-left flex-1 min-w-0 rounded-lg" onclick={() => onActivate(slide.id)}>
+    <span class="flex-shrink-0 w-5 h-5 flex items-center justify-center opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity text-surface-400 dark:text-surface-600">
       <GripVertical class="w-4 h-4" />
     </span>
     {#if Icon}
-      <span class="flex-shrink-0 w-7 h-7 flex items-center justify-center rounded-lg {active ? 'bg-purple-500/10 text-purple-600 dark:text-purple-400' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'}">
+      <span class="flex-shrink-0 w-7 h-7 flex items-center justify-center rounded-lg {active ? 'bg-brand-500/10 text-brand-600 dark:text-brand-400' : 'bg-surface-100 dark:bg-surface-800 text-surface-500 dark:text-surface-400'}">
         <Icon class="w-3.5 h-3.5" />
       </span>
     {/if}
-    <span class="text-xs font-medium truncate {active ? 'text-purple-700 dark:text-purple-300' : 'text-slate-700 dark:text-slate-300'}">{label}</span>
+    <span class="text-xs font-medium truncate {active ? 'text-brand-700 dark:text-brand-300' : 'text-surface-700 dark:text-surface-300'}">{label}</span>
   </button>
 
   <div class="flex items-center opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity flex-shrink-0">
     {#if onMove}
-      <button onclick={() => onMove(slide.id, -1)} disabled={isFirst} class="p-1 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 transition disabled:opacity-30 disabled:pointer-events-none" aria-label="Move up" title="Move up">
-        <ChevronUp class="w-3 h-3 text-slate-400 dark:text-slate-500" />
+      <button onclick={() => onMove(slide.id, -1)} disabled={isFirst} class="p-1 rounded-md hover:bg-surface-200 dark:hover:bg-surface-700 transition disabled:opacity-30 disabled:pointer-events-none" aria-label="Move up" title="Move up">
+        <ChevronUp class="w-3 h-3 text-surface-400 dark:text-surface-500" />
       </button>
-      <button onclick={() => onMove(slide.id, 1)} disabled={isLast} class="p-1 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 transition disabled:opacity-30 disabled:pointer-events-none" aria-label="Move down" title="Move down">
-        <ChevronDown class="w-3 h-3 text-slate-400 dark:text-slate-500" />
+      <button onclick={() => onMove(slide.id, 1)} disabled={isLast} class="p-1 rounded-md hover:bg-surface-200 dark:hover:bg-surface-700 transition disabled:opacity-30 disabled:pointer-events-none" aria-label="Move down" title="Move down">
+        <ChevronDown class="w-3 h-3 text-surface-400 dark:text-surface-500" />
       </button>
     {/if}
     <button
       onclick={() => onEdit(slide.id)}
-      class="p-1 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 transition"
+      class="p-1 rounded-md hover:bg-surface-200 dark:hover:bg-surface-700 transition"
       aria-label="Edit"
       title="Edit"
     >
-      <Pencil class="w-3 h-3 text-slate-400 dark:text-slate-500" />
+      <Pencil class="w-3 h-3 text-surface-400 dark:text-surface-500" />
     </button>
     {#if onDuplicate}
       <button
         onclick={() => onDuplicate(slide.id)}
-        class="p-1 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 transition"
+        class="p-1 rounded-md hover:bg-surface-200 dark:hover:bg-surface-700 transition"
         aria-label="Duplicate slide"
         title="Duplicate"
       >
-        <Copy class="w-3 h-3 text-slate-400 dark:text-slate-500" />
+        <Copy class="w-3 h-3 text-surface-400 dark:text-surface-500" />
       </button>
     {/if}
     <button
@@ -86,7 +86,7 @@
       aria-label="Delete slide"
       title="Delete"
     >
-      <Trash2 class="w-3 h-3 text-red-400" />
+      <Trash2 class="w-3 h-3 text-red-600 dark:text-red-400" />
     </button>
   </div>
 </div>

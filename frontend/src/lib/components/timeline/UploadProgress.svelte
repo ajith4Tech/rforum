@@ -32,12 +32,12 @@
 
 <div class="card p-5">
   {#if stage === 'error'}
-    <div class="flex items-start gap-3">
+    <div class="flex items-start gap-3" role="alert">
       <div class="w-9 h-9 flex items-center justify-center rounded-xl bg-danger/10 flex-shrink-0">
-        <AlertTriangle class="w-4.5 h-4.5 text-danger" />
+        <AlertTriangle class="w-[1.125rem] h-[1.125rem] text-red-600 dark:text-red-400" />
       </div>
       <div class="flex-1 min-w-0">
-        <p class="text-sm font-semibold text-danger">Upload failed</p>
+        <p class="text-sm font-semibold text-red-600 dark:text-red-400">Upload failed</p>
         <p class="text-xs text-surface-500 mt-1">{errorMessage || 'Something went wrong while processing this file.'}</p>
         <div class="flex items-center gap-3 mt-3">
           {#if onRetry}
@@ -46,7 +46,7 @@
             </button>
           {/if}
           {#if onChooseDifferent}
-            <button onclick={onChooseDifferent} class="text-xs text-surface-500 hover:text-surface-300 transition underline">
+            <button onclick={onChooseDifferent} class="text-xs text-surface-600 hover:text-surface-900 dark:text-surface-400 dark:hover:text-surface-200 transition-colors underline">
               Choose a different file
             </button>
           {/if}
@@ -54,14 +54,15 @@
       </div>
     </div>
   {:else}
-    <div class="flex items-center justify-between mb-4">
+    <span class="sr-only" role="status" aria-live="polite">{steps[currentIndex]?.label ?? ''}</span>
+    <div class="flex items-center justify-between mb-4" aria-hidden="true">
       {#each steps as step, i}
         <div class="flex items-center flex-1 last:flex-none">
           <div class="flex flex-col items-center gap-1.5">
             <div
               class="w-8 h-8 flex items-center justify-center rounded-full border-2 transition-colors
                 {i < currentIndex ? 'bg-emerald-500 border-emerald-500 text-white' :
-                 i === currentIndex ? 'border-brand-500 text-brand-500' :
+                 i === currentIndex ? 'border-brand-500 text-brand-600 dark:text-brand-400' :
                  'border-surface-200 dark:border-surface-800 text-surface-400'}"
             >
               {#if i < currentIndex}
@@ -72,7 +73,7 @@
                 <step.icon class="w-4 h-4" />
               {/if}
             </div>
-            <span class="text-[10px] font-medium {i <= currentIndex ? 'text-surface-100 dark:text-surface-100' : 'text-surface-500'} whitespace-nowrap">
+            <span class="text-[10px] font-medium {i <= currentIndex ? 'text-surface-900 dark:text-surface-100' : 'text-surface-500'} whitespace-nowrap">
               {step.label}
             </span>
           </div>
@@ -93,7 +94,7 @@
           />
         {/if}
         <div>
-          <p class="text-sm font-semibold text-emerald-500 flex items-center gap-1.5">
+          <p class="text-sm font-semibold text-emerald-700 dark:text-emerald-400 flex items-center gap-1.5">
             <CheckCircle2 class="w-4 h-4" /> Ready — {slideCount} slide{slideCount === 1 ? '' : 's'}
           </p>
           {#if reusedExisting}
